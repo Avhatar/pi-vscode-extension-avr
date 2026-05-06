@@ -1,16 +1,53 @@
+import * as vscode from 'vscode';
 import type { AuthStorage } from '@mariozechner/pi-coding-agent';
 
-let cached: AuthStorage | undefined;
+const API_KEY_PREFIX = 'pi-agent.apiKey.';
 
-export async function getAuthStorage(): Promise<AuthStorage> {
+const KNOWN_PROVIDERS = [
+    'anthropic', 'openai', 'google', 'deepseek', 'mistral', 'groq',
+    'cerebras', 'xai', 'openrouter', 'fireworks', 'huggingface',
+    'bedrock', 'vertex', 'azure', 'kimi', 'minimax', 'gateway',
+    'gemini', 'claude',
+];
+
+let cached: AuthStorage | undefined;
+let cachedSecrets: vscode.SecretStorage | undefined;
+
+export async function getAuthStorage(secrets?: vscode.SecretStorage): Promise<AuthStorage> {
     if (cached) {
+        if (secrets) {
+            cachedSecrets = secrets;
+            await applySecretsToStorage(cached, secrets);
+        }
         return cached;
     }
     const { AuthStorage: AS } = await import('@mariozechner/pi-coding-agent');
     cached = AS.create();
+    if (secrets) {
+        cachedSecrets = secrets;
+        await applySecretsToStorage(cached, secrets);
+    }
     return cached;
+}
+
+export async function reloadCredentials(): Promise<void> {
+    if (cached && cachedSecrets) {
+        await applySecretsToStorage(cached, cachedSecrets);
+    }
+}
+
+async function applySecretsToStorage(storage: AuthStorage, secrets: vscode.SecretStorage): Promise<void> {
+    for (const provider of KNOWN_PROVIDERS) {
+        const key = await secrets.get(`${API_KEY_PREFIX}${provider}`);
+        if (key) {
+            storage.setRuntimeApiKey(provider, key);
+        } else {
+            storage.removeRuntimeApiKey(provider);
+        }
+    }
 }
 
 export function disposeAuthStorage() {
     cached = undefined;
+    cachedSecrets = undefined;
 }

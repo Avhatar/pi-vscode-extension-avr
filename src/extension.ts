@@ -14,8 +14,17 @@ export async function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('Pi Agent extension activating...');
 
     try {
-        piSession = new PiSessionManager(outputChannel);
+        piSession = new PiSessionManager(outputChannel, context.secrets);
         await piSession.initialize();
+
+        context.subscriptions.push(
+            context.secrets.onDidChange(async (e) => {
+                if (e.key.startsWith('pi-agent.apiKey.')) {
+                    await piSession?.reloadCredentials();
+                    outputChannel.appendLine(`Credentials reloaded after change to ${e.key}`);
+                }
+            }),
+        );
 
         const diffContentProvider = new DiffContentProvider();
         const checkpointManager = new CheckpointManager();

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo } from '../shared/protocol';
 import { EventRouter } from './events';
-import { getAuthStorage, disposeAuthStorage } from './auth';
+import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, disposeModelRegistry } from './models';
 
 export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
@@ -14,10 +14,16 @@ export class PiSessionManager {
     private _unsubscribe: (() => void) | undefined;
     private _outputChannel: vscode.OutputChannel;
     private _toolApprovalHandler: ToolApprovalHandler | undefined;
+    private _secrets: vscode.SecretStorage | undefined;
     readonly events = new EventRouter();
 
-    constructor(outputChannel: vscode.OutputChannel) {
+    constructor(outputChannel: vscode.OutputChannel, secrets?: vscode.SecretStorage) {
         this._outputChannel = outputChannel;
+        this._secrets = secrets;
+    }
+
+    async reloadCredentials(): Promise<void> {
+        await reloadCredentials();
     }
 
     get session(): AgentSession | undefined {
@@ -33,7 +39,7 @@ export class PiSessionManager {
         const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
 
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
-        const authStorage = await getAuthStorage();
+        const authStorage = await getAuthStorage(this._secrets);
         this._modelRegistry = await getModelRegistry();
 
         this._sessionManager = SM.create(cwd);
@@ -148,7 +154,7 @@ export class PiSessionManager {
 
         const opts: any = {
             cwd,
-            authStorage: await getAuthStorage(),
+            authStorage: await getAuthStorage(this._secrets),
             modelRegistry: this._modelRegistry,
             sessionManager: this._sessionManager,
         };
@@ -187,7 +193,7 @@ export class PiSessionManager {
 
         const { session } = await createAgentSession({
             cwd,
-            authStorage: await getAuthStorage(),
+            authStorage: await getAuthStorage(this._secrets),
             modelRegistry: this._modelRegistry,
             sessionManager: this._sessionManager,
         });
