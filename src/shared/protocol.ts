@@ -83,6 +83,7 @@ export interface SkillInfo {
 export interface SessionInfo {
     id: string;
     name?: string;
+    firstMessage?: string;
     path: string;
     lastModified?: number;
 }

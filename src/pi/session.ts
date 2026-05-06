@@ -177,6 +177,7 @@ export class PiSessionManager {
         return sessions.map((s: any) => ({
             id: s.id ?? s.sessionId ?? '',
             name: s.name ?? s.sessionName,
+            firstMessage: s.firstMessage,
             path: s.path ?? s.filePath ?? '',
             lastModified: s.lastModified ?? s.modifiedAt,
         }));

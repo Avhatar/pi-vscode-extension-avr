@@ -16,6 +16,30 @@ npm run test:all     # unit + integration tests
 
 Press F5 in VS Code to launch an Extension Development Host for manual testing.
 
+## Packaging (VSIX)
+
+```bash
+npm prune --omit=dev    # strip devDeps from node_modules
+npm run package         # vsce produces pi-agent-<version>.vsix
+npm install             # restore devDeps for further development
+```
+
+The prune step is required because `vsce` packages everything in
+`node_modules/` that isn't ignored, and the hoisted layout makes it
+non-trivial to walk only production dependencies. Pruning first
+guarantees the VSIX contains exactly the runtime tree (~40 MB).
+
+Install the resulting `.vsix` with `code --install-extension <file>
+--force` or via the **Extensions: Install from VSIX...** command.
+
+`.vscodeignore` keeps `src/**` out of the package but unignores
+`src/webview/styles/**`, because `sidebar.ts` and `settings-panel.ts`
+load CSS via `vscode.Uri.joinPath(extensionUri, 'src', 'webview',
+'styles', ...)` at runtime. Do not add a `node_modules/**` ignore rule
+with a `!node_modules/@mariozechner/**` exception -- that strips the
+hoisted transitive deps (`proper-lockfile`, `undici`, `glob`, ...) and
+breaks activation with `Cannot find package 'proper-lockfile'`.
+
 ## Architecture
 
 There are two separate bundle targets (configured in `esbuild.js`):
@@ -64,3 +88,5 @@ The Pi SDK packages (`@mariozechner/pi-coding-agent`, `@mariozechner/pi-agent-co
 - `tsconfig.json` excludes `src/webview/**/*` from the main TypeScript compilation. The webview files are compiled by esbuild only.
 - The Pi SDK is dynamically imported (`await import(...)`) in `session.ts` because it is externalized and must be resolved at runtime by VS Code's module loader.
 - When adding new settings, update both `package.json` (`contributes.configuration`) and `src/shared/protocol.ts` (`SettingsData` interface), then wire them in `settings-panel.ts` and `settings.ts`.
+- API keys saved via the settings panel are bridged into Pi's `AuthStorage` by `src/pi/auth.ts` (which calls `setRuntimeApiKey` for every known provider). `extension.ts` subscribes to `secrets.onDidChange` so a newly saved key takes effect without a window reload. Adding support for a new provider means appending its id to the `KNOWN_PROVIDERS` list in `auth.ts`.
+- Verify the build by installing the produced VSIX into a real VS Code instance (`code --install-extension ... --force`) and reloading the window. The dev host (F5) resolves the full `node_modules` tree and will hide packaging bugs that only surface after install.

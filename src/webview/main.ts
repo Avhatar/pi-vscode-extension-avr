@@ -206,7 +206,6 @@ function handleAgentEvent(event: any): void {
             state.streamingText = '';
             state.streamingThinking = '';
             state.isThinking = false;
-            userHasScrolled = false;
             updateInputArea();
             updateStreamingUI();
             showPreparingPlaceholder();
@@ -1697,7 +1696,7 @@ function renderSessionList(sessions: any[], currentId?: string): void {
         <div class="session-list">
             ${sessions.map(s => `
                 <div class="session-item ${s.id === currentId ? 'active' : ''}" data-path="${escHtml(s.path)}">
-                    <span class="session-item-name">${escHtml(s.name ?? s.id)}</span>
+                    <span class="session-item-name">${escHtml(s.name ?? (s.firstMessage ? s.firstMessage.slice(0, 100) : s.id))}</span>
                 </div>
             `).join('')}
         </div>
