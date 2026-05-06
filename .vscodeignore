@@ -1,8 +1,7 @@
 .vscode/**
 .vscode-test/**
 src/**
-node_modules/**
-!node_modules/@mariozechner/**
+!src/webview/styles/**
 .github/**
 .gitignore
 vitest.config.ts
