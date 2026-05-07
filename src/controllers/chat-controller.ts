@@ -8,6 +8,7 @@ import type {
 import { DiffManager } from '../providers/diff';
 import { CheckpointManager } from '../providers/checkpoint';
 import { onAuthChanged } from '../pi/auth';
+import { getCodexUsageStore } from '../pi/codex-usage-store';
 
 interface MessageMeta {
     thinkingDurationSec: number;
@@ -114,6 +115,7 @@ export class ChatController implements vscode.Disposable {
     private _activeTabId = '';
     private _tabSubscriptions = new Map<string, (() => void)[]>();
     private _authChangedSubscription?: vscode.Disposable;
+    private _codexUsageUnsubscribe?: () => void;
 
     private _sinks = new Set<ChatViewSink>();
 
@@ -150,10 +152,20 @@ export class ChatController implements vscode.Disposable {
         this._authChangedSubscription = onAuthChanged(() => {
             this._broadcastModels();
         });
+
+        this._codexUsageUnsubscribe = getCodexUsageStore().onChange((snapshot) => {
+            this._postBroadcast({ type: 'codexUsage', usage: snapshot });
+        });
     }
 
     addSink(sink: ChatViewSink): void {
         this._sinks.add(sink);
+        // Replay the latest known Codex usage so a freshly opened webview can
+        // render the indicator immediately, without waiting for the next turn.
+        const usage = getCodexUsageStore().getCurrent();
+        if (usage) {
+            sink.post({ type: 'codexUsage', usage });
+        }
     }
 
     removeSink(sink: ChatViewSink): void {
@@ -1012,6 +1024,8 @@ export class ChatController implements vscode.Disposable {
         this._tabSubscriptions.clear();
         this._authChangedSubscription?.dispose();
         this._authChangedSubscription = undefined;
+        this._codexUsageUnsubscribe?.();
+        this._codexUsageUnsubscribe = undefined;
         this._sinks.clear();
         this._openPanels.clear();
         this._panelOpener = undefined;

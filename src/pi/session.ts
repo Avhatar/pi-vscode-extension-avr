@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
-import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@mariozechner/pi-coding-agent';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo } from '../shared/protocol';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, disposeModelRegistry } from './models';
+import { createCodexMonitorExtension } from './codex-monitor';
+import { getCodexUsageStore } from './codex-usage-store';
 
 export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
 
@@ -47,11 +49,14 @@ export class PiSessionManager {
         const config = vscode.workspace.getConfiguration('pi-agent');
         const allowedTools = config.get<string[]>('allowedTools', []);
 
+        const resourceLoader = await this._buildResourceLoader(cwd);
+
         const opts: any = {
             cwd,
             authStorage,
             modelRegistry: this._modelRegistry,
             sessionManager: this._sessionManager,
+            resourceLoader,
         };
         if (allowedTools.length > 0) {
             opts.allowedToolNames = allowedTools;
@@ -66,7 +71,7 @@ export class PiSessionManager {
             this._outputChannel.appendLine(`Model fallback: ${modelFallbackMessage}`);
         }
 
-        this._applyDefaultSettings(session);
+        await this._applyDefaultSettings(session);
         this._installToolApprovalHook(session);
 
         const model = session.model;
@@ -75,7 +80,29 @@ export class PiSessionManager {
         );
     }
 
-    private _applyDefaultSettings(session: AgentSession): void {
+    private async _buildResourceLoader(cwd: string): Promise<ResourceLoader> {
+        const { DefaultResourceLoader, getAgentDir, SettingsManager } = await import('@mariozechner/pi-coding-agent');
+        const agentDir = getAgentDir();
+        const settingsManager = SettingsManager.create(cwd, agentDir);
+        const usageStore = getCodexUsageStore();
+        const factories = [
+            createCodexMonitorExtension({
+                onResponse: ({ headers }) => {
+                    usageStore.updateFromHeaders(headers);
+                },
+            }),
+        ];
+        const loader = new DefaultResourceLoader({
+            cwd,
+            agentDir,
+            settingsManager,
+            extensionFactories: factories,
+        });
+        await loader.reload();
+        return loader;
+    }
+
+    private async _applyDefaultSettings(session: AgentSession): Promise<void> {
         const config = vscode.workspace.getConfiguration('pi-agent');
 
         const thinkingLevel = config.get<string>('thinkingLevel', 'off');
@@ -90,9 +117,11 @@ export class PiSessionManager {
             if (match) {
                 const model = findModel(this._modelRegistry, match.provider, match.id);
                 if (model) {
-                    session.setModel(model).catch((err: any) => {
+                    try {
+                        await session.setModel(model);
+                    } catch (err: any) {
                         this._outputChannel.appendLine(`Failed to set default model: ${err.message}`);
-                    });
+                    }
                 }
             }
         }
@@ -152,11 +181,14 @@ export class PiSessionManager {
         const config = vscode.workspace.getConfiguration('pi-agent');
         const allowedTools = config.get<string[]>('allowedTools', []);
 
+        const resourceLoader = await this._buildResourceLoader(cwd);
+
         const opts: any = {
             cwd,
             authStorage: await getAuthStorage(this._secrets),
             modelRegistry: this._modelRegistry,
             sessionManager: this._sessionManager,
+            resourceLoader,
         };
         if (allowedTools.length > 0) {
             opts.allowedToolNames = allowedTools;
@@ -166,7 +198,7 @@ export class PiSessionManager {
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
-        this._applyDefaultSettings(session);
+        await this._applyDefaultSettings(session);
         this._installToolApprovalHook(session);
     }
 
@@ -185,11 +217,14 @@ export class PiSessionManager {
         const config = vscode.workspace.getConfiguration('pi-agent');
         const allowedTools = config.get<string[]>('allowedTools', []);
 
+        const resourceLoader = await this._buildResourceLoader(cwd);
+
         const opts: any = {
             cwd,
             authStorage,
             modelRegistry: this._modelRegistry,
             sessionManager: this._sessionManager,
+            resourceLoader,
         };
         if (allowedTools.length > 0) {
             opts.allowedToolNames = allowedTools;
@@ -198,7 +233,7 @@ export class PiSessionManager {
         const { session } = await createAgentSession(opts);
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
-        this._applyDefaultSettings(session);
+        await this._applyDefaultSettings(session);
         this._installToolApprovalHook(session);
 
         const model = session.model;
@@ -229,11 +264,14 @@ export class PiSessionManager {
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         this._sessionManager = SM.open(sessionPath, undefined);
 
+        const resourceLoader = await this._buildResourceLoader(cwd);
+
         const { session } = await createAgentSession({
             cwd,
             authStorage: await getAuthStorage(this._secrets),
             modelRegistry: this._modelRegistry,
             sessionManager: this._sessionManager,
+            resourceLoader,
         });
 
         this._session = session;

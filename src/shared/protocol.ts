@@ -4,6 +4,35 @@ export interface ContextUsageInfo {
     percent: number | null;
 }
 
+export interface CodexUsageWindow {
+    /** Percentage already used in this window (0-100). */
+    percentUsed: number;
+    /** Window length in minutes (e.g. 300 for the 5h window, 10080 for the weekly one). */
+    windowMinutes: number;
+    /** Seconds until reset, as reported when the headers were captured. */
+    resetAfterSeconds: number;
+    /** Unix epoch seconds when the window resets. */
+    resetAt: number;
+}
+
+export interface CodexUsageCredits {
+    balance?: string;
+    hasCredits: boolean;
+    unlimited: boolean;
+}
+
+export interface CodexUsageSnapshot {
+    /** Subscription plan label reported by Codex (e.g. "plus", "pro"). */
+    planType: string;
+    /** Active limit label (e.g. "premium"). */
+    activeLimit?: string;
+    primary?: CodexUsageWindow;
+    secondary?: CodexUsageWindow;
+    credits?: CodexUsageCredits;
+    /** Unix epoch milliseconds when these headers were captured. */
+    capturedAt: number;
+}
+
 export interface OAuthProviderInfo {
     id: string;
     name: string;
@@ -206,6 +235,7 @@ export type ServerMessage =
     | { type: 'toolCallPending'; pending: ToolCallPendingInfo }
     | { type: 'toolCallResolved'; toolCallId: string }
     | { type: 'skills'; skills: SkillInfo[] }
+    | { type: 'codexUsage'; usage: CodexUsageSnapshot | null }
     | { type: 'error'; message: string };
 
 // Extension -> Settings webview messages

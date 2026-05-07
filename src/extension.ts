@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { PiSessionManager } from './pi/session';
+import { getCodexUsageStore } from './pi/codex-usage-store';
 import { LauncherView } from './providers/launcher-view';
 import { StatusBarManager } from './providers/status-bar';
 import { SettingsPanel } from './providers/settings-panel';
@@ -17,6 +18,8 @@ export async function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('Pi Agent extension activating...');
 
     try {
+        getCodexUsageStore().init(context.globalState);
+
         const initialSession = new PiSessionManager(outputChannel, context.secrets);
         await initialSession.initialize();
 

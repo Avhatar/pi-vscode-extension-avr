@@ -880,6 +880,40 @@ body[data-mode="panel"] .tab-strip,
     border-radius: 10px;
 }
 
+.footer-codex {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 2px 8px;
+    background: var(--badge-bg);
+    color: var(--badge-fg);
+    border-radius: 10px;
+    white-space: nowrap;
+}
+.footer-codex-plan {
+    font-weight: 600;
+    text-transform: capitalize;
+    opacity: 0.8;
+}
+.footer-codex-segment {
+    font-variant-numeric: tabular-nums;
+}
+.footer-codex-segment--low {
+    color: var(--badge-fg);
+}
+.footer-codex-segment--mid {
+    color: var(--vscode-editorWarning-foreground, #d8a022);
+}
+.footer-codex-segment--high {
+    color: var(--vscode-editorError-foreground, #e26060);
+    font-weight: 600;
+}
+.footer-codex--pending {
+    opacity: 0.6;
+    font-style: italic;
+}
+
 .footer-spacer {
     flex: 1;
 }

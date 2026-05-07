@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -45,11 +45,13 @@ const state: {
     fileChanges: FileChangeInfo[];
     rollbackPoint: number | null;
     availableModels: any[];
+    modelsLoaded: boolean;
     recentModels: { provider: string; id: string; name?: string }[];
     tabs: TabInfo[];
     activeTabId: string;
     skills: SkillInfo[];
     queuedMessages: string[];
+    codexUsage: CodexUsageSnapshot | null;
 } = {
     messages: [],
     isStreaming: false,
@@ -60,6 +62,7 @@ const state: {
     thinkingStartTime: 0,
     streamingThinkingDuration: 0,
     availableModels: [],
+    modelsLoaded: false,
     recentModels: [],
     fileChanges: [],
     rollbackPoint: null,
@@ -67,6 +70,7 @@ const state: {
     activeTabId: '',
     skills: [],
     queuedMessages: [],
+    codexUsage: null,
 };
 
 // ── Marked config ──
@@ -108,6 +112,7 @@ function handleMessage(msg: ServerMessage): void {
     switch (msg.type) {
         case 'ready':
             vscode.postMessage({ type: 'getState' });
+            vscode.postMessage({ type: 'getModels' });
             vscode.postMessage({ type: 'getSkills' });
             break;
         case 'stateSync':
@@ -118,6 +123,7 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'models':
             state.availableModels = msg.models ?? [];
+            state.modelsLoaded = true;
             if (msg.current) {
                 state.model = msg.current;
                 addToRecentModels(msg.current.provider, msg.current.id, msg.current.name);
@@ -151,6 +157,10 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'skills':
             state.skills = msg.skills;
+            break;
+        case 'codexUsage':
+            state.codexUsage = msg.usage ?? null;
+            updateInputArea();
             break;
         case 'error':
             showError(msg.message);
@@ -535,6 +545,98 @@ function updateTabs(): void {
     bindTabEvents();
 }
 
+function renderCodexUsage(): string {
+    const provider = state.model?.provider;
+    if (provider !== 'openai-codex') return '';
+    const snap = state.codexUsage;
+    if (!snap) return `<span class="footer-codex footer-codex--pending" title="Subscription usage will appear after the first response">Codex &middot; &hellip;</span>`;
+
+    const nowSec = Date.now() / 1000;
+    const primaryPct = snap.primary
+        ? (nowSec >= snap.primary.resetAt ? 0 : snap.primary.percentUsed)
+        : null;
+    const secondaryPct = snap.secondary
+        ? (nowSec >= snap.secondary.resetAt ? 0 : snap.secondary.percentUsed)
+        : null;
+
+    const segments: string[] = [];
+    const planLabel = snap.planType ? snap.planType.charAt(0).toUpperCase() + snap.planType.slice(1) : 'Codex';
+    segments.push(`<span class="footer-codex-plan">${escHtml(planLabel)}</span>`);
+    if (primaryPct !== null && snap.primary) {
+        const label = formatCodexWindow(snap.primary.windowMinutes);
+        const sev = severityClass(primaryPct);
+        segments.push(`<span class="footer-codex-segment ${sev}">${escHtml(label)} ${Math.round(primaryPct)}%</span>`);
+    }
+    if (secondaryPct !== null && snap.secondary) {
+        const label = formatCodexWindow(snap.secondary.windowMinutes);
+        const sev = severityClass(secondaryPct);
+        segments.push(`<span class="footer-codex-segment ${sev}">${escHtml(label)} ${Math.round(secondaryPct)}%</span>`);
+    }
+
+    const tooltipLines: string[] = [];
+    tooltipLines.push(`Plan: ${snap.planType}${snap.activeLimit ? ` (${snap.activeLimit})` : ''}`);
+    if (snap.primary) {
+        tooltipLines.push(
+            `${formatCodexWindow(snap.primary.windowMinutes)} window: ${Math.round(primaryPct ?? 0)}% used, resets ${formatResetTime(snap.primary.resetAt)}`,
+        );
+    }
+    if (snap.secondary) {
+        tooltipLines.push(
+            `${formatCodexWindow(snap.secondary.windowMinutes)} window: ${Math.round(secondaryPct ?? 0)}% used, resets ${formatResetTime(snap.secondary.resetAt)}`,
+        );
+    }
+    if (snap.credits) {
+        if (snap.credits.unlimited) {
+            tooltipLines.push('Credits: unlimited');
+        } else if (snap.credits.balance) {
+            tooltipLines.push(`Credits balance: ${snap.credits.balance}`);
+        } else if (snap.credits.hasCredits) {
+            tooltipLines.push('Credits: available');
+        }
+    }
+    const ageSec = Math.max(0, Math.round((Date.now() - snap.capturedAt) / 1000));
+    tooltipLines.push(`Last update: ${formatAge(ageSec)} ago`);
+
+    const title = tooltipLines.join('\n');
+    return `<span class="footer-codex" title="${escHtml(title)}">${segments.join(' &middot; ')}</span>`;
+}
+
+function severityClass(percent: number): string {
+    if (percent >= 90) return 'footer-codex-segment--high';
+    if (percent >= 50) return 'footer-codex-segment--mid';
+    return 'footer-codex-segment--low';
+}
+
+function formatCodexWindow(minutes: number): string {
+    if (minutes >= 1440 && minutes % 1440 === 0) {
+        const days = minutes / 1440;
+        return days === 7 ? 'week' : `${days}d`;
+    }
+    if (minutes % 60 === 0) return `${minutes / 60}h`;
+    return `${minutes}m`;
+}
+
+function formatResetTime(unixSec: number): string {
+    const diffMs = unixSec * 1000 - Date.now();
+    if (diffMs <= 0) return 'now';
+    const totalMin = Math.round(diffMs / 60000);
+    if (totalMin < 60) return `in ${totalMin} min`;
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    if (hours < 24) return mins ? `in ${hours}h ${mins}m` : `in ${hours}h`;
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return remHours ? `in ${days}d ${remHours}h` : `in ${days}d`;
+}
+
+function formatAge(seconds: number): string {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h`;
+}
+
 function updateInputArea(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (input) {
@@ -561,6 +663,8 @@ function updateInputArea(): void {
         }
     }
 
+    const codexUsageHtml = renderCodexUsage();
+
     const steerBtnHtml = state.isStreaming
         ? `<button id="btn-steer" class="steer-btn" title="Steer (Ctrl+Enter)"><img class="steer-icon-img" src="${iconsBaseUri}/chevrons.png" alt="steer"></button>`
         : '';
@@ -568,6 +672,7 @@ function updateInputArea(): void {
     footer.innerHTML = `
         <span class="footer-model">${escHtml(modelName)}</span>
         <span class="footer-spacer"></span>
+        ${codexUsageHtml}
         ${contextHtml}
         ${state.isStreaming ? '<button id="btn-abort" class="abort-btn" title="Stop generation (Esc)">&#9632; Stop</button>' : ''}
         ${steerBtnHtml}
@@ -760,8 +865,8 @@ function dismissSteerToast(): void {
 
 function buildWelcome(): HTMLElement {
     const w = el('div', 'welcome');
-    const hasModels = (state.availableModels?.length ?? 0) > 0;
-    const noAuthBanner = hasModels ? '' : `
+    const hasUsableModel = (state.availableModels?.length ?? 0) > 0 || !!state.model;
+    const noAuthBanner = (!state.modelsLoaded || hasUsableModel) ? '' : `
         <div class="welcome-no-auth">
             <div class="welcome-no-auth-title">No models available yet</div>
             <div class="welcome-no-auth-text">Add an API key or sign in with a subscription account (ChatGPT, Claude, Copilot) to unlock models.</div>
@@ -780,7 +885,7 @@ function buildWelcome(): HTMLElement {
             <div class="welcome-hint"><kbd>Esc</kbd> Stop generation</div>
         </div>
     `;
-    if (!hasModels) {
+    if (!hasUsableModel) {
         const btn = w.querySelector('#welcome-open-settings');
         btn?.addEventListener('click', () => {
             vscode.postMessage({ type: 'openSettings' });
@@ -2219,8 +2324,8 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
         }
 
         const usage = msg.usage;
-        if (usage && usage.output > 0) {
-            parts.push(`${usage.output.toLocaleString()} output tokens`);
+        if (usage) {
+            parts.push(...formatFullUsageParts(usage));
         }
     }
 
@@ -2229,6 +2334,26 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
     const footer = el('div', 'message-footer');
     footer.textContent = parts.join(' · ');
     return footer;
+}
+
+function formatFullUsageParts(usage: any): string[] {
+    const input = usageNumber(usage.input);
+    const output = usageNumber(usage.output);
+    const cacheRead = usageNumber(usage.cacheRead);
+    const cacheWrite = usageNumber(usage.cacheWrite);
+    const total = usageNumber(usage.totalTokens, input + output + cacheRead + cacheWrite);
+
+    return [
+        `${total.toLocaleString()} total tokens`,
+        `${output.toLocaleString()} out`,
+        `${input.toLocaleString()} in`,
+        `${cacheWrite.toLocaleString()} cache+`,
+        `${cacheRead.toLocaleString()} cache-`,
+    ];
+}
+
+function usageNumber(value: any, fallback = 0): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
 function extractThinking(msg: any): string {

@@ -7,6 +7,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-05-07
+
+### Added
+- ChatGPT subscription usage indicator in the chat footer when using a Codex (GPT-5.x) model. Shows the percent used in the 5-hour and weekly windows, with colour cues at 50% and 90%, and a tooltip detailing the plan, exact reset times, and credit balance. Hidden for non-Codex models and when the account is on a token-billed API key.
+
+### Changed
+- The temporary `PI_CODEX_PROXY_URL` discovery hook (added in 0.3.8) was removed; subscription data is now read directly from the Codex response headers.
+
+## [0.3.8] - 2026-05-07
+
+### Added
+- Codex provider response headers are now logged to the Pi Agent output channel, and the provider's base URL can be temporarily redirected to a local capture proxy by setting the `PI_CODEX_PROXY_URL` environment variable. Diagnostic plumbing for upcoming subscription-usage indicator work.
+
+### Fixed
+- The welcome screen no longer shows a "No models available yet" warning before the saved/current model has finished loading.
+
+## [0.3.7] - 2026-05-07
+
+### Changed
+- Token usage shown after assistant turns now includes total, output, input, cache write, and cache read counts.
+
 ## [0.3.6] - 2026-05-07
 
 ### Added
