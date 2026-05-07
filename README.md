@@ -1,13 +1,13 @@
-# Pi Agent for VS Code
+# Pi Code for VS Code
 
 A VS Code extension that provides a first-class UI for [Mario Zechner's Pi coding agent](https://github.com/badlogic/pi-mono) — an AI agent that can read, write, edit files, run commands, search your codebase, and more, all from within the editor. The UX is heavily inspired by [Cursor](https://www.cursor.com/).
 
-![Pi Agent screenshot](screenshot.png)
+![Pi Code screenshot](screenshot.png)
 
 ## Features
 
 ### Sidebar Chat Interface
-A dedicated activity bar panel with a full chat UI for interacting with the Pi agent. Send prompts, view streaming responses with thinking blocks, and inspect tool calls — all inline.
+A dedicated activity bar panel with a full chat UI for interacting with the Pi coding agent. Send prompts, view streaming responses with thinking blocks, and inspect tool calls — all inline.
 
 ### Multi-Tab Sessions
 Run multiple independent agent sessions in parallel. Each tab maintains its own conversation history, file change tracking, and checkpoint state.
@@ -25,10 +25,10 @@ Each user message creates a checkpoint. Restore your workspace to any previous c
 Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle through thinking levels (`off`, `minimal`, `low`, `medium`, `high`) to control how much internal reasoning is shown.
 
 ### Model Selection
-Pick from any model available through the Pi agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
+Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
 
 ### Settings Page
-A dedicated settings panel (accessible via the gear icon in the sidebar header or the `Pi: Open Settings` command) provides configuration for API connection, default model and thinking level, tool execution behavior, and session management. API keys are stored securely via VS Code's SecretStorage and never written to disk in plaintext.
+A dedicated settings panel (accessible via the gear icon in the sidebar header or the `Pi Code: Open Settings` command) provides configuration for API connection, default model and thinking level, tool execution behavior, and session management. API keys are stored securely via VS Code's SecretStorage and never written to disk in plaintext.
 
 ### Tool Approval
 When auto-approve is disabled (the default), each tool call pauses execution and shows an inline approval card in the chat with the tool name, arguments preview, and Approve/Reject buttons. This gives you full control over what the agent executes before it happens.
@@ -66,11 +66,11 @@ Install [VS Code](https://code.visualstudio.com/) `1.100.0` or later. Compatible
 
 ### 3. AI Provider Credentials
 
-The Pi agent needs credentials for at least one AI provider. You can authenticate in two ways:
+The embedded Pi coding agent needs credentials for at least one AI provider. You can authenticate in two ways:
 
 **Option A — Settings page (recommended):**
 
-Open the Pi Agent settings page (gear icon in the sidebar header, or `Pi: Open Settings` from the command palette) and enter your API key for your preferred provider. Keys are stored securely via VS Code's SecretStorage and never written to disk in plaintext.
+Open the Pi Code settings page (gear icon in the sidebar header, or `Pi Code: Open Settings` from the command palette) and enter your API key for your preferred provider. Keys are stored securely via VS Code's SecretStorage and never written to disk in plaintext.
 
 **Option B — Environment variable:**
 
@@ -109,8 +109,8 @@ The token is stored in `~/.pi/agent/` and the extension will pick it up automati
 ### From Source
 
 ```bash
-git clone <repo-url>
-cd ai-vscode-extension
+git clone https://github.com/Avhatar/pi-vscode-extension-avr.git
+cd pi-vscode-extension-avr
 npm install
 npm run compile
 ```
@@ -127,8 +127,8 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 
 ## Usage
 
-1. Click the **Pi Agent** icon in the activity bar to open the sidebar.
-2. Select a model using the model picker at the bottom of the chat or via the command palette (`Pi: Select Model`).
+1. Click the **Pi Code** icon in the activity bar to open the sidebar.
+2. Select a model using the model picker at the bottom of the chat or via the command palette (`Pi Code: Select Model`).
 3. Type a prompt and press Enter (or Shift+Enter for newlines).
 4. Watch the agent stream its response, invoke tools, and make file changes.
 5. While streaming, press Enter to **queue** a follow-up or Ctrl+Enter to **steer** the current generation.
@@ -140,7 +140,7 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+L` (`Cmd+Shift+L`) | Focus the Pi Agent chat panel |
+| `Ctrl+Shift+L` (`Cmd+Shift+L`) | Focus the Pi Code chat panel |
 | `Ctrl+Shift+N` (`Cmd+Shift+N`) | Start a new chat session |
 | `Enter` | Send prompt, or queue message while streaming |
 | `Ctrl+Enter` (`Cmd+Enter`) | Steer the agent mid-generation |
@@ -150,12 +150,12 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 
 All commands are available from the command palette (`Ctrl+Shift+P`):
 
-- **Pi: New Chat** — Start a fresh agent session in a new tab
-- **Pi: Stop Generation** — Abort the current streaming response
-- **Pi: Select Model** — Choose an AI model from the available providers
-- **Pi: Toggle Thinking Level** — Cycle through thinking verbosity levels
-- **Pi: Focus Chat** — Bring focus to the Pi Agent sidebar
-- **Pi: Open Settings** — Open the Pi Agent settings page
+- **Pi Code: New Chat** — Start a fresh agent session in a new tab
+- **Pi Code: Stop Generation** — Abort the current streaming response
+- **Pi Code: Select Model** — Choose an AI model from the available providers
+- **Pi Code: Toggle Thinking Level** — Cycle through thinking verbosity levels
+- **Pi Code: Focus Chat** — Bring focus to the Pi Code sidebar
+- **Pi Code: Open Settings** — Open the Pi Code settings page
 
 ## Settings
 
@@ -163,15 +163,15 @@ Settings can be configured through the dedicated settings page (gear icon in the
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| `pi-agent.apiProvider` | `string` | `""` | Preferred AI provider (anthropic, openai, google, deepseek). Leave empty for auto-detect. |
-| `pi-agent.apiBaseUrl` | `string` | `""` | Custom API base URL for proxies or self-hosted endpoints |
-| `pi-agent.defaultModel` | `string` | `""` | Default model ID for new sessions (e.g. `claude-sonnet-4-20250514`) |
-| `pi-agent.thinkingLevel` | `string` | `off` | Default thinking level (`off`, `minimal`, `low`, `medium`, `high`) |
-| `pi-agent.autoApproveTools` | `boolean` | `false` | Auto-approve tool executions without confirmation |
-| `pi-agent.allowedTools` | `string[]` | `[]` | Restrict which tools the agent can use. Empty = allow all. |
-| `pi-agent.autoSaveSessions` | `boolean` | `true` | Automatically persist sessions |
-| `pi-agent.sessionStoragePath` | `string` | `""` | Custom session storage path. Empty = workspace `.pi/` directory. |
-| `pi-agent.contextUsageWarningThreshold` | `number` | `80` | Warn when context usage exceeds this percentage |
+| `pi-code.apiProvider` | `string` | `""` | Preferred AI provider (anthropic, openai, google, deepseek). Leave empty for auto-detect. |
+| `pi-code.apiBaseUrl` | `string` | `""` | Custom API base URL for proxies or self-hosted endpoints |
+| `pi-code.defaultModel` | `string` | `""` | Default model ID for new sessions (e.g. `claude-sonnet-4-20250514`) |
+| `pi-code.thinkingLevel` | `string` | `off` | Default thinking level (`off`, `minimal`, `low`, `medium`, `high`) |
+| `pi-code.autoApproveTools` | `boolean` | `false` | Auto-approve tool executions without confirmation |
+| `pi-code.allowedTools` | `string[]` | `[]` | Restrict which tools the agent can use. Empty = allow all. |
+| `pi-code.autoSaveSessions` | `boolean` | `true` | Automatically persist sessions |
+| `pi-code.sessionStoragePath` | `string` | `""` | Custom session storage path. Empty = workspace `.pi/` directory. |
+| `pi-code.contextUsageWarningThreshold` | `number` | `80` | Warn when context usage exceeds this percentage |
 
 API keys are managed through the settings page and stored via VS Code's SecretStorage (never in `settings.json`).
 

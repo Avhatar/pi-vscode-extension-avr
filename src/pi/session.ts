@@ -47,7 +47,7 @@ export class PiSessionManager {
 
         this._sessionManager = SM.create(cwd);
 
-        const config = vscode.workspace.getConfiguration('pi-agent');
+        const config = vscode.workspace.getConfiguration('pi-code');
         const allowedTools = config.get<string[]>('allowedTools', []);
 
         const resourceLoader = await this._buildResourceLoader(cwd);
@@ -111,7 +111,7 @@ export class PiSessionManager {
     }
 
     private async _applyDefaultSettings(session: AgentSession): Promise<void> {
-        const config = vscode.workspace.getConfiguration('pi-agent');
+        const config = vscode.workspace.getConfiguration('pi-code');
 
         const thinkingLevel = config.get<string>('thinkingLevel', 'off');
         if (thinkingLevel && thinkingLevel !== 'off') {
@@ -186,7 +186,7 @@ export class PiSessionManager {
         const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         this._sessionManager = SM.create(cwd);
 
-        const config = vscode.workspace.getConfiguration('pi-agent');
+        const config = vscode.workspace.getConfiguration('pi-code');
         const allowedTools = config.get<string[]>('allowedTools', []);
 
         const resourceLoader = await this._buildResourceLoader(cwd);
@@ -222,7 +222,7 @@ export class PiSessionManager {
         this._modelRegistry = await getModelRegistry();
         this._sessionManager = SM.open(sessionPath, undefined);
 
-        const config = vscode.workspace.getConfiguration('pi-agent');
+        const config = vscode.workspace.getConfiguration('pi-code');
         const allowedTools = config.get<string[]>('allowedTools', []);
 
         const resourceLoader = await this._buildResourceLoader(cwd);
@@ -303,7 +303,7 @@ export class PiSessionManager {
     }
 
     getAutoApproveTools(): boolean {
-        return vscode.workspace.getConfiguration('pi-agent').get<boolean>('autoApproveTools', false);
+        return vscode.workspace.getConfiguration('pi-code').get<boolean>('autoApproveTools', false);
     }
 
     setToolApprovalHandler(handler: ToolApprovalHandler | undefined): void {

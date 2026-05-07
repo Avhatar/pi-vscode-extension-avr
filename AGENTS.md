@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Pi Agent is a VS Code extension providing a sidebar chat UI for the Pi coding agent SDK (`@mariozechner/pi-coding-agent`). It supports multi-tab sessions, inline diffs, tool approval, checkpoints/rollback, a dedicated settings page, message queuing during streaming, mid-stream steering, and slash-command skills.
+Pi Code is a VS Code extension providing a sidebar chat UI for the Pi coding agent SDK (`@mariozechner/pi-coding-agent`). It supports multi-tab sessions, inline diffs, tool approval, checkpoints/rollback, a dedicated settings page, message queuing during streaming, mid-stream steering, and slash-command skills.
 
 ## Language
 
@@ -24,7 +24,7 @@ Press F5 in VS Code to launch an Extension Development Host for manual testing.
 
 ```bash
 npm prune --omit=dev    # strip devDeps from node_modules
-npm run package         # vsce produces pi-agent-<version>.vsix
+npm run package         # vsce produces pi-code-<version>.vsix
 npm install             # restore devDeps for further development
 ```
 

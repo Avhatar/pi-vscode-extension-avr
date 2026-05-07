@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { CodexUsageSnapshot, CodexUsageWindow, CodexUsageCredits } from '../shared/protocol';
 
-const PERSIST_KEY = 'pi-agent.codexUsage';
+const PERSIST_KEY = 'pi-code.codexUsage';
 
 export type CodexUsageListener = (snapshot: CodexUsageSnapshot | null) => void;
 

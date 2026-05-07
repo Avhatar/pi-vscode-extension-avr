@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { AuthStorage } from '@mariozechner/pi-coding-agent';
 
-const API_KEY_PREFIX = 'pi-agent.apiKey.';
+const API_KEY_PREFIX = 'pi-code.apiKey.';
 
 const KNOWN_PROVIDERS = [
     'anthropic', 'openai', 'google', 'deepseek', 'mistral', 'groq',

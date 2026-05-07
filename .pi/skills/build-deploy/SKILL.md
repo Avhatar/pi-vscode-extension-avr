@@ -1,7 +1,7 @@
 ---
 name: build-deploy
 description: >-
-  Build, package, and install the Pi Agent VS Code extension locally.
+  Build, package, and install the Pi Code VS Code extension locally.
   Includes versioning: bump version, maintain CHANGELOG.md, deploy with auto-increment.
   Use when: user asks to build, compile, deploy, package, install, update the extension,
   create a VSIX, apply code changes, bump version, or release.
@@ -9,7 +9,7 @@ description: >-
   bump version, version, changelog.
 ---
 
-# Build & Deploy — Pi Agent VS Code Extension
+# Build & Deploy — Pi Code VS Code Extension
 
 ## Versioning & Changelog
 
@@ -111,7 +111,7 @@ that strips hoisted transitive deps and breaks activation.
 npm run package
 ```
 
-Produces `pi-agent-<version>.vsix` in the project root.
+Produces `pi-code-<version>.vsix` in the project root.
 
 ### 4. Restore dev dependencies
 
@@ -122,7 +122,7 @@ npm install
 ### 5. Install into VS Code
 
 ```bash
-code --install-extension pi-agent-<version>.vsix --force
+code --install-extension pi-code-<version>.vsix --force
 ```
 
 ### 6. Reload VS Code
@@ -162,7 +162,7 @@ npm run watch
 
 After deploy + window reload:
 
-1. Extension activates without errors (check Output → Pi Agent channel)
+1. Extension activates without errors (check Output → Pi Code channel)
 2. Sidebar opens and shows the chat UI
 3. Tabs work (create, switch, close)
 4. Settings page opens

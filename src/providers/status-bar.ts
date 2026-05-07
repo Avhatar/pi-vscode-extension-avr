@@ -11,7 +11,7 @@ export class StatusBarManager implements vscode.Disposable {
     constructor(session: PiSessionManager) {
         this._session = session;
         this._item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        this._item.command = 'pi-agent.selectModel';
+        this._item.command = 'pi-code.selectModel';
         this._update();
         this._item.show();
 
@@ -37,10 +37,10 @@ export class StatusBarManager implements vscode.Disposable {
         const isStreaming = this._isStreaming;
         const icon = isStreaming ? '$(loading~spin)' : '$(hubot)';
         const name = model ? (model.name ?? model.id) : 'No model';
-        this._item.text = `${icon} Pi: ${name}`;
+        this._item.text = `${icon} Pi Code: ${name}`;
 
         const usage = this._session.session?.getContextUsage?.();
-        const parts: string[] = ['Pi Agent'];
+        const parts: string[] = ['Pi Code'];
         if (usage) {
             if (usage.tokens !== null) {
                 parts.push(`Context: ${usage.tokens.toLocaleString()} / ${usage.contextWindow.toLocaleString()} tokens`);

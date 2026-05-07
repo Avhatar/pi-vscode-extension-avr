@@ -1,11 +1,11 @@
 {
-  "name": "pi-agent",
-  "displayName": "Pi Agent",
-  "description": "First-class Pi coding agent experience for VS Code",
-  "version": "0.4.0",
-  "publisher": "zetaphor",
+  "name": "pi-code",
+  "displayName": "Pi Code",
+  "description": "First-class AI coding agent experience for VS Code",
+  "version": "0.5.0",
+  "publisher": "Avhatar",
   "license": "MIT",
-  "icon": "media/pi-icon-full.png",
+  "icon": "media/pi-code-icon-full.png",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -19,95 +19,95 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "pi-agent",
-          "title": "Pi Agent",
-          "icon": "media/pi-icon.svg"
+          "id": "pi-code",
+          "title": "Pi Code",
+          "icon": "media/pi-code-icon.svg"
         }
       ]
     },
     "views": {
-      "pi-agent": [
+      "pi-code": [
         {
           "type": "webview",
-          "id": "pi-agent.chat",
+          "id": "pi-code.chat",
           "name": ""
         }
       ]
     },
     "commands": [
       {
-        "command": "pi-agent.newChat",
-        "title": "Pi: New Chat",
+        "command": "pi-code.newChat",
+        "title": "Pi Code: New Chat",
         "icon": "$(add)"
       },
       {
-        "command": "pi-agent.abort",
-        "title": "Pi: Stop Generation"
+        "command": "pi-code.abort",
+        "title": "Pi Code: Stop Generation"
       },
       {
-        "command": "pi-agent.selectModel",
-        "title": "Pi: Select Model"
+        "command": "pi-code.selectModel",
+        "title": "Pi Code: Select Model"
       },
       {
-        "command": "pi-agent.toggleThinking",
-        "title": "Pi: Toggle Thinking Level"
+        "command": "pi-code.toggleThinking",
+        "title": "Pi Code: Toggle Thinking Level"
       },
       {
-        "command": "pi-agent.focusChat",
-        "title": "Pi: Focus Chat"
+        "command": "pi-code.focusChat",
+        "title": "Pi Code: Focus Chat"
       },
       {
-        "command": "pi-agent.openSettings",
-        "title": "Pi: Open Settings",
+        "command": "pi-code.openSettings",
+        "title": "Pi Code: Open Settings",
         "icon": "$(gear)"
       },
       {
-        "command": "pi-agent.showSessions",
-        "title": "Pi: Session History",
+        "command": "pi-code.showSessions",
+        "title": "Pi Code: Session History",
         "icon": "$(history)"
       },
       {
-        "command": "pi-agent.createTab",
-        "title": "Pi: New Agent Tab",
+        "command": "pi-code.createTab",
+        "title": "Pi Code: New Agent Tab",
         "icon": "$(add)"
       }
     ],
     "keybindings": [
       {
-        "command": "pi-agent.focusChat",
+        "command": "pi-code.focusChat",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l"
       },
       {
-        "command": "pi-agent.newChat",
+        "command": "pi-code.newChat",
         "key": "ctrl+shift+n",
         "mac": "cmd+shift+n"
       },
       {
-        "command": "pi-agent.abort",
+        "command": "pi-code.abort",
         "key": "escape",
-        "when": "pi-agent.isStreaming"
+        "when": "pi-code.isStreaming"
       }
     ],
     "configuration": {
-      "title": "Pi Agent",
+      "title": "Pi Code",
       "properties": {
-        "pi-agent.apiProvider": {
+        "pi-code.apiProvider": {
           "type": "string",
           "default": "",
           "description": "Preferred AI provider (e.g. anthropic, openai, google, deepseek). Leave empty for automatic detection."
         },
-        "pi-agent.apiBaseUrl": {
+        "pi-code.apiBaseUrl": {
           "type": "string",
           "default": "",
           "description": "Custom API base URL for self-hosted or proxy endpoints. Leave empty to use the provider default."
         },
-        "pi-agent.defaultModel": {
+        "pi-code.defaultModel": {
           "type": "string",
           "default": "",
           "description": "Default model ID to use when starting new sessions (e.g. claude-sonnet-4-20250514). Leave empty for automatic selection."
         },
-        "pi-agent.thinkingLevel": {
+        "pi-code.thinkingLevel": {
           "type": "string",
           "default": "off",
           "enum": [
@@ -117,14 +117,14 @@
             "medium",
             "high"
           ],
-          "description": "Default thinking level for Pi agent responses"
+          "description": "Default thinking level for Pi Code responses"
         },
-        "pi-agent.autoApproveTools": {
+        "pi-code.autoApproveTools": {
           "type": "boolean",
           "default": false,
           "description": "Automatically approve tool executions without confirmation"
         },
-        "pi-agent.allowedTools": {
+        "pi-code.allowedTools": {
           "type": "array",
           "items": {
             "type": "string"
@@ -132,17 +132,17 @@
           "default": [],
           "description": "Restrict which tools the agent can use. Leave empty to allow all tools."
         },
-        "pi-agent.autoSaveSessions": {
+        "pi-code.autoSaveSessions": {
           "type": "boolean",
           "default": true,
           "description": "Automatically persist sessions"
         },
-        "pi-agent.sessionStoragePath": {
+        "pi-code.sessionStoragePath": {
           "type": "string",
           "default": "",
           "description": "Custom path for session storage. Leave empty to use the default workspace .pi/ directory."
         },
-        "pi-agent.contextUsageWarningThreshold": {
+        "pi-code.contextUsageWarningThreshold": {
           "type": "number",
           "default": 80,
           "minimum": 0,
@@ -183,5 +183,14 @@
     "mocha": "^11.0.0",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0"
-  }
+  },
+  "author": "Timofei Nikitchenko",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Avhatar/pi-vscode-extension-avr.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Avhatar/pi-vscode-extension-avr/issues"
+  },
+  "homepage": "https://github.com/Avhatar/pi-vscode-extension-avr#readme"
 }

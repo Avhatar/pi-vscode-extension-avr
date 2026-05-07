@@ -3,15 +3,16 @@ import * as vscode from 'vscode';
 
 suite('Extension', () => {
     test('extension is present', () => {
-        const ext = vscode.extensions.getExtension('zetaphor.pi-agent');
+        const ext = vscode.extensions.getExtension('Avhatar.pi-code')
+            ?? vscode.extensions.getExtension('avhatar.pi-code');
         assert.ok(ext, 'Extension should be installed');
     });
 
     test('commands are registered', async () => {
         const commands = await vscode.commands.getCommands(true);
-        assert.ok(commands.includes('pi-agent.newChat'), 'newChat command should exist');
-        assert.ok(commands.includes('pi-agent.abort'), 'abort command should exist');
-        assert.ok(commands.includes('pi-agent.selectModel'), 'selectModel command should exist');
-        assert.ok(commands.includes('pi-agent.focusChat'), 'focusChat command should exist');
+        assert.ok(commands.includes('pi-code.newChat'), 'newChat command should exist');
+        assert.ok(commands.includes('pi-code.abort'), 'abort command should exist');
+        assert.ok(commands.includes('pi-code.selectModel'), 'selectModel command should exist');
+        assert.ok(commands.includes('pi-code.focusChat'), 'focusChat command should exist');
     });
 });

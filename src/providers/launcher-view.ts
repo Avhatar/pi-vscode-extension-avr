@@ -81,12 +81,12 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                     await this._sendState();
                     break;
                 case 'openSettings':
-                    vscode.commands.executeCommand('pi-agent.openSettings');
+                    vscode.commands.executeCommand('pi-code.openSettings');
                     break;
             }
         } catch (err: any) {
             // Surface as an info message — the launcher webview is too small for an error UI.
-            vscode.window.showErrorMessage(`Pi Agent: ${err.message ?? String(err)}`);
+            vscode.window.showErrorMessage(`Pi Code: ${err.message ?? String(err)}`);
         }
     }
 
@@ -122,7 +122,7 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <link rel="stylesheet" href="${styleUri}">
-    <title>Pi Agent</title>
+    <title>Pi Code</title>
 </head>
 <body>
     <div id="launcher"></div>

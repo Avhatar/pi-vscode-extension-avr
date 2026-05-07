@@ -3,7 +3,7 @@ import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillI
 import { getAuthStorage, notifyAuthChanged } from '../pi/auth';
 import { refreshModelRegistry } from '../pi/models';
 
-const API_KEY_PREFIX = 'pi-agent.apiKey.';
+const API_KEY_PREFIX = 'pi-code.apiKey.';
 
 interface OAuthFlow {
     resolveCode: (code: string) => void;
@@ -38,7 +38,7 @@ export class SettingsPanel {
         this._panel.onDidDispose(() => this._dispose(), undefined, this._disposables);
 
         const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('pi-agent')) {
+            if (e.affectsConfiguration('pi-code')) {
                 this._sendSettings();
             }
         });
@@ -52,8 +52,8 @@ export class SettingsPanel {
         }
 
         const panel = vscode.window.createWebviewPanel(
-            'pi-agent.settings',
-            'Pi Agent Settings',
+            'pi-code.settings',
+            'Pi Code Settings',
             vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -104,12 +104,12 @@ export class SettingsPanel {
     }
 
     private async _updateSetting(key: string, value: any): Promise<void> {
-        const config = vscode.workspace.getConfiguration('pi-agent');
+        const config = vscode.workspace.getConfiguration('pi-code');
         await config.update(key, value, vscode.ConfigurationTarget.Global);
     }
 
     private async _sendSettings(): Promise<void> {
-        const config = vscode.workspace.getConfiguration('pi-agent');
+        const config = vscode.workspace.getConfiguration('pi-code');
         const provider = config.get<string>('apiProvider', '');
 
         let apiKeySet = false;
@@ -337,7 +337,7 @@ export class SettingsPanel {
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; style-src ${this._panel.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <link rel="stylesheet" href="${styleUri}">
-    <title>Pi Agent Settings</title>
+    <title>Pi Code Settings</title>
 </head>
 <body>
     <div id="settings-app"></div>

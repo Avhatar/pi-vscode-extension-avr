@@ -875,7 +875,7 @@ function buildWelcome(): HTMLElement {
     `;
     w.innerHTML = `
         <div class="welcome-icon">&pi;</div>
-        <div class="welcome-title">Pi Agent</div>
+        <div class="welcome-title">Pi Code</div>
         <div class="welcome-subtitle">Ask anything. Pi can read, write, and execute code for you.</div>
         ${noAuthBanner}
         <div class="welcome-hints">

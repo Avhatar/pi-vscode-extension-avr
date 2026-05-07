@@ -3,7 +3,7 @@ name: commit
 description: Inspect all uncommitted changes (modified + untracked), decide on commit grouping, verify CHANGELOG and version, draft a concise commit message in the project's existing style, iterate with the user until approved, then commit. Triggers when the user asks to commit, write a commit message, finalize changes, закоммить, коммит, or wrap up work.
 ---
 
-# Commit — Pi Agent VS Code Extension
+# Commit — Pi Code VS Code Extension
 
 Run this skill when the user wants to turn the current uncommitted state into
 one or more git commits.

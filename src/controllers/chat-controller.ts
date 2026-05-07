@@ -455,7 +455,7 @@ export class ChatController implements vscode.Disposable {
             tab.isStreamingLocal = true;
             tab.codexTurnBaseline = getCodexUsageStore().getCurrent();
             if (tab.id === this._activeTabId) {
-                vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
+                vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
             }
             this._onLauncherStateChanged.fire();
         }
@@ -500,7 +500,7 @@ export class ChatController implements vscode.Disposable {
             tab.agentStartTime = 0;
             tab.isStreamingLocal = false;
             if (tab.id === this._activeTabId) {
-                vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', false);
+                vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
             } else {
                 tab.hasNotification = true;
             }
@@ -861,7 +861,7 @@ export class ChatController implements vscode.Disposable {
                     this._switchTab(msg.tabId);
                     break;
                 case 'openSettings':
-                    vscode.commands.executeCommand('pi-agent.openSettings');
+                    vscode.commands.executeCommand('pi-code.openSettings');
                     break;
             }
         } catch (err: any) {
@@ -946,9 +946,9 @@ export class ChatController implements vscode.Disposable {
         if (!tab) return;
         tab.hasNotification = false;
         if (tab.isStreamingLocal) {
-            vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
+            vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
         } else {
-            vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', false);
+            vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
         }
 
         this._persistTabs();
@@ -968,14 +968,14 @@ export class ChatController implements vscode.Disposable {
             }))
             .filter(t => t.sessionPath !== '');
 
-        this._context.workspaceState.update('pi-agent.tabs', {
+        this._context.workspaceState.update('pi-code.tabs', {
             tabs,
             activeIndex: Math.max(0, activeIndex),
         } satisfies PersistedTabsState);
     }
 
     async restorePersistedTabs(): Promise<void> {
-        const persisted = this._context.workspaceState.get<PersistedTabsState>('pi-agent.tabs');
+        const persisted = this._context.workspaceState.get<PersistedTabsState>('pi-code.tabs');
         if (!persisted || persisted.tabs.length === 0) { return; }
 
         // Remember the initial empty tab to dispose after successful restore

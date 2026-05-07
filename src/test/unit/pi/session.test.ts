@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestSession, TEST_MODEL_PROVIDER, TEST_MODEL_ID } from '../../setup';
 import type { AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 
-describe('Pi AgentSession', () => {
+describe('Pi Code session', () => {
     let session: AgentSession;
 
     beforeAll(async () => {

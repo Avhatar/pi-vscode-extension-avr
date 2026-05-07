@@ -1,11 +1,18 @@
 # Changelog
 
-All notable changes to the Pi Agent VS Code extension are documented here.
+All notable changes to the Pi Code VS Code extension are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-05-07
+
+### Changed
+- Rebranded the extension as Pi Code, including the package identity, publisher, command IDs, settings namespace, and visible UI labels.
+
+## [0.4.1] - 2026-05-07
 
 ### Added
 - Per-turn Codex usage delta is now appended to each assistant message footer (e.g. `5h +1.2% · week +0.3%`), so you can see how much of the 5-hour and weekly subscription windows the turn consumed. Hidden for non-Codex models.
@@ -16,7 +23,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.4.0] - 2026-05-07
 
 ### Added
-- Web access for the Pi agent: `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools (powered by the bundled `pi-web-access` package), plus its accompanying skill. Works out of the box via Exa MCP without any API keys; optionally read `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys. Fetching GitHub repos, YouTube videos, PDFs, and local video files is supported.
+- Web access for the Pi coding agent: `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools (powered by the bundled `pi-web-access` package), plus its accompanying skill. Works out of the box via Exa MCP without any API keys; optionally read `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys. Fetching GitHub repos, YouTube videos, PDFs, and local video files is supported.
 
 ### Changed
 - Pi extensions (npm packages tagged `pi-package`) now ship inside the VSIX and are loaded automatically at session start — no `pi install` step required.
@@ -32,7 +39,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.3.8] - 2026-05-07
 
 ### Added
-- Codex provider response headers are now logged to the Pi Agent output channel, and the provider's base URL can be temporarily redirected to a local capture proxy by setting the `PI_CODEX_PROXY_URL` environment variable. Diagnostic plumbing for upcoming subscription-usage indicator work.
+- Codex provider response headers are now logged to the Pi Code output channel, and the provider's base URL can be temporarily redirected to a local capture proxy by setting the `PI_CODEX_PROXY_URL` environment variable. Diagnostic plumbing for upcoming subscription-usage indicator work.
 
 ### Fixed
 - The welcome screen no longer shows a "No models available yet" warning before the saved/current model has finished loading.

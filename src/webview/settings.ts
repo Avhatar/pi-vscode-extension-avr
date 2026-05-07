@@ -51,7 +51,7 @@ function render(data: SettingsData): void {
     const container = el('div', 'settings-container');
 
     const header = el('div', 'settings-header');
-    header.innerHTML = `<h1>Pi Agent Settings</h1>`;
+    header.innerHTML = `<h1>Pi Code Settings</h1>`;
     container.appendChild(header);
 
     container.appendChild(buildSection('API Connection', [

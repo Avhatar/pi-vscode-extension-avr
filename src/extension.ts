@@ -14,8 +14,8 @@ import { CheckpointManager } from './providers/checkpoint';
 let controllerRef: ChatController | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
-    const outputChannel = vscode.window.createOutputChannel('Pi Agent');
-    outputChannel.appendLine('Pi Agent extension activating...');
+    const outputChannel = vscode.window.createOutputChannel('Pi Code');
+    outputChannel.appendLine('Pi Code extension activating...');
 
     try {
         getCodexUsageStore().init(context.globalState);
@@ -25,7 +25,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         context.subscriptions.push(
             context.secrets.onDidChange(async (e) => {
-                if (e.key.startsWith('pi-agent.apiKey.')) {
+                if (e.key.startsWith('pi-code.apiKey.')) {
                     await controllerRef?.activeSession?.reloadCredentials();
                     outputChannel.appendLine(`Credentials reloaded after change to ${e.key}`);
                 }
@@ -53,14 +53,14 @@ export async function activate(context: vscode.ExtensionContext) {
         // (and their backing tabs) back across reloads, so we no longer need
         // our own eager `restorePersistedTabs()` call. Clear any leftover
         // pre-0.3.0 state so users upgrading don't see ghost "Open chats".
-        context.workspaceState.update('pi-agent.tabs', undefined);
+        context.workspaceState.update('pi-code.tabs', undefined);
 
         const launcherView = new LauncherView(context.extensionUri, controller);
 
         context.subscriptions.push(
             controller,
             launcherView,
-            vscode.window.registerWebviewViewProvider('pi-agent.chat', launcherView),
+            vscode.window.registerWebviewViewProvider('pi-code.chat', launcherView),
             vscode.workspace.registerTextDocumentContentProvider('pi-diff', diffContentProvider),
             statusBar,
 
@@ -68,22 +68,22 @@ export async function activate(context: vscode.ExtensionContext) {
             checkpointManager,
             outputChannel,
 
-            vscode.commands.registerCommand('pi-agent.newChat', async () => {
+            vscode.commands.registerCommand('pi-code.newChat', async () => {
                 // "New Chat" now means a fresh session in a fresh editor tab,
                 // matching the launcher's behaviour.
                 await controller.createTab();
             }),
 
-            vscode.commands.registerCommand('pi-agent.abort', async () => {
+            vscode.commands.registerCommand('pi-code.abort', async () => {
                 await controller.activeSession?.abort();
             }),
 
-            vscode.commands.registerCommand('pi-agent.selectModel', async () => {
+            vscode.commands.registerCommand('pi-code.selectModel', async () => {
                 await controller.activeSession?.showModelPicker();
                 controller.sendStateSync();
             }),
 
-            vscode.commands.registerCommand('pi-agent.toggleThinking', async () => {
+            vscode.commands.registerCommand('pi-code.toggleThinking', async () => {
                 const level = controller.activeSession?.cycleThinkingLevel();
                 if (level) {
                     vscode.window.showInformationMessage(`Thinking level: ${level}`);
@@ -91,28 +91,28 @@ export async function activate(context: vscode.ExtensionContext) {
                 controller.sendStateSync();
             }),
 
-            vscode.commands.registerCommand('pi-agent.focusChat', () => {
+            vscode.commands.registerCommand('pi-code.focusChat', () => {
                 // Reveal the active chat panel if there is one; otherwise fall
                 // back to focusing the launcher.
                 const tabId = controller.activeTabId;
                 if (tabId) {
                     controller.openOrFocusPanel(tabId);
                 } else {
-                    vscode.commands.executeCommand('pi-agent.chat.focus');
+                    vscode.commands.executeCommand('pi-code.chat.focus');
                 }
             }),
 
-            vscode.commands.registerCommand('pi-agent.openSettings', () => {
+            vscode.commands.registerCommand('pi-code.openSettings', () => {
                 SettingsPanel.show(context.extensionUri, context.secrets);
             }),
 
-            vscode.commands.registerCommand('pi-agent.createTab', async () => {
+            vscode.commands.registerCommand('pi-code.createTab', async () => {
                 await controller.createTab();
             }),
 
-            vscode.commands.registerCommand('pi-agent.showSessions', () => {
+            vscode.commands.registerCommand('pi-code.showSessions', () => {
                 // Surface the launcher (which already lists session history).
-                vscode.commands.executeCommand('pi-agent.chat.focus');
+                vscode.commands.executeCommand('pi-code.chat.focus');
             }),
 
             vscode.window.registerWebviewPanelSerializer(
@@ -121,10 +121,10 @@ export async function activate(context: vscode.ExtensionContext) {
             ),
         );
 
-        outputChannel.appendLine('Pi Agent extension activated.');
+        outputChannel.appendLine('Pi Code extension activated.');
     } catch (err: any) {
         outputChannel.appendLine(`Failed to activate: ${err.message}`);
-        vscode.window.showErrorMessage(`Pi Agent failed to activate: ${err.message}`);
+        vscode.window.showErrorMessage(`Pi Code failed to activate: ${err.message}`);
     }
 }
 

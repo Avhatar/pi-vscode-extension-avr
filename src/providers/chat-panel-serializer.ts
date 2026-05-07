@@ -5,7 +5,7 @@ import { ChatPanel } from './chat-panel';
 /**
  * Restores chat editor panels after a window reload. VS Code calls
  * `deserializeWebviewPanel` for every panel of view type
- * `pi-agent.chat` that was open at the previous shutdown, passing back
+ * `pi-code.chat` that was open at the previous shutdown, passing back
  * whatever the webview persisted via `vscode.setState(...)`.
  *
  * The serialized state (`{ tabId?, sessionPath? }`) is just a pointer

@@ -100,7 +100,7 @@ webview (panel A) ──postMessage──▶ ChatPanel ──handleMessage(tabId
 | Layer | What it stores | When it is restored |
 |---|---|---|
 | `vscode.setState({ tabId, sessionPath })` inside the webview | panel ↔ session binding | `WebviewPanelSerializer.deserializeWebviewPanel` on window reload |
-| `workspaceState['pi-agent.tabs']` | List of every tab ever opened: `{ tabId, name, sessionPath, isOpen }` + `lastActiveTabId` | Cold start (fresh VS Code launch) when the serializer did not fire |
+| `workspaceState['pi-code.tabs']` | List of every tab ever opened: `{ tabId, name, sessionPath, isOpen }` + `lastActiveTabId` | Cold start (fresh VS Code launch) when the serializer did not fire |
 | `.pi/sessions/<id>.json` (Pi SDK) | Full contents of every session | Via `session.loadSession(path)` |
 
 ---
@@ -152,13 +152,13 @@ place.
 - `src/providers/chat-panel-serializer.ts` (new) —
   `WebviewPanelSerializer.deserializeWebviewPanel`.
 - `src/extension.ts`:
-  - registers `vscode.window.registerWebviewPanelSerializer('pi-agent.chat', ...)`;
-  - registers a `pi-agent.openInEditor` command.
+  - registers `vscode.window.registerWebviewPanelSerializer('pi-code.chat', ...)`;
+  - registers a `pi-code.openInEditor` command.
 - `src/webview/main.ts`:
   - reads `?mode=panel|sidebar` from query/state;
   - in `mode=panel` hides the internal tab bar (one chat per panel);
   - persists `vscode.setState({ tabId, sessionPath })` on changes.
-- `package.json` — new `pi-agent.openInEditor` command and a
+- `package.json` — new `pi-code.openInEditor` command and a
   `$(link-external)` button in `view/title` for the sidebar.
 
 **Acceptance:**
@@ -179,7 +179,7 @@ place.
 
 **What we do:** the sidebar drops the chat and becomes a launcher. The
 internal tab bar inside the webview is removed. The
-`pi-agent.createTab` command now opens an editor panel directly.
+`pi-code.createTab` command now opens an editor panel directly.
 
 **Files:**
 - `src/providers/sidebar.ts` → `src/providers/launcher-view.ts`
@@ -195,8 +195,8 @@ internal tab bar inside the webview is removed. The
   only its own tabId).
 - `esbuild.js` — add a third entry: `webview/launcher.ts`.
 - `package.json`:
-  - `pi-agent.createTab` now opens an editor panel;
-  - `pi-agent.focusChat` focuses the last-active panel, or opens it if
+  - `pi-code.createTab` now opens an editor panel;
+  - `pi-code.focusChat` focuses the last-active panel, or opens it if
     closed;
   - drop the `$(link-external)` button (no longer needed — the sidebar
     is always the launcher).
@@ -218,9 +218,9 @@ internal tab bar inside the webview is removed. The
   the launcher? `TabState` already has `hasNotification`. Surface it in the
   launcher as a badge next to the chat row.
 
-- **Q2** — what about the global `pi-agent.abort` command (Esc)? Today it
+- **Q2** — what about the global `pi-code.abort` command (Esc)? Today it
   hits `_activeTab`. After the migration — the last-focused panel. We have
-  to make sure `setContext('pi-agent.isStreaming', ...)` also flips on
+  to make sure `setContext('pi-code.isStreaming', ...)` also flips on
   `onDidChangeViewState`.
 
 - **Q3** — cap the number of open panels? Probably not (D7), but if 20+
@@ -234,7 +234,7 @@ internal tab bar inside the webview is removed. The
 **Risk 1 — Serializer is not invoked.** VS Code does not call
 `deserializeWebviewPanel` for an extension that has not been activated by
 the time of the reload. We need to ensure that `activationEvents` (in
-`package.json:16`) either includes `onWebviewPanel:pi-agent.chat`, or `*`
+`package.json:16`) either includes `onWebviewPanel:pi-code.chat`, or `*`
 (we already activate early through registered views). Verify by hand.
 
 **Risk 2 — Double `TabState` creation via the serializer.** If cold start
@@ -309,7 +309,7 @@ checkbox, stamp date/version, add notes to the "Log").
 
 ### 2026-05-07 — Commit 1 shipped as 0.2.1
 
-- `npm run deploy:patch` ran clean. `pi-agent-0.2.1.vsix` (39.35 MB) packaged and installed.
+- `npm run deploy:patch` ran clean. `pi-code-0.2.1.vsix` (39.35 MB) packaged and installed.
 - CHANGELOG stamped: `[0.2.1] - 2026-05-07`.
 - Manual sweep (§7) deferred to the user — extension is installed and ready.
 - Next action: Commit 2 — add `ChatPanel` alongside the sidebar.
@@ -320,11 +320,11 @@ checkbox, stamp date/version, add notes to the "Log").
 - `handleMessage(msg, sourceTabId?)` lets panel webviews target their own tab, while the sidebar (no `sourceTabId`) keeps targeting the active tab.
 - `sendStateSync(tabId?)` builds and posts state for a specific tab. The active-tab path is unchanged.
 - New: `controller.findTabIdBySessionPath`, `createTabFromSessionPath`, `getTabName`, and `onTabRenamed` event used by panels to keep their editor-tab title in sync.
-- New `src/providers/chat-panel.ts` — `WebviewPanel` wrapper bound to one `tabId`. Implements `ChatViewSink` with `tabFilter = tabId`. Exposes `createChatPanel(...)` factory used by the `pi-agent.openInEditor` command.
+- New `src/providers/chat-panel.ts` — `WebviewPanel` wrapper bound to one `tabId`. Implements `ChatViewSink` with `tabFilter = tabId`. Exposes `createChatPanel(...)` factory used by the `pi-code.openInEditor` command.
 - New `src/providers/chat-panel-serializer.ts` — `WebviewPanelSerializer` that, on window reload, looks up the tab by `sessionPath` (falling back to creating a new tab from disk if needed) and re-attaches the panel.
-- View type for editor panels: `pi-agent.chatPanel` (distinct from the sidebar view id `pi-agent.chat`, even though both load the same webview bundle).
+- View type for editor panels: `pi-code.chatPanel` (distinct from the sidebar view id `pi-code.chat`, even though both load the same webview bundle).
 - Webview detects mode via `data-mode` attribute on `<div id="app">`. In `panel` mode it (a) hides the in-webview tab strip via CSS + `updateTabs()`, and (b) calls `vscode.setState({ tabId, sessionPath })` after each state sync so the serializer can restore.
-- `package.json`: new command `pi-agent.openInEditor` with the `$(link-external)` icon; placed in `view/title` group `navigation@2` (between New Tab and Sessions).
+- `package.json`: new command `pi-code.openInEditor` with the `$(link-external)` icon; placed in `view/title` group `navigation@2` (between New Tab and Sessions).
 - `extension.ts`: registers the command + the `WebviewPanelSerializer`. The serializer needs the controller to be ready, so it's registered after `restorePersistedTabs()`.
 - Protocol: added optional `sessionPath` to `SerializedAgentState` so the webview can serialize it.
 - `npm run compile` and `npx tsc --noEmit` clean. Unit tests: 22 passed, 3 pre-existing failures (unchanged from before).
@@ -332,7 +332,7 @@ checkbox, stamp date/version, add notes to the "Log").
 
 ### 2026-05-07 — Commit 2 shipped as 0.2.2
 
-- `npm run deploy:patch` ran clean. `pi-agent-0.2.2.vsix` (39.35 MB) packaged and installed.
+- `npm run deploy:patch` ran clean. `pi-code-0.2.2.vsix` (39.35 MB) packaged and installed.
 - CHANGELOG stamped: `[0.2.2] - 2026-05-07`.
 - Manual sweep deferred to the user. Smoke tests to run:
   - Sidebar still functions identically (regression check after multi-sink refactor).
@@ -350,17 +350,17 @@ checkbox, stamp date/version, add notes to the "Log").
 - Removing a chat from the launcher list calls `controller.dropTab(id)` — the on-disk session is preserved, so the user can always re-open it from History (per D5).
 - **Panel toolbar**: every chat editor panel now has a small toolbar at the top with `+ New chat` and `📜 History` buttons, so you don't have to jump back to the launcher to spawn a sibling chat or browse old sessions.
 - **Controller upgrades**: panel registry (`Map<tabId, panel>`), `setPanelOpener(...)` factory, `openOrFocusPanel`, `dropTab`, `computeLauncherState()`, `onLauncherStateChanged` event. `_createTab` now auto-opens an editor panel via the registered opener.
-- **Commands**: `pi-agent.newChat` and `pi-agent.createTab` both create a tab and open a panel for it. `pi-agent.focusChat` reveals the active panel (or the launcher if none). `pi-agent.openInEditor` removed (no longer needed). `pi-agent.showSessions` now reveals the launcher.
+- **Commands**: `pi-code.newChat` and `pi-code.createTab` both create a tab and open a panel for it. `pi-code.focusChat` reveals the active panel (or the launcher if none). `pi-code.openInEditor` removed (no longer needed). `pi-code.showSessions` now reveals the launcher.
 - **Deleted**: `src/providers/sidebar.ts` (replaced by `launcher-view.ts`). The chat-in-sidebar code path is gone.
 - **Webview/main.ts** preserves backwards-compatibility: in panel mode, `.header` is repurposed as the panel toolbar (instead of the tab strip). Sidebar mode (the now-removed chat-in-sidebar UX) still works in code, but no longer reachable since `LauncherView` doesn't load `webview/main.js`.
-- View type for editor panels remains `pi-agent.chatPanel`; serializer untouched, so 0.2.2 panels restore cleanly after upgrade.
+- View type for editor panels remains `pi-code.chatPanel`; serializer untouched, so 0.2.2 panels restore cleanly after upgrade.
 - `npm run compile` + `npx tsc --noEmit` clean. Unit tests: 22 passed / 3 pre-existing failures (unchanged).
 - Open question Q2 (Esc / global commands targeting last-focused panel rather than `_activeTabId`) intentionally left for a follow-up — current commands hit `controller.activeTabId`, which is "good enough" but doesn't track which editor panel the user has focus on. Acceptable v1.
 - Pending before ticking §8: F5 sweep (especially: session history persistence, drag-to-new-window, reload restore) + `deploy:minor` to publish 0.3.0.
 
 ### 2026-05-07 — Commit 3 shipped as 0.3.0 — migration complete
 
-- `npm run deploy:minor` clean. `pi-agent-0.3.0.vsix` (39.36 MB, 8 files in `out/`) packaged and installed.
+- `npm run deploy:minor` clean. `pi-code-0.3.0.vsix` (39.36 MB, 8 files in `out/`) packaged and installed.
 - CHANGELOG stamped: `[0.3.0] - 2026-05-07`. Three published versions trace the migration: 0.2.1 (controller refactor), 0.2.2 (panels alongside sidebar), 0.3.0 (launcher).
 - All three checkboxes in §8 ticked; the Sidebar-WebviewView → Editor-WebviewPanel migration is functionally done.
 - Smoke tests for the user to run after Reload Window:
@@ -370,5 +370,5 @@ checkbox, stamp date/version, add notes to the "Log").
   - "×" on a launcher row removes it from the list but the session remains under History.
 - **Follow-ups parked** (not blocking 0.3.0):
   - Q1 — unread / streaming badges per launcher row already present, but could be more prominent.
-  - Q2 — global commands (`pi-agent.abort` / Esc, `pi-agent.selectModel`, `pi-agent.toggleThinking`) still target `controller.activeTabId` instead of the user's currently-focused panel. Wire `panel.onDidChangeViewState` → `controller.setActive(tabId)` to fix.
+  - Q2 — global commands (`pi-code.abort` / Esc, `pi-code.selectModel`, `pi-code.toggleThinking`) still target `controller.activeTabId` instead of the user's currently-focused panel. Wire `panel.onDidChangeViewState` → `controller.setActive(tabId)` to fix.
   - Cleanup — `webview/main.ts` still contains the now-unreachable sidebar-mode tab strip rendering. Safe to delete in a follow-up patch.

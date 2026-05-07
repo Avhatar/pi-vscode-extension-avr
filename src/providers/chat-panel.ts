@@ -4,11 +4,11 @@ import { ChatController, ChatViewSink } from '../controllers/chat-controller';
 
 /**
  * View type used both for created panels and for the panel serializer.
- * Distinct from the sidebar view id (`pi-agent.chat`) to keep the two
+ * Distinct from the sidebar view id (`pi-code.chat`) to keep the two
  * registrations cleanly separated even though they share the same webview
  * bundle.
  */
-export const CHAT_PANEL_VIEW_TYPE = 'pi-agent.chatPanel';
+export const CHAT_PANEL_VIEW_TYPE = 'pi-code.chatPanel';
 
 /**
  * An editor-area webview panel bound to exactly one chat tab. The panel
@@ -41,7 +41,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         this._tabId = tabId;
         this._controller = controller;
         this._extensionUri = extensionUri;
-        this._panel.iconPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'pi-icon-full.png');
+        this._panel.iconPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'pi-code-icon-full.png');
 
         this._panel.webview.options = {
             enableScripts: true,
@@ -114,7 +114,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <link rel="stylesheet" href="${styleUri}">
-    <title>Pi Agent</title>
+    <title>Pi Code</title>
 </head>
 <body data-mode="panel">
     <div id="app"
@@ -129,7 +129,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
 
 /**
  * Create a fresh editor-tab panel for an existing chat tab. Used by the
- * `pi-agent.openInEditor` command.
+ * `pi-code.openInEditor` command.
  */
 export function createChatPanel(
     tabId: string,
@@ -137,7 +137,7 @@ export function createChatPanel(
     extensionUri: vscode.Uri,
     column: vscode.ViewColumn = vscode.ViewColumn.Active,
 ): ChatPanel {
-    const title = formatPanelTitle(controller.getTabName(tabId) ?? 'Pi Agent');
+    const title = formatPanelTitle(controller.getTabName(tabId) ?? 'Pi Code');
     const panel = vscode.window.createWebviewPanel(
         CHAT_PANEL_VIEW_TYPE,
         title,
@@ -152,7 +152,7 @@ export function createChatPanel(
 }
 
 function formatPanelTitle(name: string): string {
-    const title = name.trim() || 'Pi Agent';
+    const title = name.trim() || 'Pi Code';
     return title.length > 20 ? `${title.slice(0, 19)}…` : title;
 }
 
