@@ -12,6 +12,9 @@ const iconsBaseUri = document.getElementById('app')?.dataset.iconsUri ?? '';
 
 // ── State ──
 
+// Per-tab draft text (unsent input preserved across tab switches)
+const draftTexts = new Map<string, string>();
+
 const state: {
     messages: any[];
     isStreaming: boolean;
@@ -155,6 +158,16 @@ function handleConfirmResult(action: string, confirmed: boolean, payload?: any):
 
 function applyStateSync(s: SerializedAgentState): void {
     const prevTab = state.activeTabId;
+    const incomingTabId = s.activeTabId ?? '';
+
+    // Save draft for the outgoing tab before we switch
+    if (prevTab && prevTab !== incomingTabId && skeletonBuilt) {
+        const inputEl = document.getElementById('input') as HTMLTextAreaElement | null;
+        if (inputEl) {
+            draftTexts.set(prevTab, inputEl.value);
+        }
+    }
+
     state.messages = s.messages ?? [];
     state.isStreaming = s.isStreaming;
     state.model = s.model;
@@ -175,8 +188,24 @@ function applyStateSync(s: SerializedAgentState): void {
     state.queuedMessages = s.queuedMessages ?? [];
     const tabSwitched = prevTab !== state.activeTabId;
 
+    // Purge drafts for tabs that no longer exist
+    const liveTabIds = new Set(state.tabs.map((t: TabInfo) => t.id));
+    for (const id of draftTexts.keys()) {
+        if (!liveTabIds.has(id)) draftTexts.delete(id);
+    }
+
     if (tabSwitched || !skeletonBuilt) {
         render();
+        // Restore saved draft for the newly active tab
+        const inputEl = document.getElementById('input') as HTMLTextAreaElement | null;
+        if (inputEl) {
+            const draft = draftTexts.get(state.activeTabId) ?? '';
+            if (draft) {
+                inputEl.value = draft;
+                inputEl.style.height = 'auto';
+                inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+            }
+        }
         userHasScrolled = false;
         scrollToBottom(true);
         updateScrollButton();
@@ -1901,6 +1930,7 @@ function sendMessage(): void {
     if (!text) return;
     input.value = '';
     input.style.height = 'auto';
+    draftTexts.delete(state.activeTabId);
     userHasScrolled = false;
     updateScrollButton();
     vscode.postMessage({ type: 'prompt', text });

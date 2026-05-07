@@ -9,5 +9,8 @@ tsconfig.json
 esbuild.js
 TODO.md
 AGENTS.md
+CHANGELOG.md
+scripts/**
+.pi/**
 *.map
 *.vsix
