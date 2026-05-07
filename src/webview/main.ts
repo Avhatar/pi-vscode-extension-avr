@@ -111,6 +111,9 @@ function handleMessage(msg: ServerMessage): void {
             }
             if (msg.thinkingLevel) state.thinkingLevel = msg.thinkingLevel;
             updateFooterModel();
+            if (state.messages.length === 0 && !state.isStreaming) {
+                updateMessages();
+            }
             if (pendingModelPicker) {
                 pendingModelPicker = false;
                 showModelPicker();
@@ -695,10 +698,19 @@ function dismissSteerToast(): void {
 
 function buildWelcome(): HTMLElement {
     const w = el('div', 'welcome');
+    const hasModels = (state.availableModels?.length ?? 0) > 0;
+    const noAuthBanner = hasModels ? '' : `
+        <div class="welcome-no-auth">
+            <div class="welcome-no-auth-title">No models available yet</div>
+            <div class="welcome-no-auth-text">Add an API key or sign in with a subscription account (ChatGPT, Claude, Copilot) to unlock models.</div>
+            <button class="welcome-no-auth-btn" id="welcome-open-settings">Open Settings</button>
+        </div>
+    `;
     w.innerHTML = `
         <div class="welcome-icon">&pi;</div>
         <div class="welcome-title">Pi Agent</div>
         <div class="welcome-subtitle">Ask anything. Pi can read, write, and execute code for you.</div>
+        ${noAuthBanner}
         <div class="welcome-hints">
             <div class="welcome-hint">Type a message to start</div>
             <div class="welcome-hint"><kbd>Ctrl+Shift+L</kbd> Focus chat</div>
@@ -706,6 +718,12 @@ function buildWelcome(): HTMLElement {
             <div class="welcome-hint"><kbd>Esc</kbd> Stop generation</div>
         </div>
     `;
+    if (!hasModels) {
+        const btn = w.querySelector('#welcome-open-settings');
+        btn?.addEventListener('click', () => {
+            vscode.postMessage({ type: 'openSettings' });
+        });
+    }
     return w;
 }
 
@@ -973,10 +991,16 @@ function renderMessage(msg: any, index: number, turnNumber?: number): HTMLElemen
             checkpointBtn.innerHTML = '&#8634;';
             wrapper.appendChild(checkpointBtn);
         }
-        const text = extractText(msg);
-        if (text) {
+        const rawText = extractText(msg);
+        const { skillName, userText } = parseSkillFromUserMessage(rawText);
+        if (skillName) {
+            const badge = el('span', 'skill-badge');
+            badge.textContent = `/skill:${skillName}`;
+            wrapper.appendChild(badge);
+        }
+        if (userText) {
             const content = el('div', 'message-content');
-            content.innerHTML = renderMarkdown(text);
+            content.innerHTML = renderMarkdown(userText);
             wrapper.appendChild(content);
         }
         group.appendChild(wrapper);
@@ -1746,8 +1770,34 @@ function showError(message: string): void {
     if (!container) return;
     const errEl = el('div', 'error-message');
     errEl.textContent = message;
+
+    if (looksLikeAuthError(message)) {
+        const action = el('button', 'error-action');
+        action.textContent = 'Open Settings';
+        action.addEventListener('click', () => {
+            vscode.postMessage({ type: 'openSettings' });
+        });
+        errEl.appendChild(action);
+    }
+
     container.appendChild(errEl);
     scrollToBottom();
+}
+
+function looksLikeAuthError(message: string): boolean {
+    const m = message.toLowerCase();
+    return (
+        m.includes('api key') ||
+        m.includes('apikey') ||
+        m.includes('unauthorized') ||
+        m.includes('authentic') ||
+        m.includes('credentials') ||
+        m.includes('not signed in') ||
+        m.includes('no auth') ||
+        m.includes('oauth') ||
+        m.includes('sign in') ||
+        m.includes('login required')
+    );
 }
 
 function updateStreamingUI(): void {
@@ -2127,6 +2177,12 @@ function extractThinking(msg: any): string {
             .join('');
     }
     return msg.thinking ?? '';
+}
+
+function parseSkillFromUserMessage(text: string): { skillName: string | null; userText: string } {
+    const match = text.match(/^<skill name="([^"]+)" location="[^"]*">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/);
+    if (!match) return { skillName: null, userText: text };
+    return { skillName: match[1], userText: match[2]?.trim() ?? '' };
 }
 
 function extractText(msg: any): string {

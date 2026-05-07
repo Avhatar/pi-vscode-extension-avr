@@ -4,6 +4,13 @@ export interface ContextUsageInfo {
     percent: number | null;
 }
 
+export interface OAuthProviderInfo {
+    id: string;
+    name: string;
+    signedIn: boolean;
+    usesCallbackServer: boolean;
+}
+
 export interface SettingsData {
     apiProvider: string;
     apiBaseUrl: string;
@@ -16,7 +23,16 @@ export interface SettingsData {
     autoSaveSessions: boolean;
     sessionStoragePath: string;
     contextUsageWarningThreshold: number;
+    oauthProviders: OAuthProviderInfo[];
 }
+
+export type OAuthFlowState =
+    | { kind: 'idle' }
+    | { kind: 'starting'; message?: string }
+    | { kind: 'awaitingBrowser'; url: string; instructions?: string; promptForCode?: { message: string; placeholder?: string; allowEmpty?: boolean } }
+    | { kind: 'progress'; message: string }
+    | { kind: 'success' }
+    | { kind: 'error'; message: string };
 
 export interface ToolCallPendingInfo {
     toolCallId: string;
@@ -125,7 +141,11 @@ export type SettingsClientMessage =
     | { type: 'updateSetting'; key: string; value: any }
     | { type: 'setApiKey'; provider: string; key: string }
     | { type: 'clearApiKey'; provider: string }
-    | { type: 'getSkills' };
+    | { type: 'getSkills' }
+    | { type: 'oauthLogin'; providerId: string }
+    | { type: 'oauthLogout'; providerId: string }
+    | { type: 'oauthCancel'; providerId: string }
+    | { type: 'oauthSubmitCode'; providerId: string; code: string };
 
 // Extension -> Webview messages
 export type ServerMessage =
@@ -148,4 +168,5 @@ export type SettingsServerMessage =
     | { type: 'settings'; data: SettingsData }
     | { type: 'settingChanged'; key: string; value: any }
     | { type: 'skills'; skills: SkillInfo[] }
+    | { type: 'oauthState'; providerId: string; state: OAuthFlowState }
     | { type: 'error'; message: string };

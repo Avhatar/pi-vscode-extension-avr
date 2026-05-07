@@ -13,6 +13,13 @@ const KNOWN_PROVIDERS = [
 let cached: AuthStorage | undefined;
 let cachedSecrets: vscode.SecretStorage | undefined;
 
+const _onAuthChanged = new vscode.EventEmitter<void>();
+export const onAuthChanged = _onAuthChanged.event;
+
+export function notifyAuthChanged(): void {
+    _onAuthChanged.fire();
+}
+
 export async function getAuthStorage(secrets?: vscode.SecretStorage): Promise<AuthStorage> {
     if (cached) {
         if (secrets) {
@@ -31,6 +38,9 @@ export async function getAuthStorage(secrets?: vscode.SecretStorage): Promise<Au
 }
 
 export async function reloadCredentials(): Promise<void> {
+    if (cached) {
+        cached.reload();
+    }
     if (cached && cachedSecrets) {
         await applySecretsToStorage(cached, cachedSecrets);
     }

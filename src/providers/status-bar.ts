@@ -5,6 +5,8 @@ export class StatusBarManager implements vscode.Disposable {
     private _item: vscode.StatusBarItem;
     private _session: PiSessionManager;
     private _unsubscribe: (() => void) | undefined;
+    /** Locally tracked flag – SDK's isStreaming lags behind agent_end. */
+    private _isStreaming = false;
 
     constructor(session: PiSessionManager) {
         this._session = session;
@@ -14,6 +16,11 @@ export class StatusBarManager implements vscode.Disposable {
         this._item.show();
 
         this._unsubscribe = session.events.onAll((event) => {
+            if (event.type === 'agent_start') {
+                this._isStreaming = true;
+            } else if (event.type === 'agent_end') {
+                this._isStreaming = false;
+            }
             if (
                 event.type === 'agent_start' ||
                 event.type === 'agent_end' ||
@@ -27,7 +34,7 @@ export class StatusBarManager implements vscode.Disposable {
 
     private _update(): void {
         const model = this._session.getCurrentModel();
-        const isStreaming = this._session.session?.isStreaming ?? false;
+        const isStreaming = this._isStreaming;
         const icon = isStreaming ? '$(loading~spin)' : '$(hubot)';
         const name = model ? (model.name ?? model.id) : 'No model';
         this._item.text = `${icon} Pi: ${name}`;

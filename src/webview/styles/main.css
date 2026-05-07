@@ -349,6 +349,17 @@ body {
     position: relative;
 }
 
+.skill-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--badge-bg);
+    color: var(--badge-fg);
+    margin-bottom: 6px;
+}
+
 .message-assistant {
     padding: 0;
 }
@@ -1365,6 +1376,54 @@ body {
     background: rgba(244, 135, 113, 0.08);
     border-left: 3px solid var(--error-fg);
     margin: 4px 0;
+}
+.error-action {
+    display: block;
+    margin-top: 6px;
+    padding: 4px 10px;
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+    border: none;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.error-action:hover {
+    background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.welcome-no-auth {
+    margin: 16px auto;
+    padding: 12px 14px;
+    background: rgba(55, 148, 255, 0.08);
+    border: 1px solid rgba(55, 148, 255, 0.25);
+    border-radius: 6px;
+    text-align: left;
+    max-width: 320px;
+}
+.welcome-no-auth-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vscode-editor-foreground, #ccc);
+    margin-bottom: 4px;
+}
+.welcome-no-auth-text {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground, #999);
+    line-height: 1.4;
+    margin-bottom: 8px;
+}
+.welcome-no-auth-btn {
+    padding: 4px 12px;
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+    border: none;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.welcome-no-auth-btn:hover {
+    background: var(--vscode-button-hoverBackground, #1177bb);
 }
 
 /* ── Steer toast ── */

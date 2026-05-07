@@ -7,6 +7,32 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-07
+
+### Added
+- Sign-in via OAuth in the settings panel: ChatGPT (Plus/Pro/Codex), Anthropic Claude, GitHub Copilot, Google Gemini CLI, Antigravity. Unlocks subscription-only models (e.g. GPT-5.1 Codex) without leaving VS Code.
+- Manual authorization-code paste field shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
+- Welcome screen banner with a direct "Open Settings" button when no models are available yet.
+
+### Changed
+- Auth-related errors in the chat now include an "Open Settings" shortcut.
+- Model list refreshes automatically after a successful OAuth login or logout — no window reload required.
+
+## [0.1.6] - 2026-05-07
+
+### Fixed
+- Skill text no longer floods the chat window. Skill blocks are stripped from user messages and replaced with a compact `/skill:name` badge; only the user's own text is shown.
+
+## [0.1.5] - 2026-05-07
+
+### Fixed
+- Long user messages (e.g. skill text) filling the entire chat window and blocking agent responses. User messages now collapse at 150px with a "Show more" / "Show less" toggle.
+
+## [0.1.4] - 2026-05-07
+
+### Fixed
+- Agent appearing stuck after completing a request (spinning indicator wouldn't stop until switching tabs). The SDK's `isStreaming` flag lags behind the `agent_end` event; now tracked locally.
+
 ## [0.1.3] - 2026-05-07
 
 ### Added

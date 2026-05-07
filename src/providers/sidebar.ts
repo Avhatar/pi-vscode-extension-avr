@@ -3,6 +3,7 @@ import { PiSessionManager } from '../pi/session';
 import type { ClientMessage, ServerMessage, TabInfo } from '../shared/protocol';
 import { DiffManager } from './diff';
 import { CheckpointManager } from './checkpoint';
+import { onAuthChanged } from '../pi/auth';
 
 interface MessageMeta {
     thinkingDurationSec: number;
@@ -31,6 +32,8 @@ interface TabState {
     hasNotification: boolean;
     pendingApprovals: Map<string, PendingApproval>;
     queuedMessages: string[];
+    /** Locally tracked streaming flag – the SDK's isStreaming lags behind agent_end. */
+    isStreamingLocal: boolean;
 }
 
 let tabIdCounter = 0;
@@ -62,6 +65,7 @@ function makeTabState(
         hasNotification: false,
         pendingApprovals: new Map(),
         queuedMessages: [],
+        isStreamingLocal: false,
     };
 }
 
@@ -79,6 +83,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _tabs = new Map<string, TabState>();
     private _activeTabId = '';
     private _tabSubscriptions = new Map<string, (() => void)[]>();
+    private _authChangedSubscription?: vscode.Disposable;
 
     constructor(
         extensionUri: vscode.Uri,
@@ -97,6 +102,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._tabs.set(id, tab);
         this._activeTabId = id;
         this._subscribeTab(tab);
+
+        this._authChangedSubscription = onAuthChanged(() => {
+            this._broadcastModels();
+        });
+    }
+
+    private _broadcastModels(): void {
+        const tab = this._activeTab;
+        if (!tab) return;
+        const models = tab.session.getModels();
+        const current = tab.session.getCurrentModel();
+        const thinkingLevel = tab.session.getThinkingLevel();
+        this._post({ type: 'models', models, current, thinkingLevel });
     }
 
     private get _activeTab(): TabState {
@@ -141,6 +159,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 for (const unsub of unsubs) unsub();
             }
             this._tabSubscriptions.clear();
+            this._authChangedSubscription?.dispose();
+            this._authChangedSubscription = undefined;
         });
 
         this._post({ type: 'ready' });
@@ -189,6 +209,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             tab.thinkingStartTime = 0;
             tab.streamingThinkingDuration = 0;
             tab.agentStartTime = Date.now();
+            tab.isStreamingLocal = true;
             if (isActive) {
                 vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
             }
@@ -220,6 +241,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             tab.thinkingStartTime = 0;
             tab.streamingThinkingDuration = 0;
             tab.agentStartTime = 0;
+            tab.isStreamingLocal = false;
             if (isActive) {
                 vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', false);
             } else {
@@ -318,6 +340,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         if (!tab) return;
 
         const state = tab.session.serializeState();
+        // Override isStreaming with our locally tracked flag because the SDK
+        // sets session.isStreaming = false only AFTER the agent_end listener
+        // returns (in finishRun), so reading it here during agent_end would
+        // still see `true` and the webview would think the agent is still working.
+        state.isStreaming = tab.isStreamingLocal;
         if (tab.suspendedMessages.length > 0) {
             state.messages = [
                 ...state.messages,
@@ -355,7 +382,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             id,
             name: tab.name,
             isActive: id === this._activeTabId,
-            isStreaming: tab.session.session?.isStreaming ?? false,
+            isStreaming: tab.isStreamingLocal,
             hasNotification: tab.hasNotification,
         }));
     }
@@ -439,6 +466,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.thinkingStartTime = 0;
                     tab.streamingThinkingDuration = 0;
                     tab.agentStartTime = 0;
+                    tab.isStreamingLocal = false;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
                     this.sendStateSync();
@@ -455,6 +483,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.thinkingStartTime = 0;
                     tab.streamingThinkingDuration = 0;
                     tab.agentStartTime = 0;
+                    tab.isStreamingLocal = false;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
                     tab.name = 'New Agent'; // reset so _updateTabName re-derives from first message
@@ -636,7 +665,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         const tab = this._activeTab;
         tab.hasNotification = false;
-        if (tab.session.session?.isStreaming) {
+        if (tab.isStreamingLocal) {
             vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
         } else {
             vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', false);

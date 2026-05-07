@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
-import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo } from '../shared/protocol';
+import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo, OAuthProviderInfo } from '../shared/protocol';
+import { getAuthStorage, notifyAuthChanged } from '../pi/auth';
+import { refreshModelRegistry } from '../pi/models';
 
 const API_KEY_PREFIX = 'pi-agent.apiKey.';
+
+interface OAuthFlow {
+    resolveCode: (code: string) => void;
+    rejectCode: (err: Error) => void;
+}
 
 export class SettingsPanel {
     private static _instance: SettingsPanel | undefined;
@@ -9,6 +16,7 @@ export class SettingsPanel {
     private _extensionUri: vscode.Uri;
     private _secrets: vscode.SecretStorage;
     private _disposables: vscode.Disposable[] = [];
+    private _oauthFlows = new Map<string, OAuthFlow>();
 
     private constructor(
         panel: vscode.WebviewPanel,
@@ -77,6 +85,18 @@ export class SettingsPanel {
                 case 'getSkills':
                     await this._sendSkills();
                     break;
+                case 'oauthLogin':
+                    await this._startOAuthLogin(msg.providerId);
+                    break;
+                case 'oauthLogout':
+                    await this._oauthLogout(msg.providerId);
+                    break;
+                case 'oauthCancel':
+                    this._cancelOAuth(msg.providerId);
+                    break;
+                case 'oauthSubmitCode':
+                    this._submitOAuthCode(msg.providerId, msg.code);
+                    break;
             }
         } catch (err: any) {
             this._post({ type: 'error', message: err.message ?? String(err) });
@@ -99,6 +119,7 @@ export class SettingsPanel {
         }
 
         const authMethod = this._detectAuthMethod(provider, apiKeySet);
+        const oauthProviders = await this._getOAuthProviders();
 
         const data: SettingsData = {
             apiProvider: provider,
@@ -112,9 +133,132 @@ export class SettingsPanel {
             autoSaveSessions: config.get<boolean>('autoSaveSessions', true),
             sessionStoragePath: config.get<string>('sessionStoragePath', ''),
             contextUsageWarningThreshold: config.get<number>('contextUsageWarningThreshold', 80),
+            oauthProviders,
         };
 
         this._post({ type: 'settings', data });
+    }
+
+    private async _getOAuthProviders(): Promise<OAuthProviderInfo[]> {
+        try {
+            const authStorage = await getAuthStorage(this._secrets);
+            const providers = authStorage.getOAuthProviders();
+            return providers.map((p: any) => ({
+                id: String(p.id),
+                name: String(p.name ?? p.id),
+                signedIn: authStorage.has(String(p.id)),
+                usesCallbackServer: !!p.usesCallbackServer,
+            }));
+        } catch {
+            return [];
+        }
+    }
+
+    private async _startOAuthLogin(providerId: string): Promise<void> {
+        if (this._oauthFlows.has(providerId)) {
+            this._post({
+                type: 'oauthState',
+                providerId,
+                state: { kind: 'error', message: 'Login already in progress for this provider.' },
+            });
+            return;
+        }
+
+        const authStorage = await getAuthStorage(this._secrets);
+
+        let resolveCode!: (code: string) => void;
+        let rejectCode!: (err: Error) => void;
+        const codePromise = new Promise<string>((resolve, reject) => {
+            resolveCode = resolve;
+            rejectCode = reject;
+        });
+        this._oauthFlows.set(providerId, { resolveCode, rejectCode });
+
+        this._post({
+            type: 'oauthState',
+            providerId,
+            state: { kind: 'starting' },
+        });
+
+        const callbacks = {
+            onAuth: (info: { url: string; instructions?: string }) => {
+                this._post({
+                    type: 'oauthState',
+                    providerId,
+                    state: {
+                        kind: 'awaitingBrowser',
+                        url: info.url,
+                        instructions: info.instructions,
+                        promptForCode: {
+                            message: 'After logging in, paste the authorization code or callback URL here:',
+                            placeholder: 'Paste code or full callback URL',
+                            allowEmpty: false,
+                        },
+                    },
+                });
+                vscode.env.openExternal(vscode.Uri.parse(info.url)).then(undefined, () => {
+                    // Browser launch failed; UI still shows the URL for manual copy.
+                });
+            },
+            onPrompt: async (_prompt: { message: string; placeholder?: string; allowEmpty?: boolean }) => {
+                // Fallback path used by some providers when no onManualCodeInput is provided.
+                // We always provide onManualCodeInput, so this rarely fires — return the same promise.
+                return codePromise;
+            },
+            onProgress: (message: string) => {
+                this._post({
+                    type: 'oauthState',
+                    providerId,
+                    state: { kind: 'progress', message },
+                });
+            },
+            onManualCodeInput: () => codePromise,
+        };
+
+        try {
+            await authStorage.login(providerId as any, callbacks);
+            this._post({
+                type: 'oauthState',
+                providerId,
+                state: { kind: 'success' },
+            });
+            await refreshModelRegistry();
+            notifyAuthChanged();
+            await this._sendSettings();
+        } catch (err: any) {
+            const message = err?.message ?? String(err);
+            this._post({
+                type: 'oauthState',
+                providerId,
+                state: { kind: 'error', message },
+            });
+            // Refresh state so UI shows accurate signed-in status (login may have partially persisted).
+            await this._sendSettings();
+        } finally {
+            this._oauthFlows.delete(providerId);
+        }
+    }
+
+    private async _oauthLogout(providerId: string): Promise<void> {
+        const authStorage = await getAuthStorage(this._secrets);
+        authStorage.logout(providerId);
+        await refreshModelRegistry();
+        notifyAuthChanged();
+        await this._sendSettings();
+    }
+
+    private _cancelOAuth(providerId: string): void {
+        const flow = this._oauthFlows.get(providerId);
+        if (flow) {
+            flow.rejectCode(new Error('Login cancelled'));
+        }
+    }
+
+    private _submitOAuthCode(providerId: string, code: string): void {
+        const flow = this._oauthFlows.get(providerId);
+        if (flow) {
+            flow.resolveCode(code);
+        }
     }
 
     private async _sendSkills(): Promise<void> {
@@ -168,6 +312,10 @@ export class SettingsPanel {
 
     private _dispose(): void {
         SettingsPanel._instance = undefined;
+        for (const [, flow] of this._oauthFlows) {
+            flow.rejectCode(new Error('Settings panel closed'));
+        }
+        this._oauthFlows.clear();
         for (const d of this._disposables) d.dispose();
         this._disposables = [];
     }

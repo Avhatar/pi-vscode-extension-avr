@@ -1,4 +1,4 @@
-import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo } from '../shared/protocol';
+import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo, OAuthFlowState } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: SettingsClientMessage): void;
@@ -10,6 +10,7 @@ const vscode = acquireVsCodeApi();
 
 let currentSettings: SettingsData | null = null;
 let loadedSkills: SkillInfo[] = [];
+const oauthFlowStates = new Map<string, OAuthFlowState>();
 
 window.addEventListener('message', (event) => {
     const msg = event.data as SettingsServerMessage;
@@ -27,6 +28,15 @@ window.addEventListener('message', (event) => {
         case 'skills':
             loadedSkills = msg.skills;
             renderSkillsSection();
+            break;
+        case 'oauthState':
+            oauthFlowStates.set(msg.providerId, msg.state);
+            renderOAuthSection();
+            if (msg.state.kind === 'success') {
+                showToast(`Signed in successfully.`, 'info');
+            } else if (msg.state.kind === 'error') {
+                showToast(msg.state.message, 'error');
+            }
             break;
         case 'error':
             showToast(msg.message, 'error');
@@ -57,6 +67,10 @@ function render(data: SettingsData): void {
             'Custom endpoint URL for proxies or self-hosted models. Leave empty for default.'),
         buildAuthIndicator(data.authMethod),
     ]));
+
+    const oauthSection = buildSection('Sign in with subscription accounts', [buildOAuthPlaceholder()]);
+    oauthSection.id = 'oauth-section';
+    container.appendChild(oauthSection);
 
     container.appendChild(buildSection('Default Model & Thinking', [
         buildTextInput('defaultModel', 'Default Model', data.defaultModel,
@@ -101,6 +115,7 @@ function render(data: SettingsData): void {
     app.appendChild(container);
     bindEvents();
     renderSkillsSection();
+    renderOAuthSection();
 }
 
 function buildSection(title: string, children: HTMLElement[]): HTMLElement {
@@ -266,6 +281,160 @@ function buildSkillsPlaceholder(): HTMLElement {
     return row;
 }
 
+function buildOAuthPlaceholder(): HTMLElement {
+    const row = el('div', 'setting-row');
+    row.id = 'oauth-list';
+    row.innerHTML = `<p class="setting-description">Loading sign-in providers...</p>`;
+    return row;
+}
+
+const OAUTH_DESCRIPTIONS: Record<string, string> = {
+    'openai-codex': 'Use your ChatGPT Plus / Pro / Codex subscription. Unlocks GPT-5.1, GPT-5.2 and Codex models.',
+    'anthropic': 'Use your Claude Pro / Max subscription instead of an Anthropic API key.',
+    'github-copilot': 'Use your GitHub Copilot subscription as a model provider.',
+    'google-gemini-cli': 'Use Google Cloud Code Assist credentials (gemini CLI flow).',
+    'google-antigravity': 'Use Antigravity (Gemini 3, Claude, GPT-OSS via Google Cloud).',
+};
+
+function renderOAuthSection(): void {
+    const container = document.getElementById('oauth-list');
+    if (!container) return;
+
+    const providers = currentSettings?.oauthProviders ?? [];
+    if (providers.length === 0) {
+        container.innerHTML = `<p class="setting-description">No OAuth providers registered by the Pi SDK.</p>`;
+        return;
+    }
+
+    container.innerHTML = '';
+    for (const p of providers) {
+        const flow = oauthFlowStates.get(p.id) ?? { kind: 'idle' };
+        container.appendChild(buildOAuthCard(p, flow));
+    }
+    bindOAuthEvents();
+}
+
+function buildOAuthCard(p: { id: string; name: string; signedIn: boolean; usesCallbackServer: boolean }, flow: OAuthFlowState): HTMLElement {
+    const card = el('div', 'oauth-card');
+    const description = OAUTH_DESCRIPTIONS[p.id] ?? '';
+    const inProgress = flow.kind === 'starting' || flow.kind === 'awaitingBrowser' || flow.kind === 'progress';
+
+    let statusBadge = '';
+    if (p.signedIn) {
+        statusBadge = `<span class="key-status set">Signed in</span>`;
+    } else if (inProgress) {
+        statusBadge = `<span class="key-status pending">Signing in...</span>`;
+    } else {
+        statusBadge = `<span class="key-status unset">Not signed in</span>`;
+    }
+
+    let actions = '';
+    if (p.signedIn && !inProgress) {
+        actions = `<button class="setting-btn danger" data-oauth-logout="${escAttr(p.id)}">Sign out</button>`;
+    } else if (inProgress) {
+        actions = `<button class="setting-btn secondary" data-oauth-cancel="${escAttr(p.id)}">Cancel</button>`;
+    } else {
+        actions = `<button class="setting-btn primary" data-oauth-login="${escAttr(p.id)}">Sign in</button>`;
+    }
+
+    let flowDetails = '';
+    if (flow.kind === 'awaitingBrowser') {
+        const instr = flow.instructions ? `<p class="setting-description">${escHtml(flow.instructions)}</p>` : '';
+        const promptMsg = flow.promptForCode?.message ?? '';
+        const placeholder = flow.promptForCode?.placeholder ?? 'Paste authorization code';
+        flowDetails = `
+            <div class="oauth-flow-block">
+                <p class="setting-description">A browser window should have opened. If not, <a href="#" data-oauth-open-url="${escAttr(flow.url)}">open this link manually</a>.</p>
+                ${instr}
+                <p class="setting-description"><strong>${escHtml(promptMsg)}</strong></p>
+                <div class="api-key-input-row">
+                    <input type="text" class="setting-input" data-oauth-code-input="${escAttr(p.id)}" placeholder="${escAttr(placeholder)}">
+                    <button class="setting-btn primary" data-oauth-submit-code="${escAttr(p.id)}">Submit</button>
+                </div>
+            </div>
+        `;
+    } else if (flow.kind === 'progress') {
+        flowDetails = `<p class="setting-description">${escHtml(flow.message)}</p>`;
+    } else if (flow.kind === 'starting') {
+        flowDetails = `<p class="setting-description">Starting authentication flow...</p>`;
+    } else if (flow.kind === 'error') {
+        flowDetails = `<p class="oauth-error-message">${escHtml(flow.message)}</p>`;
+    }
+
+    card.innerHTML = `
+        <div class="oauth-card-header">
+            <div class="oauth-card-name">${escHtml(p.name)}</div>
+            ${statusBadge}
+        </div>
+        ${description ? `<p class="setting-description">${escHtml(description)}</p>` : ''}
+        ${flowDetails}
+        <div class="oauth-card-actions">${actions}</div>
+    `;
+    return card;
+}
+
+function bindOAuthEvents(): void {
+    document.querySelectorAll('[data-oauth-login]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = (btn as HTMLElement).getAttribute('data-oauth-login')!;
+            oauthFlowStates.set(id, { kind: 'starting' });
+            renderOAuthSection();
+            vscode.postMessage({ type: 'oauthLogin', providerId: id });
+        });
+    });
+    document.querySelectorAll('[data-oauth-logout]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = (btn as HTMLElement).getAttribute('data-oauth-logout')!;
+            vscode.postMessage({ type: 'oauthLogout', providerId: id });
+        });
+    });
+    document.querySelectorAll('[data-oauth-cancel]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = (btn as HTMLElement).getAttribute('data-oauth-cancel')!;
+            vscode.postMessage({ type: 'oauthCancel', providerId: id });
+        });
+    });
+    document.querySelectorAll('[data-oauth-submit-code]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = (btn as HTMLElement).getAttribute('data-oauth-submit-code')!;
+            const input = document.querySelector(`[data-oauth-code-input="${cssEscape(id)}"]`) as HTMLInputElement | null;
+            const code = input?.value.trim() ?? '';
+            if (!code) {
+                showToast('Enter the authorization code first.', 'error');
+                return;
+            }
+            vscode.postMessage({ type: 'oauthSubmitCode', providerId: id, code });
+        });
+    });
+    document.querySelectorAll('[data-oauth-open-url]').forEach((link) => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const url = (link as HTMLElement).getAttribute('data-oauth-open-url') ?? '';
+            // Webview can't open external URLs directly, so we ask the user to copy.
+            navigator.clipboard?.writeText(url).then(
+                () => showToast('Auth URL copied to clipboard.', 'info'),
+                () => showToast('Could not copy auth URL.', 'error'),
+            );
+        });
+    });
+    document.querySelectorAll('[data-oauth-code-input]').forEach((input) => {
+        input.addEventListener('keydown', (e) => {
+            if ((e as KeyboardEvent).key === 'Enter') {
+                e.preventDefault();
+                const id = (input as HTMLElement).getAttribute('data-oauth-code-input')!;
+                const code = (input as HTMLInputElement).value.trim();
+                if (code) {
+                    vscode.postMessage({ type: 'oauthSubmitCode', providerId: id, code });
+                }
+            }
+        });
+    });
+}
+
+function cssEscape(s: string): string {
+    return s.replace(/[^a-zA-Z0-9_-]/g, (ch) => `\\${ch}`);
+}
+
 function renderSkillsSection(): void {
     const container = document.getElementById('skills-list');
     if (!container) return;
@@ -400,6 +569,10 @@ function escHtml(s: string): string {
     const div = document.createElement('div');
     div.textContent = s;
     return div.innerHTML;
+}
+
+function escAttr(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 vscode.postMessage({ type: 'getSettings' });

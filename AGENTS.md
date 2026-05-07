@@ -82,6 +82,35 @@ The Pi SDK packages (`@mariozechner/pi-coding-agent`, `@mariozechner/pi-agent-co
 | `src/webview/styles/settings.css` | Settings page styles |
 | `media/icons/` | UI icons (36x36 grayscale PNGs) |
 
+## Versioning & Changelog
+
+The project uses [Semantic Versioning](https://semver.org/) and maintains
+`CHANGELOG.md` in [Keep a Changelog](https://keepachangelog.com/) format.
+
+**Every time you make code changes**, you must add entries to `CHANGELOG.md`
+under `## [Unreleased]` using the appropriate subsections: `Added`, `Changed`,
+`Deprecated`, `Removed`, `Fixed`, `Security`.
+
+Rules:
+- Write entries from the user's perspective, not implementation details.
+- Each entry is one line starting with `- `.
+- Group by type (Added, Changed, Fixed, etc.).
+- Never leave `[Unreleased]` empty before a deploy — the bump script will refuse to run.
+
+When deploying, use one of:
+```bash
+npm run deploy:patch   # bug fixes, small tweaks
+npm run deploy:minor   # new features, backward-compatible
+npm run deploy:major   # breaking changes
+```
+
+These commands automatically:
+1. Validate that `[Unreleased]` has content
+2. Bump version in `package.json`
+3. Stamp `[Unreleased]` → `[x.y.z] - YYYY-MM-DD`
+4. Add a fresh empty `[Unreleased]` section on top
+5. Compile, prune, package VSIX, restore deps, install into VS Code
+
 ## Common Pitfalls
 
 - The webview bundles (`src/webview/`) cannot import `vscode` or Node.js modules. They are browser-only IIFE bundles.

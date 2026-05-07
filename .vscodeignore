@@ -10,6 +10,8 @@ esbuild.js
 TODO.md
 AGENTS.md
 CHANGELOG.md
+CLAUDE.md
+.claude/**
 scripts/**
 .pi/**
 *.map

@@ -2,3 +2,7 @@ out/
 node_modules/
 *.vsix
 .vscode-test/
+
+# Local junction/symlink to .pi/skills — recreated per-machine
+.claude/skills
+

@@ -230,6 +230,55 @@ body {
     background: rgba(244, 135, 113, 0.1);
     color: var(--muted);
 }
+.key-status.pending {
+    background: rgba(55, 148, 255, 0.15);
+    color: var(--link);
+}
+
+/* OAuth cards */
+.oauth-card {
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.oauth-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    gap: 8px;
+}
+.oauth-card-name {
+    font-weight: 600;
+    color: var(--fg);
+    font-size: 13px;
+}
+.oauth-card-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+}
+.oauth-flow-block {
+    margin-top: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+.oauth-flow-block .api-key-input-row {
+    margin-top: 8px;
+}
+.oauth-error-message {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(244, 135, 113, 0.1);
+    border: 1px solid rgba(244, 135, 113, 0.3);
+    border-radius: 4px;
+    color: var(--error-fg);
+    font-size: 12px;
+}
 
 /* Buttons */
 .setting-btn {

@@ -14,6 +14,12 @@ export async function getModelRegistry(): Promise<ModelRegistry> {
     return cached;
 }
 
+export async function refreshModelRegistry(): Promise<void> {
+    if (cached) {
+        cached.refresh();
+    }
+}
+
 export function getAvailableModels(registry: ModelRegistry): ModelInfo[] {
     return registry.getAvailable().map((m) => ({
         provider: String(m.provider),
