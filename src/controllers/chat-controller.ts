@@ -679,11 +679,11 @@ export class ChatController implements vscode.Disposable {
                     const turnIdx = tab.turnCounter;
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
-                    await tab.session.prompt(msg.text);
+                    await tab.session.prompt(msg.text, msg.images);
                     break;
                 }
                 case 'steer':
-                    await tab.session.steer(msg.text);
+                    await tab.session.steer(msg.text, msg.images);
                     break;
                 case 'queueMessage':
                     tab.queuedMessages.push(msg.text);
@@ -706,7 +706,7 @@ export class ChatController implements vscode.Disposable {
                     this.sendStateSync(tab.id);
                     break;
                 case 'followUp':
-                    await tab.session.followUp(msg.text);
+                    await tab.session.followUp(msg.text, msg.images);
                     break;
                 case 'abort':
                     await tab.session.abort();

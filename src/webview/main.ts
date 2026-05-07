@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -25,13 +25,20 @@ const panelTabId: string | undefined = appEl?.dataset.tabId || undefined;
 
 // ── State ──
 
-// Per-tab draft text (unsent input preserved across tab switches)
+// Per-tab draft text and attachments (unsent input preserved across tab switches)
 const draftTexts = new Map<string, string>();
+const draftImages = new Map<string, ImageAttachment[]>();
+let currentImageAttachments: ImageAttachment[] = [];
+
+const SUPPORTED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const MAX_IMAGES_PER_MESSAGE = 5;
+const MAX_IMAGE_DIMENSION = 2000;
+const JPEG_RESIZE_QUALITY = 0.88;
 
 const state: {
     messages: any[];
     isStreaming: boolean;
-    model?: { provider: string; id: string; name?: string };
+    model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
     thinkingLevel?: string;
     tools: string[];
     sessionId?: string;
@@ -46,7 +53,7 @@ const state: {
     rollbackPoint: number | null;
     availableModels: any[];
     modelsLoaded: boolean;
-    recentModels: { provider: string; id: string; name?: string }[];
+    recentModels: { provider: string; id: string; name?: string; supportsImages?: boolean }[];
     tabs: TabInfo[];
     activeTabId: string;
     skills: SkillInfo[];
@@ -126,7 +133,7 @@ function handleMessage(msg: ServerMessage): void {
             state.modelsLoaded = true;
             if (msg.current) {
                 state.model = msg.current;
-                addToRecentModels(msg.current.provider, msg.current.id, msg.current.name);
+                addToRecentModels(msg.current.provider, msg.current.id, msg.current.name, msg.current.supportsImages);
             }
             if (msg.thinkingLevel) state.thinkingLevel = msg.thinkingLevel;
             updateFooterModel();
@@ -192,6 +199,7 @@ function applyStateSync(s: SerializedAgentState): void {
         if (inputEl) {
             draftTexts.set(prevTab, inputEl.value);
         }
+        draftImages.set(prevTab, [...currentImageAttachments]);
     }
 
     state.messages = s.messages ?? [];
@@ -225,10 +233,14 @@ function applyStateSync(s: SerializedAgentState): void {
     for (const id of draftTexts.keys()) {
         if (!liveTabIds.has(id)) draftTexts.delete(id);
     }
+    for (const id of draftImages.keys()) {
+        if (!liveTabIds.has(id)) draftImages.delete(id);
+    }
 
     if (tabSwitched || !skeletonBuilt) {
         render();
         // Restore saved draft for the newly active tab
+        currentImageAttachments = [...(draftImages.get(state.activeTabId) ?? [])];
         const inputEl = document.getElementById('input') as HTMLTextAreaElement | null;
         if (inputEl) {
             const draft = draftTexts.get(state.activeTabId) ?? '';
@@ -238,6 +250,8 @@ function applyStateSync(s: SerializedAgentState): void {
                 inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
             }
         }
+        renderAttachmentPreview();
+        updateInputArea();
         userHasScrolled = false;
         scrollToBottom(true);
         updateScrollButton();
@@ -411,7 +425,7 @@ function render(): void {
     slashMenu.style.display = 'none';
     inputContainer.appendChild(slashMenu);
     const area = el('div', 'input-area');
-    area.innerHTML = `<textarea id="input" placeholder="Ask Pi anything..." rows="1"></textarea>`;
+    area.innerHTML = `<div id="attachment-preview" class="attachment-preview" style="display: none;"></div><textarea id="input" placeholder="Ask Pi anything..." rows="1"></textarea><input id="image-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>`;
     inputContainer.appendChild(area);
     const footer = el('div', 'input-footer');
     inputContainer.appendChild(footer);
@@ -664,14 +678,19 @@ function updateInputArea(): void {
     }
 
     const codexUsageHtml = renderCodexUsage();
+    const attachmentHtml = currentImageAttachments.length > 0
+        ? `<span class="footer-context" title="${currentImageAttachments.length} image attachment${currentImageAttachments.length === 1 ? '' : 's'}">${currentImageAttachments.length} image${currentImageAttachments.length === 1 ? '' : 's'}</span>`
+        : '';
 
     const steerBtnHtml = state.isStreaming
         ? `<button id="btn-steer" class="steer-btn" title="Steer (Ctrl+Enter)"><img class="steer-icon-img" src="${iconsBaseUri}/chevrons.png" alt="steer"></button>`
         : '';
 
     footer.innerHTML = `
+        <button id="btn-attach-image" class="attach-btn" title="Attach image"><img class="attach-icon-img" src="${iconsBaseUri}/folder.png" alt="Attach image"></button>
         <span class="footer-model">${escHtml(modelName)}</span>
         <span class="footer-spacer"></span>
+        ${attachmentHtml}
         ${codexUsageHtml}
         ${contextHtml}
         ${state.isStreaming ? '<button id="btn-abort" class="abort-btn" title="Stop generation (Esc)">&#9632; Stop</button>' : ''}
@@ -683,6 +702,10 @@ function updateInputArea(): void {
     const sendBtn = document.getElementById('btn-send');
     sendBtn?.addEventListener('click', () => {
         if (state.isStreaming) {
+            if (currentImageAttachments.length > 0) {
+                showError('Image attachments cannot be queued while the agent is streaming yet. Send them after the current response finishes.');
+                return;
+            }
             const text = input?.value.trim();
             if (text) {
                 vscode.postMessage({ type: 'queueMessage', text });
@@ -697,6 +720,10 @@ function updateInputArea(): void {
 
     const steerBtn = document.getElementById('btn-steer');
     steerBtn?.addEventListener('click', () => {
+        if (currentImageAttachments.length > 0) {
+            showError('Image attachments cannot be sent as steering messages yet. Send them after the current response finishes.');
+            return;
+        }
         const text = input?.value.trim();
         if (text) {
             vscode.postMessage({ type: 'steer', text });
@@ -707,6 +734,12 @@ function updateInputArea(): void {
 
     const abortBtn = document.getElementById('btn-abort');
     abortBtn?.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
+
+    const attachBtn = document.getElementById('btn-attach-image');
+    attachBtn?.addEventListener('click', () => {
+        const fileInput = document.getElementById('image-file-input') as HTMLInputElement | null;
+        fileInput?.click();
+    });
 
     document.querySelector('.footer-model')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1159,6 +1192,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number): HTMLElemen
             wrapper.appendChild(checkpointBtn);
         }
         const rawText = extractText(msg);
+        const images = extractImages(msg);
         const { skillName, userText } = parseSkillFromUserMessage(rawText);
         if (skillName) {
             const badge = el('span', 'skill-badge');
@@ -1169,6 +1203,9 @@ function renderMessage(msg: any, index: number, turnNumber?: number): HTMLElemen
             const content = el('div', 'message-content');
             content.innerHTML = renderMarkdown(userText);
             wrapper.appendChild(content);
+        }
+        if (images.length > 0) {
+            wrapper.appendChild(buildMessageImageGrid(images));
         }
         group.appendChild(wrapper);
 
@@ -1267,10 +1304,11 @@ function renderStreamingContent(): void {
     if (!container.querySelector('.message')) {
         container.innerHTML = `
             <div class="message message-assistant">
-                <details class="thinking-block active" open id="streaming-thinking" style="display:none">
+                <details class="thinking-block active" id="streaming-thinking" style="display:none">
                     <summary class="thinking-summary">
                         <span class="thinking-indicator"></span>
                         <span class="thinking-label">Thinking...</span>
+                        <span class="thinking-preview"></span>
                         <span class="thinking-chevron">&#9656;</span>
                     </summary>
                     <div class="thinking-content"></div>
@@ -1286,6 +1324,8 @@ function renderStreamingContent(): void {
             thinkingEl.style.display = '';
             const contentEl = thinkingEl.querySelector('.thinking-content');
             if (contentEl) contentEl.innerHTML = renderMarkdown(state.streamingThinking);
+            const previewEl = thinkingEl.querySelector('.thinking-preview');
+            if (previewEl) previewEl.textContent = getThinkingPreview(state.streamingThinking);
             const labelEl = thinkingEl.querySelector('.thinking-label');
             if (state.isThinking) {
                 thinkingEl.classList.add('active');
@@ -1716,6 +1756,7 @@ function buildThinkingBlock(text: string, active: boolean, durationSec?: number)
         <summary class="thinking-summary">
             <span class="thinking-indicator"></span>
             <span class="thinking-label">${label}</span>
+            <span class="thinking-preview">${escHtml(getThinkingPreview(text))}</span>
             <span class="thinking-chevron">&#9656;</span>
         </summary>
         <div class="thinking-content">${renderMarkdown(text)}</div>
@@ -1744,11 +1785,11 @@ function toggleModelPicker(): void {
     showModelPicker();
 }
 
-function addToRecentModels(provider: string, id: string, name?: string): void {
+function addToRecentModels(provider: string, id: string, name?: string, supportsImages?: boolean): void {
     state.recentModels = state.recentModels.filter(
         m => !(m.id === id && m.provider === provider)
     );
-    state.recentModels.unshift({ provider, id, name });
+    state.recentModels.unshift({ provider, id, name, supportsImages });
     if (state.recentModels.length > 5) {
         state.recentModels = state.recentModels.slice(0, 5);
     }
@@ -1846,8 +1887,8 @@ function showModelPicker(): void {
         vscode.postMessage({ type: 'setModel', provider, modelId });
         const matched = state.availableModels.find(m => m.id === modelId && m.provider === provider);
         if (matched) {
-            state.model = { provider, id: modelId, name: matched.name ?? modelId };
-            addToRecentModels(provider, modelId, matched.name ?? modelId);
+            state.model = { provider, id: modelId, name: matched.name ?? modelId, supportsImages: matched.supportsImages };
+            addToRecentModels(provider, modelId, matched.name ?? modelId, matched.supportsImages);
         }
         updateFooterModel();
         closeModelPicker();
@@ -1973,6 +2014,211 @@ function updateStreamingUI(): void {
     container.innerHTML = '';
 }
 
+// ── Image attachments ──
+
+function inferImageMimeType(file: File): string | null {
+    if (SUPPORTED_IMAGE_MIME_TYPES.has(file.type)) return file.type;
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+    if (name.endsWith('.webp')) return 'image/webp';
+    if (name.endsWith('.gif')) return 'image/gif';
+    return null;
+}
+
+function hasImageFiles(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    return Array.from(dataTransfer.items ?? []).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        || Array.from(dataTransfer.files ?? []).some((file) => inferImageMimeType(file) !== null);
+}
+
+async function handleImagePaste(event: ClipboardEvent): Promise<void> {
+    const items = Array.from(event.clipboardData?.items ?? []);
+    const imageFiles = items
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => !!file);
+    if (imageFiles.length === 0) return;
+    event.preventDefault();
+    await addImageFiles(imageFiles);
+}
+
+async function handleImageDrop(event: DragEvent): Promise<void> {
+    const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => inferImageMimeType(file) !== null);
+    if (files.length === 0) return;
+    event.preventDefault();
+    await addImageFiles(files);
+}
+
+async function addImageFiles(files: File[]): Promise<void> {
+    for (const file of files) {
+        if (currentImageAttachments.length >= MAX_IMAGES_PER_MESSAGE) {
+            showError(`You can attach up to ${MAX_IMAGES_PER_MESSAGE} images per message.`);
+            break;
+        }
+        const mimeType = inferImageMimeType(file);
+        if (!mimeType) {
+            showError(`Unsupported image type: ${file.name || file.type || 'unknown file'}`);
+            continue;
+        }
+        try {
+            currentImageAttachments.push(await fileToImageAttachment(file, mimeType));
+        } catch (err: any) {
+            showError(`Could not attach image: ${err?.message ?? String(err)}`);
+        }
+    }
+    draftImages.set(state.activeTabId, [...currentImageAttachments]);
+    renderAttachmentPreview();
+    updateInputArea();
+}
+
+async function fileToImageAttachment(file: File, mimeType: string): Promise<ImageAttachment> {
+    const prepared = await prepareImageForAttachment(file, mimeType);
+    const comma = prepared.dataUrl.indexOf(',');
+    const data = comma >= 0 ? prepared.dataUrl.slice(comma + 1) : prepared.dataUrl;
+    return {
+        type: 'image',
+        data,
+        mimeType: prepared.mimeType,
+        name: file.name || 'pasted-image',
+        size: prepared.size,
+        width: prepared.width,
+        height: prepared.height,
+    };
+}
+
+async function prepareImageForAttachment(file: File, mimeType: string): Promise<{ dataUrl: string; mimeType: string; size: number; width: number; height: number }> {
+    const originalDataUrl = await readFileAsDataUrl(file);
+    const originalDimensions = await getImageDimensions(originalDataUrl);
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(originalDimensions.width, originalDimensions.height));
+    if (scale >= 1) {
+        return {
+            dataUrl: originalDataUrl,
+            mimeType,
+            size: file.size,
+            width: originalDimensions.width,
+            height: originalDimensions.height,
+        };
+    }
+
+    const width = Math.max(1, Math.round(originalDimensions.width * scale));
+    const height = Math.max(1, Math.round(originalDimensions.height * scale));
+    const outputMimeType = chooseResizeMimeType(mimeType);
+    const dataUrl = await resizeImageDataUrl(originalDataUrl, width, height, outputMimeType);
+    const size = estimateDataUrlBytes(dataUrl);
+    return { dataUrl, mimeType: getDataUrlMimeType(dataUrl) ?? outputMimeType, size, width, height };
+}
+
+function chooseResizeMimeType(mimeType: string): string {
+    if (mimeType === 'image/jpeg') return 'image/jpeg';
+    if (mimeType === 'image/webp') return 'image/webp';
+    return 'image/png';
+}
+
+function resizeImageDataUrl(src: string, width: number, height: number, mimeType: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    reject(new Error('Canvas rendering is not available'));
+                    return;
+                }
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL(mimeType, mimeType === 'image/jpeg' || mimeType === 'image/webp' ? JPEG_RESIZE_QUALITY : undefined));
+            } catch (err) {
+                reject(err);
+            }
+        };
+        img.onerror = () => reject(new Error('Could not load image for resizing'));
+        img.src = src;
+    });
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
+        reader.onload = () => resolve(String(reader.result ?? ''));
+        reader.readAsDataURL(file);
+    });
+}
+
+function getImageDimensions(src: string): Promise<{ width: number; height: number }> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        img.onerror = () => reject(new Error('Could not read image dimensions'));
+        img.src = src;
+    });
+}
+
+function renderAttachmentPreview(): void {
+    const preview = document.getElementById('attachment-preview');
+    if (!preview) return;
+    if (currentImageAttachments.length === 0) {
+        preview.innerHTML = '';
+        preview.style.display = 'none';
+        return;
+    }
+    preview.style.display = 'flex';
+    preview.innerHTML = currentImageAttachments.map((img, index) => {
+        const label = img.name || `Image ${index + 1}`;
+        const size = img.size ? ` · ${formatBytes(img.size)}` : '';
+        const dims = img.width && img.height ? ` · ${img.width}×${img.height}` : '';
+        return `<div class="attachment-chip" title="${escAttr(label + size + dims)}">
+            <img class="attachment-thumb" src="data:${escAttr(img.mimeType)};base64,${escAttr(img.data)}" alt="${escAttr(label)}">
+            <span class="attachment-name">${escHtml(label)}</span>
+            <button class="attachment-remove" data-index="${index}" title="Remove image" aria-label="Remove image">×</button>
+        </div>`;
+    }).join('');
+    preview.querySelectorAll('.attachment-remove').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const index = Number((btn as HTMLElement).dataset.index ?? '-1');
+            if (index >= 0 && index < currentImageAttachments.length) {
+                currentImageAttachments.splice(index, 1);
+                draftImages.set(state.activeTabId, [...currentImageAttachments]);
+                renderAttachmentPreview();
+                updateInputArea();
+            }
+        });
+    });
+}
+
+function clearImageAttachments(): void {
+    currentImageAttachments = [];
+    draftImages.delete(state.activeTabId);
+    renderAttachmentPreview();
+    updateInputArea();
+}
+
+function currentModelSupportsImages(): boolean {
+    return state.model?.supportsImages !== false;
+}
+
+function getDataUrlMimeType(dataUrl: string): string | null {
+    const match = dataUrl.match(/^data:([^;,]+)[;,]/);
+    return match?.[1] ?? null;
+}
+
+function estimateDataUrlBytes(dataUrl: string): number {
+    const comma = dataUrl.indexOf(',');
+    const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+    return Math.ceil(base64.length * 3 / 4);
+}
+
+function formatBytes(bytes: number): string {
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} B`;
+}
+
 // ── Events ──
 
 function bindStableEvents(): void {
@@ -2010,6 +2256,10 @@ function bindStableEvents(): void {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (state.isStreaming) {
+                if (currentImageAttachments.length > 0) {
+                    showError('Image attachments cannot be queued while the agent is streaming yet. Send them after the current response finishes.');
+                    return;
+                }
                 const text = input.value.trim();
                 if (text) {
                     if (e.ctrlKey || e.metaKey) {
@@ -2038,7 +2288,31 @@ function bindStableEvents(): void {
         updateSlashMenu(input);
     });
 
+    input?.addEventListener('paste', (e) => {
+        void handleImagePaste(e);
+    });
 
+    const imageFileInput = document.getElementById('image-file-input') as HTMLInputElement | null;
+    imageFileInput?.addEventListener('change', () => {
+        const files = Array.from(imageFileInput.files ?? []);
+        imageFileInput.value = '';
+        void addImageFiles(files);
+    });
+
+    const inputContainer = document.querySelector('.input-container') as HTMLElement | null;
+    inputContainer?.addEventListener('dragover', (e) => {
+        if (hasImageFiles(e.dataTransfer)) {
+            e.preventDefault();
+            inputContainer.classList.add('drag-over');
+        }
+    });
+    inputContainer?.addEventListener('dragleave', () => {
+        inputContainer.classList.remove('drag-over');
+    });
+    inputContainer?.addEventListener('drop', (e) => {
+        inputContainer.classList.remove('drag-over');
+        void handleImageDrop(e);
+    });
 }
 
 function bindTabEvents(): void {
@@ -2143,14 +2417,21 @@ function bindChangedFileItems(): void {
 function sendMessage(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (!input) return;
-    const text = input.value.trim();
-    if (!text) return;
+    const typedText = input.value.trim();
+    const images = currentImageAttachments.length > 0 ? [...currentImageAttachments] : undefined;
+    if (!typedText && !images?.length) return;
+    if (images?.length && !currentModelSupportsImages()) {
+        showError('The current model does not support images. Select an image-capable model before sending attachments.');
+        return;
+    }
+    const text = typedText || (images && images.length > 1 ? 'Please inspect the attached images.' : 'Please inspect the attached image.');
     input.value = '';
     input.style.height = 'auto';
     draftTexts.delete(state.activeTabId);
+    clearImageAttachments();
     userHasScrolled = false;
     updateScrollButton();
-    vscode.postMessage({ type: 'prompt', text });
+    vscode.postMessage({ type: 'prompt', text, images });
 }
 
 function bindCopyButtons(): void {
@@ -2283,6 +2564,15 @@ function escAttr(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function getThinkingPreview(text: string): string {
+    const firstLine = text
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => line.trim())
+        .find(Boolean) ?? '';
+    return firstLine.replace(/\s+/g, ' ');
+}
+
 function formatTimestamp(ts: number): string {
     if (!ts) return '';
     const d = new Date(ts < 1e12 ? ts * 1000 : ts);
@@ -2398,6 +2688,35 @@ function extractText(msg: any): string {
             .join('');
     }
     return msg.text ?? '';
+}
+
+function extractImages(msg: any): ImageAttachment[] {
+    if (!Array.isArray(msg.content)) return [];
+    return msg.content
+        .filter((c: any) => c.type === 'image' && typeof c.data === 'string' && typeof c.mimeType === 'string')
+        .map((c: any) => ({
+            type: 'image',
+            data: c.data,
+            mimeType: c.mimeType,
+            name: c.name,
+            size: c.size,
+            width: c.width,
+            height: c.height,
+        }));
+}
+
+function buildMessageImageGrid(images: ImageAttachment[]): HTMLElement {
+    const grid = el('div', 'message-images');
+    for (const img of images) {
+        const src = `data:${img.mimeType};base64,${img.data}`;
+        const imageEl = document.createElement('img');
+        imageEl.className = 'message-image';
+        imageEl.src = src;
+        imageEl.alt = img.name ?? 'Attached image';
+        imageEl.title = img.name ?? 'Attached image';
+        grid.appendChild(imageEl);
+    }
+    return grid;
 }
 
 function formatTokenCount(n: number): string {

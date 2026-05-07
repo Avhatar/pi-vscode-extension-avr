@@ -21,10 +21,11 @@ export async function refreshModelRegistry(): Promise<void> {
 }
 
 export function getAvailableModels(registry: ModelRegistry): ModelInfo[] {
-    return registry.getAvailable().map((m) => ({
+    return registry.getAvailable().map((m: any) => ({
         provider: String(m.provider),
         id: m.id,
         name: m.name,
+        supportsImages: Array.isArray(m.input) ? m.input.includes('image') : undefined,
     }));
 }
 

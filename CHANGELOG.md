@@ -7,6 +7,29 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-05-07
+
+### Changed
+- The image attachment button now uses the folder icon for a cleaner toolbar appearance.
+
+## [0.6.1] - 2026-05-07
+
+### Added
+- Image attachments can now be selected with a paperclip button next to the model picker.
+
+### Changed
+- Large image attachments are now resized automatically instead of being rejected by file size.
+
+## [0.6.0] - 2026-05-07
+
+### Added
+- Images can now be pasted or dropped into the chat input and sent to image-capable models as attachments, with previews shown before sending and in chat history.
+
+## [0.5.2] - 2026-05-07
+
+### Fixed
+- Thinking output now stays collapsed to a single-line preview by default and only expands when opened manually.
+
 ## [0.5.1] - 2026-05-07
 
 ### Changed

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@mariozechner/pi-coding-agent';
-import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo } from '../shared/protocol';
+import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment } from '../shared/protocol';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, disposeModelRegistry } from './models';
@@ -135,19 +135,19 @@ export class PiSessionManager {
         }
     }
 
-    async prompt(text: string): Promise<void> {
+    async prompt(text: string, images?: ImageAttachment[]): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
-        await this._session.prompt(text);
+        await this._session.prompt(text, images?.length ? { images } : undefined);
     }
 
-    async steer(text: string): Promise<void> {
+    async steer(text: string, images?: ImageAttachment[]): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
-        await this._session.steer(text);
+        await this._session.steer(text, images?.length ? images : undefined);
     }
 
-    async followUp(text: string): Promise<void> {
+    async followUp(text: string, images?: ImageAttachment[]): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
-        await this._session.followUp(text);
+        await this._session.followUp(text, images?.length ? images : undefined);
     }
 
     async abort(): Promise<void> {
@@ -293,9 +293,14 @@ export class PiSessionManager {
     }
 
     getCurrentModel(): ModelInfo | undefined {
-        const m = this._session?.model;
+        const m: any = this._session?.model;
         if (!m) { return undefined; }
-        return { provider: getProviderId(m), id: m.id, name: m.name };
+        return {
+            provider: getProviderId(m),
+            id: m.id,
+            name: m.name,
+            supportsImages: Array.isArray(m.input) ? m.input.includes('image') : undefined,
+        };
     }
 
     getThinkingLevel(): string | undefined {
@@ -381,7 +386,12 @@ export class PiSessionManager {
         const model = s.model;
         return {
             messages: s.messages.map(safeSerialize),
-            model: model ? { provider: getProviderId(model), id: model.id, name: model.name } : undefined,
+            model: model ? {
+                provider: getProviderId(model),
+                id: model.id,
+                name: model.name,
+                supportsImages: Array.isArray((model as any).input) ? (model as any).input.includes('image') : undefined,
+            } : undefined,
             thinkingLevel: s.thinkingLevel,
             isStreaming: s.isStreaming,
             tools: s.getActiveToolNames(),

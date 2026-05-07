@@ -107,7 +107,7 @@ export interface TabInfo {
 
 export interface SerializedAgentState {
     messages: any[];
-    model?: { provider: string; id: string; name?: string };
+    model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
     thinkingLevel?: string;
     isStreaming: boolean;
     streamingMessage?: any;
@@ -134,6 +134,17 @@ export interface ModelInfo {
     provider: string;
     id: string;
     name?: string;
+    supportsImages?: boolean;
+}
+
+export interface ImageAttachment {
+    type: 'image';
+    data: string;
+    mimeType: string;
+    name?: string;
+    size?: number;
+    width?: number;
+    height?: number;
 }
 
 export interface SkillInfo {
@@ -154,9 +165,9 @@ export interface SessionInfo {
 
 // Webview -> Extension messages
 export type ClientMessage =
-    | { type: 'prompt'; text: string; images?: string[] }
-    | { type: 'steer'; text: string }
-    | { type: 'followUp'; text: string }
+    | { type: 'prompt'; text: string; images?: ImageAttachment[] }
+    | { type: 'steer'; text: string; images?: ImageAttachment[] }
+    | { type: 'followUp'; text: string; images?: ImageAttachment[] }
     | { type: 'abort' }
     | { type: 'getModels' }
     | { type: 'setModel'; provider: string; modelId: string }
