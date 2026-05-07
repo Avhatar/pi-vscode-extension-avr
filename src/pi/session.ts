@@ -6,6 +6,7 @@ import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, disposeModelRegistry } from './models';
 import { createCodexMonitorExtension } from './codex-monitor';
 import { getCodexUsageStore } from './codex-usage-store';
+import { getBundledPiPackagePaths } from './bundled-packages';
 
 export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
 
@@ -92,13 +93,20 @@ export class PiSessionManager {
                 },
             }),
         ];
+        const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const loader = new DefaultResourceLoader({
             cwd,
             agentDir,
             settingsManager,
             extensionFactories: factories,
+            additionalExtensionPaths: bundledPackagePaths,
         });
         await loader.reload();
+        if (bundledPackagePaths.length > 0) {
+            this._outputChannel.appendLine(
+                `Bundled Pi packages registered: ${bundledPackagePaths.length} (${bundledPackagePaths.map((p) => p.split(/[\\/]/).pop()).join(', ')})`,
+            );
+        }
         return loader;
     }
 

@@ -64,6 +64,27 @@ The Pi SDK packages (`@mariozechner/pi-coding-agent`, `@mariozechner/pi-agent-co
 - **Message queuing**: While streaming, user messages are queued (stored in `TabState.queuedMessages`) and auto-dispatched as new prompts on `agent_end`. Steering (mid-stream injection) is a separate path via `AgentSession.steer()`.
 - **Skills / slash commands**: Skills are loaded from the Pi SDK and surfaced in the webview via a `getSkills` message. The webview renders a slash-command menu triggered by `/` in the input.
 
+## Bundled Pi extensions
+
+Pi extensions (npm packages keyed `pi-package`, e.g. `pi-web-access`) ship **inside the VSIX** and are surfaced to Pi via `DefaultResourceLoader.additionalExtensionPaths`. We do **not** invoke `pi install` at activation, and we do **not** mutate the user's `~/.pi/settings.json`.
+
+**Why this approach:** the VSIX must be self-contained. `pi install npm:<pkg>` writes into `~/.pi/settings.json` and `~/.pi/npm/node_modules/`, neither of which is owned by us, bundled in the VSIX, or guaranteed to survive a marketplace install. Feeding paths directly to the resource loader keeps the install fully offline, deterministic, and removable when the user uninstalls the extension.
+
+**Tradeoff:** Pi extension versions are pinned to the VSIX release. Bumping `pi-web-access` (or any other Pi extension) requires cutting a new extension version. The upside is that an upstream regression in a Pi extension cannot break the plugin between our releases.
+
+### How to add a new Pi extension
+
+1. `npm install <package> --save` — it MUST be a production dependency. `devDependencies` are stripped by `npm prune --omit=dev` before packaging and will not appear in the VSIX.
+2. Append the package name to `BUNDLED_PI_PACKAGES` in `src/pi/bundled-packages.ts`. That list is consumed by `_buildResourceLoader` in `src/pi/session.ts`, which resolves each name to an absolute path under `node_modules/<pkg>/` and passes the directory to `DefaultResourceLoader` via `additionalExtensionPaths`. Pi's package manager treats it as a local pi-package and auto-discovers `pi.extensions` and `pi.skills` from the package's own `package.json` manifest — no separate skills wiring needed.
+3. Confirm `.vscodeignore` does not exclude `node_modules/<pkg>/**`. The current rules leave `node_modules/` alone, so most packages ship without changes.
+4. Smoke-test the produced VSIX in a clean VS Code window: open a chat, confirm the new tools appear in the active tool list, and any new skills show up in the slash-command menu (`/`).
+
+### Don't
+
+- Don't call `pi install npm:<pkg>` from extension code, activation, or a `postinstall` script. It pollutes user-global state, requires network on first run, and the package lands outside the VSIX.
+- Don't rely on a transitive dependency to bring the package in — declare it explicitly in our root `package.json` so `npm prune --omit=dev` cannot drop it.
+- Don't write registration files into `~/.pi/` or `<workspace>/.pi/` to make Pi see the package. The resource loader picks bundled extensions up directly from `node_modules/` via `additionalExtensionPaths` — no settings round-trip needed.
+
 ## File Layout
 
 | Path | Purpose |
@@ -71,6 +92,7 @@ The Pi SDK packages (`@mariozechner/pi-coding-agent`, `@mariozechner/pi-agent-co
 | `src/extension.ts` | Activation, command/provider registration |
 | `src/shared/protocol.ts` | Typed message interfaces (ClientMessage, ServerMessage, etc.) |
 | `src/pi/session.ts` | Wraps Pi SDK AgentSession lifecycle |
+| `src/pi/bundled-packages.ts` | List of Pi extensions shipped in the VSIX (see "Bundled Pi extensions") |
 | `src/pi/models.ts` | Model registry helpers |
 | `src/pi/auth.ts` | Auth storage singleton |
 | `src/pi/events.ts` | EventRouter for agent session events |
