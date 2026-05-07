@@ -1,16 +1,35 @@
 # Pi Code for VS Code
 
-A VS Code extension that provides a first-class UI for [Mario Zechner's Pi coding agent](https://github.com/badlogic/pi-mono) — an AI agent that can read, write, edit files, run commands, search your codebase, and more, all from within the editor. The UX is heavily inspired by [Cursor](https://www.cursor.com/).
+A VS Code extension that provides a first-class UI for [Mario Zechner's Pi coding agent](https://github.com/badlogic/pi-mono) — an AI agent that can read, write, edit files, run commands, search your codebase, and more, all from within the editor.
+
+> This is a downstream fork of the upstream `pi-vscode-extension`. The fork takes the UX in a Claude Code direction — chats live as editor tabs rather than inside the sidebar — and bundles selected Pi ecosystem packages directly inside the VSIX. See **[Why this fork](#why-this-fork)** below for the full diff.
 
 ![Pi Code screenshot](screenshot.png)
 
+## Why this fork
+
+Two motivations drove the split from upstream:
+
+**1. Claude Code-style editor-tab panels instead of a sidebar chat.** Upstream renders the entire chat UI inside the activity-bar sidebar — one chat at a time, fixed to one side of the window. This fork moves each chat into an editor-area `WebviewPanel`, so chats behave exactly like editor tabs: split horizontally or vertically, drag into another editor group, move into a separate window, restore across `Reload Window`. The activity-bar sidebar is repurposed as a thin **launcher** that lists currently open chats, shows session history, and exposes one-click *New chat* / *Settings* buttons. Every chat panel also has its own toolbar with *New chat* and *History* so you don't need to keep flipping back to the sidebar.
+
+**2. Bundled Pi extensions instead of `pi install`.** Upstream relies on the user running `pi install npm:<package>` and managing `~/.pi/` themselves to enable Pi ecosystem tools (web search, content fetching, etc.). This fork ships selected Pi extensions (currently `pi-web-access`) **inside the VSIX** as ordinary npm dependencies and wires them into Pi's resource loader via `additionalExtensionPaths`. The extension never writes to `~/.pi/`, never invokes `pi install` at activation, and works fully offline after install. The tradeoff is that bundled extension versions are pinned per Pi Code release — see [AGENTS.md](AGENTS.md#bundled-pi-extensions) for the rationale and the procedure for adding a new bundled extension.
+
+In addition to those two structural changes, the fork has accumulated a number of features not present upstream at the time of forking:
+
+- OAuth subscription login in the settings panel for Anthropic Claude Pro/Max, ChatGPT Plus/Pro/Codex, GitHub Copilot, Google Gemini CLI, and Google Antigravity — so subscription-only models (e.g. GPT-5.x Codex) work without an API key.
+- Codex subscription usage indicator: a percent-used readout for the 5-hour and weekly windows in the chat footer, plus a per-turn delta on each assistant message.
+- Image attachments via paste, drag-and-drop, or a paperclip button — sent to image-capable models with previews preserved in chat history.
+- The launcher persists a session history on disk and lets you delete entries individually; opening an old entry reopens it as a fresh editor panel.
+
+The fork tracks the upstream `@mariozechner/pi-coding-agent` SDK as a regular npm dependency and stays in sync with its API.
+
 ## Features
 
-### Sidebar Chat Interface
-A dedicated activity bar panel with a full chat UI for interacting with the Pi coding agent. Send prompts, view streaming responses with thinking blocks, and inspect tool calls — all inline.
+### Editor-Tab Chat Panels with Launcher Sidebar
+Each chat opens as its own editor-area webview panel — splittable, draggable into another editor group, movable into a separate window, restored across `Reload Window`. The activity-bar sidebar acts as a **launcher**: it lists currently open chats with live indicators (streaming spinner, unread dot), shows a history of previous sessions, and exposes one-click *New chat* and *Settings* buttons. Every chat panel also carries its own *New chat* / *History* toolbar.
 
 ### Multi-Tab Sessions
-Run multiple independent agent sessions in parallel. Each tab maintains its own conversation history, file change tracking, and checkpoint state.
+Run multiple independent agent sessions in parallel — each chat panel has its own conversation history, file change tracking, and checkpoint state. Nothing is shared between tabs.
 
 ### Tool Visibility
 Every tool the agent invokes (file reads, writes, edits, shell commands, glob/grep searches) is rendered as an expandable card showing arguments and results in real time.
@@ -27,8 +46,17 @@ Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle
 ### Model Selection
 Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
 
-### Settings Page
-A dedicated settings panel (accessible via the gear icon in the sidebar header or the `Pi Code: Open Settings` command) provides configuration for API connection, default model and thinking level, tool execution behavior, and session management. API keys are stored securely via VS Code's SecretStorage and never written to disk in plaintext.
+### Settings Page with OAuth Login
+A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API connection, default model and thinking level, tool execution behavior, and session management. API keys are stored securely via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity — unlocking subscription-only models without leaving VS Code, with a manual authorization-code paste fallback when the local OAuth callback can't be reached.
+
+### Bundled Pi Extensions (Web Access Out of the Box)
+Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Works out of the box via Exa MCP without any API keys; optionally reads `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys to upgrade to a different backend. No `pi install` step required.
+
+### Image Attachments
+Paste images directly into the chat input, drop them onto the chat panel, or pick a file via the paperclip button next to the model picker. Attached images appear as previews before sending and remain in the chat history. Large images are resized automatically; image-capable models receive them inline with the prompt.
+
+### Codex Subscription Usage Indicator
+When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer shows percent used in the 5-hour and weekly windows with colour cues at 50% and 90%. A tooltip details the plan, exact reset times, and remaining credit balance. Each assistant message footer also shows the per-turn delta (`5h +1.2% · week +0.3%`) so you can see how much each turn cost. Hidden for non-Codex models and for token-billed API key accounts.
 
 ### Tool Approval
 When auto-approve is disabled (the default), each tool call pauses execution and shows an inline approval card in the chat with the tool name, arguments preview, and Approve/Reject buttons. This gives you full control over what the agent executes before it happens.
@@ -127,21 +155,23 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 
 ## Usage
 
-1. Click the **Pi Code** icon in the activity bar to open the sidebar.
-2. Select a model using the model picker at the bottom of the chat or via the command palette (`Pi Code: Select Model`).
-3. Type a prompt and press Enter (or Shift+Enter for newlines).
-4. Watch the agent stream its response, invoke tools, and make file changes.
-5. While streaming, press Enter to **queue** a follow-up or Ctrl+Enter to **steer** the current generation.
-6. Review diffs inline or click **Review** to open VS Code's diff editor.
-7. Use checkpoint buttons on your messages to roll back if needed.
-8. Type `/` to search and insert skills via the slash-command menu.
+1. Click the **Pi Code** icon in the activity bar to open the launcher sidebar.
+2. Click **New chat** (or press `Ctrl+Shift+N`) to open a fresh chat as an editor tab. Existing chats can be reopened from the *Open chats* / *History* lists in the launcher.
+3. Drag the chat tab to split the editor, drop it into another editor group, or move it into a separate window — it's a regular editor tab.
+4. Select a model using the model picker at the bottom of the chat or via the command palette (`Pi Code: Select Model`).
+5. Type a prompt and press Enter (Shift+Enter for newlines). Paste, drop, or pick images via the paperclip button to attach them.
+6. Watch the agent stream its response, invoke tools, and make file changes.
+7. While streaming, press Enter to **queue** a follow-up or Ctrl+Enter to **steer** the current generation.
+8. Review diffs inline or click **Review** to open VS Code's diff editor.
+9. Use checkpoint buttons on your messages to roll back if needed.
+10. Type `/` to search and insert skills via the slash-command menu.
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+L` (`Cmd+Shift+L`) | Focus the Pi Code chat panel |
-| `Ctrl+Shift+N` (`Cmd+Shift+N`) | Start a new chat session |
+| `Ctrl+Shift+L` (`Cmd+Shift+L`) | Reveal the active chat panel, or focus the launcher if no chat is open |
+| `Ctrl+Shift+N` (`Cmd+Shift+N`) | Open a new chat as an editor tab |
 | `Enter` | Send prompt, or queue message while streaming |
 | `Ctrl+Enter` (`Cmd+Enter`) | Steer the agent mid-generation |
 | `Escape` | Stop the current generation (while streaming) |
@@ -150,11 +180,13 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 
 All commands are available from the command palette (`Ctrl+Shift+P`):
 
-- **Pi Code: New Chat** — Start a fresh agent session in a new tab
+- **Pi Code: New Chat** — Open a fresh agent session as an editor tab
+- **Pi Code: New Agent Tab** — Same as *New Chat*, also surfaced as the launcher's `+` button
+- **Pi Code: Session History** — Reveal the launcher (which lists previous sessions)
 - **Pi Code: Stop Generation** — Abort the current streaming response
 - **Pi Code: Select Model** — Choose an AI model from the available providers
 - **Pi Code: Toggle Thinking Level** — Cycle through thinking verbosity levels
-- **Pi Code: Focus Chat** — Bring focus to the Pi Code sidebar
+- **Pi Code: Focus Chat** — Reveal the active chat panel, or fall back to the launcher
 - **Pi Code: Open Settings** — Open the Pi Code settings page
 
 ## Settings
@@ -178,76 +210,92 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│                  VS Code                     │
-│                                              │
-│  ┌──────────┐   ┌────────────────────────┐  │
-│  │ Extension │──▶│   SidebarProvider       │  │
-│  │ activate()│   │   (WebviewViewProvider) │  │
-│  └──────────┘   └───────────┬────────────┘  │
-│       │                     │                │
-│       ▼                     ▼                │
-│  ┌──────────┐   ┌────────────────────────┐  │
-│  │StatusBar  │   │     Webview (chat UI)  │  │
-│  │          │   │     main.ts + CSS      │  │
-│  └──────────┘   └───────────┬────────────┘  │
-│                             │                │
-│              ClientMessage / ServerMessage    │
-│              (src/shared/protocol.ts)        │
-│                             │                │
-│                     ┌───────▼──────┐         │
-│                     │  Tab State   │         │
-│                     │  ┌─────────┐ │         │
-│                     │  │ Session  │ │         │
-│                     │  │ Diffs    │ │         │
-│                     │  │Checkpoint│ │         │
-│                     │  └─────────┘ │         │
-│                     └───────┬──────┘         │
-│                             │                │
-│                     ┌───────▼──────┐         │
-│                     │ Pi Coding    │         │
-│                     │ Agent (npm)  │         │
-│                     └──────────────┘         │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                            VS Code                              │
+│                                                                  │
+│   Activity-bar sidebar              Editor area                  │
+│  ┌────────────────────┐   ┌────────────────────────────────┐   │
+│  │   LauncherView     │   │  ChatPanel  ChatPanel  ...     │   │
+│  │ (WebviewView)      │   │ (WebviewPanel per chat)        │   │
+│  │ - open chats       │   │ - chat UI (main.ts + CSS)       │   │
+│  │ - history          │   │ - tool approval cards           │   │
+│  │ - new / settings   │   │ - diffs, checkpoints, queue     │   │
+│  └─────────┬──────────┘   └──────────────┬──────────────────┘   │
+│            │                              │                      │
+│            └──────────────┬───────────────┘                      │
+│                           ▼                                      │
+│              ChatController (controllers/chat-controller.ts)     │
+│              - tab lifecycle, routing of ClientMessage           │
+│              - shared between launcher + chat panels             │
+│                           │                                      │
+│        ┌──────────────────┼──────────────────┐                   │
+│        ▼                  ▼                  ▼                   │
+│  ┌───────────┐    ┌──────────────┐   ┌───────────────┐          │
+│  │  Tab N    │    │ DiffManager  │   │ Checkpoint    │          │
+│  │ ┌───────┐ │    │ pi-diff:     │   │ Manager       │          │
+│  │ │Session│ │    │ virtual docs │   │ per-turn      │          │
+│  │ └───┬───┘ │    └──────────────┘   │ snapshots     │          │
+│  └─────┼─────┘                       └───────────────┘          │
+│        ▼                                                         │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Pi Coding Agent SDK (@mariozechner/pi-coding-agent)     │    │
+│  │   + bundled Pi extensions (e.g. pi-web-access),          │    │
+│  │     loaded via DefaultResourceLoader.additionalExtensionPaths │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                  │
+│   StatusBarManager — context usage / streaming state             │
+│   SettingsPanel    — WebviewPanel for settings + OAuth login     │
+│   ChatPanelSerializer — restores chat panels across Reload Window│
+└────────────────────────────────────────────────────────────────┘
 ```
 
-- **Extension host** (`src/extension.ts`) registers providers and commands on activation.
-- **SidebarProvider** (`src/providers/sidebar.ts`) manages tabs, each containing an independent `PiSessionManager`, `DiffManager`, and `CheckpointManager`. Also handles tool approval round-trips.
-- **SettingsPanel** (`src/providers/settings-panel.ts`) opens a `WebviewPanel` in the editor area for the settings page, backed by VS Code's configuration API and `SecretStorage`.
-- **Webview** (`src/webview/main.ts`) renders the chat UI, inline tool approval cards, and communicates with the extension host via typed messages defined in `src/shared/protocol.ts`.
-- **PiSessionManager** (`src/pi/session.ts`) wraps `createAgentSession` from `@mariozechner/pi-coding-agent`, handling prompt/steer/follow-up/abort lifecycle. Reads configuration on session creation and installs tool approval hooks via the SDK's extension runner.
-- **DiffManager** (`src/providers/diff.ts`) tracks file changes from `edit`/`write` tool calls and provides unified diffs via a `pi-diff:` virtual document scheme.
-- **CheckpointManager** (`src/providers/checkpoint.ts`) snapshots file state per turn for rollback and redo.
+- **Extension host** ([src/extension.ts](src/extension.ts)) registers providers, commands, and the `WebviewPanelSerializer` on activation.
+- **ChatController** ([src/controllers/chat-controller.ts](src/controllers/chat-controller.ts)) owns tab lifecycle (create/close/active), keeps the per-tab `PiSessionManager`, and routes typed messages between any view (launcher or chat panel) and the agent. It is the single source of truth for tab state — both the launcher and the editor panels are thin views on top of it.
+- **LauncherView** ([src/providers/launcher-view.ts](src/providers/launcher-view.ts)) is the `WebviewViewProvider` mounted in the activity bar. It renders the list of open chats and previous sessions and asks the controller to open or focus a panel.
+- **ChatPanel** ([src/providers/chat-panel.ts](src/providers/chat-panel.ts)) is one editor-area `WebviewPanel` per chat, hosting the actual chat UI. **ChatPanelSerializer** ([src/providers/chat-panel-serializer.ts](src/providers/chat-panel-serializer.ts)) restores these panels across `Reload Window` by replaying the bound tab id.
+- **SettingsPanel** ([src/providers/settings-panel.ts](src/providers/settings-panel.ts)) opens a `WebviewPanel` in the editor area for the settings page, backed by VS Code's configuration API and `SecretStorage`. Hosts API-key entry and the OAuth subscription-login flow.
+- **Webview** ([src/webview/main.ts](src/webview/main.ts)) renders the chat UI, inline tool approval cards, slash-command menu, and image attachment previews, and communicates with the extension host via typed messages defined in [src/shared/protocol.ts](src/shared/protocol.ts).
+- **PiSessionManager** ([src/pi/session.ts](src/pi/session.ts)) wraps `createAgentSession` from `@mariozechner/pi-coding-agent`, handling the prompt / steer / follow-up / abort lifecycle. Reads configuration on session creation, installs tool approval hooks via the SDK's extension runner, and feeds Pi's resource loader the bundled-extension paths from [src/pi/bundled-packages.ts](src/pi/bundled-packages.ts).
+- **DiffManager** ([src/providers/diff.ts](src/providers/diff.ts)) tracks file changes from `edit`/`write` tool calls and provides unified diffs via a `pi-diff:` virtual document scheme.
+- **CheckpointManager** ([src/providers/checkpoint.ts](src/providers/checkpoint.ts)) snapshots file state per turn for rollback and redo.
+- **Codex usage plumbing** ([src/pi/codex-monitor.ts](src/pi/codex-monitor.ts) + [src/pi/codex-usage-store.ts](src/pi/codex-usage-store.ts)) captures subscription windows from Codex response headers and exposes them to the chat footer.
 
 ## Project Structure
 
 ```
 src/
-├── extension.ts              # Entry point, activation
+├── extension.ts                      # Entry point, activation, command wiring
 ├── shared/
-│   └── protocol.ts           # Typed message protocol (Client ↔ Server)
+│   └── protocol.ts                   # Typed message protocol (Client ↔ Server)
+├── controllers/
+│   └── chat-controller.ts            # Tab lifecycle, message routing (shared)
 ├── pi/
-│   ├── session.ts            # Agent session lifecycle
-│   ├── models.ts             # Model registry wrapper
-│   ├── auth.ts               # Auth storage singleton
-│   └── events.ts             # Event router for agent events
+│   ├── session.ts                    # Agent session lifecycle
+│   ├── models.ts                     # Model registry wrapper
+│   ├── auth.ts                       # Auth storage singleton + OAuth bridge
+│   ├── events.ts                     # Event router for agent events
+│   ├── bundled-packages.ts           # Pi extensions shipped inside the VSIX
+│   ├── codex-monitor.ts              # Codex subscription header capture
+│   └── codex-usage-store.ts          # Per-window usage state (5h / weekly)
 ├── providers/
-│   ├── sidebar.ts            # Webview provider, tab management, tool approval
-│   ├── settings-panel.ts     # Settings page (WebviewPanel)
-│   ├── diff.ts               # File change tracking, VS Code diff integration
-│   ├── checkpoint.ts         # Per-turn snapshots, rollback/redo
-│   └── status-bar.ts         # Status bar item
+│   ├── launcher-view.ts              # Activity-bar sidebar (launcher)
+│   ├── chat-panel.ts                 # Editor-area WebviewPanel per chat
+│   ├── chat-panel-serializer.ts      # Restore chat panels on Reload Window
+│   ├── settings-panel.ts             # Settings page + OAuth login flow
+│   ├── diff.ts                       # File change tracking, VS Code diff
+│   ├── checkpoint.ts                 # Per-turn snapshots, rollback/redo
+│   └── status-bar.ts                 # Status bar item
 ├── utils/
-│   └── diff.ts               # Myers diff algorithm, unified diff formatting
+│   └── diff.ts                       # Myers diff algorithm, unified diff
 ├── webview/
-│   ├── main.ts               # Chat UI application
-│   ├── settings.ts           # Settings page UI
+│   ├── main.ts                       # Chat UI application
+│   ├── settings.ts                   # Settings page UI
 │   └── styles/
-│       ├── main.css          # Chat webview styles
-│       └── settings.css      # Settings page styles
+│       ├── main.css                  # Chat webview styles
+│       └── settings.css              # Settings page styles
 └── test/
-    ├── unit/                  # Vitest unit tests
-    └── integration/           # VS Code integration tests
+    ├── unit/                         # Vitest unit tests
+    └── integration/                  # VS Code integration tests
 ```
 
 ## Development
