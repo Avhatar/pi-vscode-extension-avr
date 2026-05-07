@@ -30,14 +30,15 @@
         {
           "type": "webview",
           "id": "pi-agent.chat",
-          "name": "Pi Agent"
+          "name": ""
         }
       ]
     },
     "commands": [
       {
         "command": "pi-agent.newChat",
-        "title": "Pi: New Chat"
+        "title": "Pi: New Chat",
+        "icon": "$(add)"
       },
       {
         "command": "pi-agent.abort",
@@ -57,9 +58,39 @@
       },
       {
         "command": "pi-agent.openSettings",
-        "title": "Pi: Open Settings"
+        "title": "Pi: Open Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "pi-agent.showSessions",
+        "title": "Pi: Session History",
+        "icon": "$(history)"
+      },
+      {
+        "command": "pi-agent.createTab",
+        "title": "Pi: New Agent Tab",
+        "icon": "$(add)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "pi-agent.createTab",
+          "when": "view == pi-agent.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "pi-agent.showSessions",
+          "when": "view == pi-agent.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "pi-agent.openSettings",
+          "when": "view == pi-agent.chat",
+          "group": "navigation@3"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "pi-agent.focusChat",

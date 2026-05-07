@@ -170,6 +170,43 @@ export class PiSessionManager {
         this._installToolApprovalHook(session);
     }
 
+    get sessionPath(): string | undefined {
+        return this._sessionManager?.getSessionFile();
+    }
+
+    async initializeFromPath(sessionPath: string): Promise<void> {
+        this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
+        const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const authStorage = await getAuthStorage(this._secrets);
+        this._modelRegistry = await getModelRegistry();
+        this._sessionManager = SM.open(sessionPath, undefined);
+
+        const config = vscode.workspace.getConfiguration('pi-agent');
+        const allowedTools = config.get<string[]>('allowedTools', []);
+
+        const opts: any = {
+            cwd,
+            authStorage,
+            modelRegistry: this._modelRegistry,
+            sessionManager: this._sessionManager,
+        };
+        if (allowedTools.length > 0) {
+            opts.allowedToolNames = allowedTools;
+        }
+
+        const { session } = await createAgentSession(opts);
+        this._session = session;
+        this._unsubscribe = session.subscribe(this.events.asSessionListener());
+        this._applyDefaultSettings(session);
+        this._installToolApprovalHook(session);
+
+        const model = session.model;
+        this._outputChannel.appendLine(
+            `Session restored. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
+        );
+    }
+
     async getSessions(): Promise<SessionInfo[]> {
         const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
@@ -190,7 +227,7 @@ export class PiSessionManager {
 
         const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
-        this._sessionManager = await SM.open(sessionPath, undefined);
+        this._sessionManager = SM.open(sessionPath, undefined);
 
         const { session } = await createAgentSession({
             cwd,

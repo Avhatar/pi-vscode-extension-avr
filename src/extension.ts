@@ -7,20 +7,20 @@ import { SettingsPanel } from './providers/settings-panel';
 import { DiffManager, DiffContentProvider } from './providers/diff';
 import { CheckpointManager } from './providers/checkpoint';
 
-let piSession: PiSessionManager | undefined;
+let sidebarRef: SidebarProvider | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     const outputChannel = vscode.window.createOutputChannel('Pi Agent');
     outputChannel.appendLine('Pi Agent extension activating...');
 
     try {
-        piSession = new PiSessionManager(outputChannel, context.secrets);
-        await piSession.initialize();
+        const initialSession = new PiSessionManager(outputChannel, context.secrets);
+        await initialSession.initialize();
 
         context.subscriptions.push(
             context.secrets.onDidChange(async (e) => {
                 if (e.key.startsWith('pi-agent.apiKey.')) {
-                    await piSession?.reloadCredentials();
+                    await sidebarRef?.activeSession?.reloadCredentials();
                     outputChannel.appendLine(`Credentials reloaded after change to ${e.key}`);
                 }
             }),
@@ -28,12 +28,16 @@ export async function activate(context: vscode.ExtensionContext) {
 
         const diffContentProvider = new DiffContentProvider();
         const checkpointManager = new CheckpointManager();
-        const statusBar = new StatusBarManager(piSession);
+        const statusBar = new StatusBarManager(initialSession);
 
-        const diffManager = new DiffManager(piSession, checkpointManager);
+        const diffManager = new DiffManager(initialSession, checkpointManager);
         const sidebarProvider = new SidebarProvider(
-            context.extensionUri, piSession, diffManager, checkpointManager, outputChannel,
+            context.extensionUri, context, initialSession, diffManager, checkpointManager, outputChannel,
         );
+        sidebarRef = sidebarProvider;
+
+        // Restore tabs from previous session before the webview is shown
+        await sidebarProvider.restorePersistedTabs();
 
         context.subscriptions.push(
             vscode.window.registerWebviewViewProvider('pi-agent.chat', sidebarProvider),
@@ -45,21 +49,21 @@ export async function activate(context: vscode.ExtensionContext) {
             outputChannel,
 
             vscode.commands.registerCommand('pi-agent.newChat', async () => {
-                await piSession?.newSession();
+                await sidebarProvider.activeSession?.newSession();
                 sidebarProvider.sendStateSync();
             }),
 
             vscode.commands.registerCommand('pi-agent.abort', async () => {
-                await piSession?.abort();
+                await sidebarProvider.activeSession?.abort();
             }),
 
             vscode.commands.registerCommand('pi-agent.selectModel', async () => {
-                await piSession?.showModelPicker();
+                await sidebarProvider.activeSession?.showModelPicker();
                 sidebarProvider.sendStateSync();
             }),
 
             vscode.commands.registerCommand('pi-agent.toggleThinking', async () => {
-                const level = piSession?.cycleThinkingLevel();
+                const level = sidebarProvider.activeSession?.cycleThinkingLevel();
                 if (level) {
                     vscode.window.showInformationMessage(`Thinking level: ${level}`);
                 }
@@ -73,6 +77,14 @@ export async function activate(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand('pi-agent.openSettings', () => {
                 SettingsPanel.show(context.extensionUri, context.secrets);
             }),
+
+            vscode.commands.registerCommand('pi-agent.createTab', async () => {
+                await sidebarProvider.createTab();
+            }),
+
+            vscode.commands.registerCommand('pi-agent.showSessions', () => {
+                sidebarProvider.showSessions();
+            }),
         );
 
         outputChannel.appendLine('Pi Agent extension activated.');
@@ -83,6 +95,6 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
-    await piSession?.dispose();
+    sidebarRef = undefined;
     await PiSessionManager.disposeGlobal();
 }

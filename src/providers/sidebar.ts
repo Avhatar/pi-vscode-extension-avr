@@ -65,10 +65,16 @@ function makeTabState(
     };
 }
 
+interface PersistedTabsState {
+    tabs: Array<{ name: string; sessionPath: string }>;
+    activeIndex: number;
+}
+
 export class SidebarProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private _extensionUri: vscode.Uri;
     private _outputChannel: vscode.OutputChannel;
+    private _context: vscode.ExtensionContext;
 
     private _tabs = new Map<string, TabState>();
     private _activeTabId = '';
@@ -76,12 +82,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     constructor(
         extensionUri: vscode.Uri,
+        context: vscode.ExtensionContext,
         initialSession: PiSessionManager,
         initialDiffManager: DiffManager,
         initialCheckpointManager: CheckpointManager,
         outputChannel: vscode.OutputChannel,
     ) {
         this._extensionUri = extensionUri;
+        this._context = context;
         this._outputChannel = outputChannel;
 
         const id = nextTabId();
@@ -93,6 +101,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     private get _activeTab(): TabState {
         return this._tabs.get(this._activeTabId)!;
+    }
+
+    /** Expose the active tab's session for global commands (palette, keybindings). */
+    get activeSession(): PiSessionManager | undefined {
+        return this._activeTab?.session;
+    }
+
+    /** Public: create a new agent tab (called from view/title action). */
+    async createTab(): Promise<void> {
+        await this._createTab();
+    }
+
+    /** Public: tell the webview to show the session history list. */
+    showSessions(): void {
+        this._handleMessage({ type: 'getSessions' });
     }
 
     resolveWebviewView(
@@ -202,6 +225,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             } else {
                 tab.hasNotification = true;
             }
+            this._persistTabs();
 
             if (tab.queuedMessages.length > 0) {
                 const text = tab.queuedMessages.shift()!;
@@ -266,6 +290,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const sessionName = tab.session.session?.sessionName;
         if (sessionName && tab.name !== sessionName) {
             tab.name = sessionName;
+            this._persistTabs();
+            return;
+        }
+        // Derive tab name from first user message if still default
+        if (tab.name === 'New Agent') {
+            const msgs = tab.session.getMessages();
+            const firstUser = msgs.find((m: any) => m.role === 'user');
+            if (firstUser) {
+                const content = firstUser.content;
+                const text: string = typeof content === 'string'
+                    ? content
+                    : Array.isArray(content)
+                        ? (content.find((c: any) => c.type === 'text')?.text ?? '')
+                        : '';
+                const trimmed = text.replace(/\n/g, ' ').trim().slice(0, 60);
+                if (trimmed) {
+                    tab.name = trimmed;
+                    this._persistTabs();
+                }
+            }
         }
     }
 
@@ -413,7 +457,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     tab.agentStartTime = 0;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
+                    tab.name = 'New Agent'; // reset so _updateTabName re-derives from first message
                     this._updateTabName(tab);
+                    this._persistTabs();
                     this.sendStateSync();
                     break;
                 case 'getSessions': {
@@ -545,7 +591,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private async _createTab(): Promise<void> {
-        const newSession = new PiSessionManager(this._outputChannel);
+        const newSession = new PiSessionManager(this._outputChannel, this._context.secrets);
         await newSession.initialize();
 
         const newCheckpoint = new CheckpointManager();
@@ -557,6 +603,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._subscribeTab(tab);
 
         this._activeTabId = id;
+        this._persistTabs();
         this.sendStateSync();
     }
 
@@ -578,6 +625,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this._activeTabId = this._tabs.keys().next().value!;
         }
 
+        this._persistTabs();
         this.sendStateSync();
     }
 
@@ -594,6 +642,75 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', false);
         }
 
+        this._persistTabs();
+        this.sendStateSync();
+    }
+
+    private _persistTabs(): void {
+        const tabList = [...this._tabs.values()];
+        const activeTab = this._tabs.get(this._activeTabId);
+        const activeIndex = activeTab ? tabList.indexOf(activeTab) : 0;
+
+        const tabs = tabList
+            .map(tab => ({
+                name: tab.name,
+                sessionPath: tab.session.sessionPath ?? '',
+            }))
+            .filter(t => t.sessionPath !== '');
+
+        this._context.workspaceState.update('pi-agent.tabs', {
+            tabs,
+            activeIndex: Math.max(0, activeIndex),
+        } satisfies PersistedTabsState);
+    }
+
+    async restorePersistedTabs(): Promise<void> {
+        const persisted = this._context.workspaceState.get<PersistedTabsState>('pi-agent.tabs');
+        if (!persisted || persisted.tabs.length === 0) { return; }
+
+        // Remember the initial empty tab to dispose after successful restore
+        const initialTabId = this._activeTabId;
+        const initialTab = this._tabs.get(initialTabId);
+
+        const restoredIds: string[] = [];
+
+        for (const { name, sessionPath } of persisted.tabs) {
+            try {
+                const session = new PiSessionManager(this._outputChannel, this._context.secrets);
+                await session.initializeFromPath(sessionPath);
+
+                const checkpoint = new CheckpointManager();
+                const diff = new DiffManager(session, checkpoint);
+
+                const id = nextTabId();
+                const tab = makeTabState(id, session, diff, checkpoint);
+                tab.name = name;
+                this._updateTabName(tab); // re-derive name from first message if needed
+
+                this._tabs.set(id, tab);
+                this._subscribeTab(tab);
+                restoredIds.push(id);
+            } catch (err: any) {
+                this._outputChannel.appendLine(`Failed to restore tab "${name}": ${err.message}`);
+            }
+        }
+
+        if (restoredIds.length === 0) { return; }
+
+        // Dispose the initial empty tab
+        if (initialTab) {
+            this._unsubscribeTab(initialTabId);
+            initialTab.diffManager.dispose();
+            initialTab.checkpointManager.dispose();
+            await initialTab.session.dispose();
+            this._tabs.delete(initialTabId);
+        }
+
+        // Restore active tab
+        const activeIdx = Math.min(persisted.activeIndex ?? 0, restoredIds.length - 1);
+        this._activeTabId = restoredIds[activeIdx];
+
+        this._outputChannel.appendLine(`Restored ${restoredIds.length} tab(s).`);
         this.sendStateSync();
     }
 

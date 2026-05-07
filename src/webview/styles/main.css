@@ -53,11 +53,13 @@ body {
 .header {
     display: flex;
     align-items: center;
-    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
-    min-height: 36px;
+    height: 26px;
     user-select: none;
-    background: var(--bg);
+    /* Use the VS Code title bar background so the strip blends into it */
+    background: var(--vscode-sideBarSectionHeader-background, var(--bg));
+    border-bottom: 1px solid var(--border);
+    padding: 0 2px;
 }
 
 .tab-strip {
@@ -66,58 +68,58 @@ body {
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
+    gap: 1px;
 }
 .tab-strip::-webkit-scrollbar { display: none; }
 
 .tab {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
+    gap: 4px;
+    padding: 0 8px;
+    height: 26px;
+    font-size: 11px;
     color: var(--muted);
     cursor: pointer;
     border-bottom: 2px solid transparent;
     white-space: nowrap;
-    transition: color 0.15s, background 0.15s;
+    transition: color 0.1s, background 0.1s;
     flex: 1;
     min-width: 0;
-    max-width: 200px;
+    max-width: 180px;
 }
 .tab:hover {
     color: var(--fg);
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.05);
 }
 .tab-active {
     color: var(--fg);
     border-bottom-color: var(--btn-bg);
-    background: rgba(255, 255, 255, 0.04);
 }
 
 .tab-icon {
-    font-size: 13px;
     flex-shrink: 0;
-    opacity: 0.6;
+    opacity: 0.5;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
 }
 .tab-active .tab-icon { opacity: 1; }
 .tab-streaming .tab-icon { opacity: 1; }
 
 .tab-icon-img {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     filter: brightness(0) invert(0.8);
 }
 
 .tab-spinner {
     display: inline-block;
-    width: 10px;
-    height: 10px;
-    border: 2px solid var(--muted);
+    width: 8px;
+    height: 8px;
+    border: 1.5px solid var(--muted);
     border-top-color: var(--btn-bg);
     border-radius: 50%;
     animation: tab-spin 0.8s linear infinite;
@@ -143,26 +145,20 @@ body {
     background: none;
     border: none;
     color: var(--muted);
-    font-size: 16px;
+    font-size: 14px;
     line-height: 1;
     cursor: pointer;
-    padding: 2px 4px;
+    padding: 1px 3px;
     border-radius: 3px;
     margin-left: auto;
     flex-shrink: 0;
-    transition: background 0.15s, color 0.15s;
+    opacity: 0;
+    transition: opacity 0.1s, background 0.1s, color 0.1s;
 }
+.tab:hover .tab-close { opacity: 1; }
 .tab-close:hover {
     background: rgba(255, 255, 255, 0.1);
     color: var(--fg);
-}
-
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding-right: 4px;
-    flex-shrink: 0;
 }
 
 .icon-btn {
@@ -180,13 +176,6 @@ body {
     transition: background 0.15s, color 0.15s;
 }
 .icon-btn:hover { background: var(--input-bg); color: var(--fg); }
-
-.header-icon-img {
-    width: 14px;
-    height: 14px;
-    filter: brightness(0) invert(0.8);
-}
-.icon-btn:hover .header-icon-img { filter: brightness(0) invert(1); }
 
 /* ── Model picker popup ── */
 .model-picker {

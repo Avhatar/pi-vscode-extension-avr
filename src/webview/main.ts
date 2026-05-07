@@ -272,17 +272,10 @@ function render(): void {
     app.innerHTML = '';
     skeletonBuilt = false;
 
-    // Header: tab-strip (dynamic) + header-right (static)
+    // Header: tab-strip only (action buttons moved to VS Code view/title)
     const header = el('div', 'header');
     const tabStrip = el('div', 'tab-strip');
     header.appendChild(tabStrip);
-    const headerActions = el('div', 'header-right');
-    headerActions.innerHTML = `
-        <button class="icon-btn" id="btn-new-tab" title="New Agent"><img class="header-icon-img" src="${iconsBaseUri}/new.png" alt="new"></button>
-        <button class="icon-btn" id="btn-sessions" title="Sessions"><img class="header-icon-img" src="${iconsBaseUri}/list.png" alt="sessions"></button>
-        <button class="icon-btn" id="btn-settings" title="Settings"><img class="header-icon-img" src="${iconsBaseUri}/settings.png" alt="settings"></button>
-    `;
-    header.appendChild(headerActions);
     app.appendChild(header);
 
     // Messages container (persistent, children managed by updateMessages)
@@ -401,9 +394,15 @@ function updateMessages(): void {
 }
 
 function updateTabs(): void {
+    const header = document.querySelector('.header') as HTMLElement | null;
     const tabStrip = document.querySelector('.tab-strip');
     if (!tabStrip) return;
     tabStrip.innerHTML = '';
+
+    // Hide the entire header when only 1 tab — action buttons live in VS Code title bar
+    if (header) {
+        header.style.display = state.tabs.length <= 1 ? 'none' : '';
+    }
 
     for (const tab of state.tabs) {
         const tabEl = el('div', `tab${tab.isActive ? ' tab-active' : ''}${tab.isStreaming ? ' tab-streaming' : ''}`);
@@ -1732,9 +1731,7 @@ function updateStreamingUI(): void {
 
 function bindStableEvents(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
-    const newTabBtn = document.getElementById('btn-new-tab');
-    const sessionsBtn = document.getElementById('btn-sessions');
-    const settingsBtn = document.getElementById('btn-settings');
+
 
     input?.addEventListener('keydown', (e) => {
         if (isSlashMenuVisible()) {
@@ -1795,9 +1792,7 @@ function bindStableEvents(): void {
         updateSlashMenu(input);
     });
 
-    newTabBtn?.addEventListener('click', () => vscode.postMessage({ type: 'createTab' }));
-    sessionsBtn?.addEventListener('click', () => vscode.postMessage({ type: 'getSessions' }));
-    settingsBtn?.addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
+
 }
 
 function bindTabEvents(): void {
@@ -2190,3 +2185,8 @@ function bindScrollListener(): void {
 
 // ── Init ──
 render();
+
+// Proactively request state — the 'ready' message from the extension may
+// have been posted before this script loaded, so don't rely on it.
+vscode.postMessage({ type: 'getState' });
+vscode.postMessage({ type: 'getSkills' });
