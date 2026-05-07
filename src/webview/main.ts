@@ -565,24 +565,24 @@ function renderCodexUsage(): string {
     if (primaryPct !== null && snap.primary) {
         const label = formatCodexWindow(snap.primary.windowMinutes);
         const sev = severityClass(primaryPct);
-        segments.push(`<span class="footer-codex-segment ${sev}">${escHtml(label)} ${Math.round(primaryPct)}%</span>`);
+        segments.push(`<span class="footer-codex-segment ${sev}">${escHtml(label)} ${primaryPct.toFixed(1)}%</span>`);
     }
     if (secondaryPct !== null && snap.secondary) {
         const label = formatCodexWindow(snap.secondary.windowMinutes);
         const sev = severityClass(secondaryPct);
-        segments.push(`<span class="footer-codex-segment ${sev}">${escHtml(label)} ${Math.round(secondaryPct)}%</span>`);
+        segments.push(`<span class="footer-codex-segment ${sev}">${escHtml(label)} ${secondaryPct.toFixed(1)}%</span>`);
     }
 
     const tooltipLines: string[] = [];
     tooltipLines.push(`Plan: ${snap.planType}${snap.activeLimit ? ` (${snap.activeLimit})` : ''}`);
     if (snap.primary) {
         tooltipLines.push(
-            `${formatCodexWindow(snap.primary.windowMinutes)} window: ${Math.round(primaryPct ?? 0)}% used, resets ${formatResetTime(snap.primary.resetAt)}`,
+            `${formatCodexWindow(snap.primary.windowMinutes)} window: ${(primaryPct ?? 0).toFixed(1)}% used, resets ${formatResetTime(snap.primary.resetAt)}`,
         );
     }
     if (snap.secondary) {
         tooltipLines.push(
-            `${formatCodexWindow(snap.secondary.windowMinutes)} window: ${Math.round(secondaryPct ?? 0)}% used, resets ${formatResetTime(snap.secondary.resetAt)}`,
+            `${formatCodexWindow(snap.secondary.windowMinutes)} window: ${(secondaryPct ?? 0).toFixed(1)}% used, resets ${formatResetTime(snap.secondary.resetAt)}`,
         );
     }
     if (snap.credits) {
@@ -2327,6 +2327,11 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
         if (usage) {
             parts.push(...formatFullUsageParts(usage));
         }
+
+        const turn = msg._codexTurnUsage;
+        if (turn) {
+            parts.push(...formatCodexTurnParts(turn));
+        }
     }
 
     if (parts.length === 0) return null;
@@ -2354,6 +2359,18 @@ function formatFullUsageParts(usage: any): string[] {
 
 function usageNumber(value: any, fallback = 0): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function formatCodexTurnParts(turn: any): string[] {
+    if (!turn) return [];
+    const parts: string[] = [];
+    if (turn.primary) {
+        parts.push(`${formatCodexWindow(turn.primary.windowMinutes)} +${turn.primary.deltaPercent.toFixed(1)}%`);
+    }
+    if (turn.secondary) {
+        parts.push(`${formatCodexWindow(turn.secondary.windowMinutes)} +${turn.secondary.deltaPercent.toFixed(1)}%`);
+    }
+    return parts;
 }
 
 function extractThinking(msg: any): string {

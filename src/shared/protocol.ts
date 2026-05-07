@@ -33,6 +33,23 @@ export interface CodexUsageSnapshot {
     capturedAt: number;
 }
 
+export interface CodexTurnWindowDelta {
+    windowMinutes: number;
+    /** Window usage at the start of the turn (clamped to 0 if the window reset mid-turn). */
+    beforePercent: number;
+    /** Window usage right after the turn ended. */
+    afterPercent: number;
+    /** Percent points consumed by this turn. */
+    deltaPercent: number;
+}
+
+export interface CodexTurnUsage {
+    primary?: CodexTurnWindowDelta;
+    secondary?: CodexTurnWindowDelta;
+    /** Unix epoch milliseconds when the post-turn snapshot was captured. */
+    capturedAt: number;
+}
+
 export interface OAuthProviderInfo {
     id: string;
     name: string;

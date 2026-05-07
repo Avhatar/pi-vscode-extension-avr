@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Per-turn Codex usage delta is now appended to each assistant message footer (e.g. `5h +1.2% · week +0.3%`), so you can see how much of the 5-hour and weekly subscription windows the turn consumed. Hidden for non-Codex models.
+
+### Changed
+- Both the global Codex usage indicator and the per-turn delta now show one decimal place (e.g. `1.2%` instead of `1%`) so small turns don't round to zero.
+
 ## [0.4.0] - 2026-05-07
 
 ### Added

@@ -9,10 +9,12 @@ import { DiffManager } from '../providers/diff';
 import { CheckpointManager } from '../providers/checkpoint';
 import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
+import type { CodexTurnUsage, CodexTurnWindowDelta, CodexUsageSnapshot, CodexUsageWindow } from '../shared/protocol';
 
 interface MessageMeta {
     thinkingDurationSec: number;
     messageEndTime: number;
+    codexTurn?: CodexTurnUsage;
 }
 
 interface PendingApproval {
@@ -39,6 +41,8 @@ interface TabState {
     queuedMessages: string[];
     /** Locally tracked streaming flag – the SDK's isStreaming lags behind agent_end. */
     isStreamingLocal: boolean;
+    /** Codex usage snapshot captured at agent_start; used to compute per-turn delta on agent_end. */
+    codexTurnBaseline?: CodexUsageSnapshot | null;
 }
 
 interface PersistedTabsState {
@@ -449,6 +453,7 @@ export class ChatController implements vscode.Disposable {
             tab.streamingThinkingDuration = 0;
             tab.agentStartTime = Date.now();
             tab.isStreamingLocal = true;
+            tab.codexTurnBaseline = getCodexUsageStore().getCurrent();
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
             }
@@ -475,6 +480,18 @@ export class ChatController implements vscode.Disposable {
         }
 
         if (event.type === 'agent_end') {
+            const baseline = tab.codexTurnBaseline;
+            tab.codexTurnBaseline = undefined;
+            const after = getCodexUsageStore().getCurrent();
+            const turn = computeCodexTurnUsage(baseline ?? null, after);
+            if (turn) {
+                const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
+                if (lastOrdinal >= 0) {
+                    const meta = tab.messageMeta.get(lastOrdinal) ?? { thinkingDurationSec: 0, messageEndTime: 0 };
+                    meta.codexTurn = turn;
+                    tab.messageMeta.set(lastOrdinal, meta);
+                }
+            }
             tab.streamingText = '';
             tab.streamingThinking = '';
             tab.isThinking = false;
@@ -620,6 +637,9 @@ export class ChatController implements vscode.Disposable {
                 if (meta) {
                     state.messages[i]._thinkingDurationSec = meta.thinkingDurationSec;
                     state.messages[i]._messageEndTime = meta.messageEndTime;
+                    if (meta.codexTurn) {
+                        state.messages[i]._codexTurnUsage = meta.codexTurn;
+                    }
                 }
                 assistantOrdinal++;
             }
@@ -1032,4 +1052,52 @@ export class ChatController implements vscode.Disposable {
         this._onTabRenamed.dispose();
         this._onLauncherStateChanged.dispose();
     }
+}
+
+function lastAssistantOrdinal(messages: any[]): number {
+    let ordinal = -1;
+    let counter = 0;
+    for (const m of messages) {
+        if (m && m.role === 'assistant') {
+            ordinal = counter;
+            counter++;
+        }
+    }
+    return ordinal;
+}
+
+function computeCodexTurnUsage(
+    baseline: CodexUsageSnapshot | null,
+    after: CodexUsageSnapshot | null,
+): CodexTurnUsage | undefined {
+    if (!after) return undefined;
+    if (baseline && after.capturedAt <= baseline.capturedAt) return undefined;
+
+    const primary = computeWindowDelta(baseline?.primary, after.primary);
+    const secondary = computeWindowDelta(baseline?.secondary, after.secondary);
+    if (!primary && !secondary) return undefined;
+
+    return {
+        primary,
+        secondary,
+        capturedAt: after.capturedAt,
+    };
+}
+
+function computeWindowDelta(
+    before: CodexUsageWindow | undefined,
+    after: CodexUsageWindow | undefined,
+): CodexTurnWindowDelta | undefined {
+    if (!after) return undefined;
+    // If the window reset between snapshots (or there was no baseline), the
+    // "before" point is effectively 0% — the entire current usage came from
+    // this turn (give or take other clients sharing the account).
+    const beforePercent = before && before.resetAt === after.resetAt ? before.percentUsed : 0;
+    const deltaPercent = Math.max(0, after.percentUsed - beforePercent);
+    return {
+        windowMinutes: after.windowMinutes,
+        beforePercent,
+        afterPercent: after.percentUsed,
+        deltaPercent,
+    };
 }
