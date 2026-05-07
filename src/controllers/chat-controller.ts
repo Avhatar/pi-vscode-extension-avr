@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { unlink } from 'fs/promises';
 import { PiSessionManager } from '../pi/session';
 import type {
     ClientMessage, ServerMessage, TabInfo,
@@ -170,14 +171,19 @@ export class ChatController implements vscode.Disposable {
     /** Called by `ChatPanel` when its constructor finishes. */
     registerPanel(tabId: string, panel: { reveal(viewColumn?: vscode.ViewColumn): void }): void {
         this._openPanels.set(tabId, panel);
+        this._activeTabId = tabId;
+        this._persistTabs();
         this._onLauncherStateChanged.fire();
     }
 
     /** Called by `ChatPanel.dispose`. */
-    unregisterPanel(tabId: string): void {
-        if (this._openPanels.delete(tabId)) {
-            this._onLauncherStateChanged.fire();
+    unregisterPanel(tabId: string, panel?: { reveal(viewColumn?: vscode.ViewColumn): void }): void {
+        const current = this._openPanels.get(tabId);
+        if (!current || (panel && current !== panel)) {
+            return;
         }
+        this._openPanels.delete(tabId);
+        this._onLauncherStateChanged.fire();
     }
 
     /**
@@ -290,6 +296,46 @@ export class ChatController implements vscode.Disposable {
     /** Display name of `tabId`, used by panels to set their editor-tab title. */
     getTabName(tabId: string): string | undefined {
         return this._tabs.get(tabId)?.name;
+    }
+
+    /** Delete a closed session file from history. Open chat panels must be closed first. */
+    async deleteHistorySession(sessionPath: string): Promise<void> {
+        if (!sessionPath) {
+            throw new Error('Session path is missing.');
+        }
+
+        const openTab = [...this._tabs.values()].find(tab => (
+            this._openPanels.has(tab.id) && tab.session.sessionPath === sessionPath
+        ));
+        if (openTab) {
+            throw new Error('Close the chat before deleting it from history.');
+        }
+
+        const anySession = this._tabs.values().next().value?.session;
+        const sessions = anySession ? await anySession.getSessions() : [];
+        if (!sessions.some((session: any) => session.path === sessionPath)) {
+            throw new Error('Session was not found in history.');
+        }
+
+        const loadedTabId = this.findTabIdBySessionPath(sessionPath);
+        if (loadedTabId) {
+            const tab = this._tabs.get(loadedTabId);
+            if (tab) {
+                this._unsubscribeTab(loadedTabId);
+                tab.diffManager.dispose();
+                tab.checkpointManager.dispose();
+                await tab.session.dispose();
+                this._tabs.delete(loadedTabId);
+                if (loadedTabId === this._activeTabId) {
+                    this._activeTabId = this._tabs.keys().next().value ?? '';
+                }
+            }
+        }
+
+        await unlink(sessionPath);
+        this._persistTabs();
+        this._onLauncherStateChanged.fire();
+        if (this._activeTabId) this.sendStateSync(this._activeTabId);
     }
 
     /**

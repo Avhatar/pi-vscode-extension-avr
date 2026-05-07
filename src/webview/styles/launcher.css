@@ -177,7 +177,14 @@ body {
     line-height: 1;
     border-radius: 3px;
 }
-.tab-row:hover .row-action { visibility: visible; }
+.tab-row:hover .row-action,
+.session-row:hover .row-action {
+    visibility: visible;
+}
+.session-delete {
+    visibility: visible;
+    margin-left: auto;
+}
 .row-action:hover {
     background: var(--vscode-toolbar-hoverBackground);
     color: var(--vscode-foreground);

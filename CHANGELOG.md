@@ -7,6 +7,34 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-05-07
+
+### Added
+- History entries in the sidebar can now be deleted one at a time.
+
+### Fixed
+- Open chats in the sidebar now keeps showing the current chat panel instead of becoming empty.
+
+## [0.3.5] - 2026-05-07
+
+### Removed
+- Duplicate New Chat and Settings buttons from the sidebar title bar.
+
+## [0.3.4] - 2026-05-07
+
+### Changed
+- Chat editor tabs now keep longer titles, and chat panel toolbar actions are icon-only.
+
+## [0.3.3] - 2026-05-07
+
+### Changed
+- Chat tabs are narrower and chat panel toolbar buttons now use matching Pi icons.
+
+## [0.3.2] - 2026-05-07
+
+### Changed
+- Chat session editor tabs now use the full Pi icon.
+
 ## [0.3.1] - 2026-05-07
 
 ### Fixed

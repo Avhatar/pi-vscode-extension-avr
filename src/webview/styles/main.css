@@ -105,6 +105,12 @@ body[data-mode="panel"] .tab-strip,
 .panel-toolbar .panel-toolbar-btn:hover {
     background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08));
 }
+.panel-toolbar-icon-img {
+    width: 14px;
+    height: 14px;
+    object-fit: contain;
+    filter: brightness(0) invert(0.8);
+}
 .panel-toolbar-spacer {
     flex: 1;
 }
@@ -123,7 +129,7 @@ body[data-mode="panel"] .tab-strip,
     transition: color 0.1s, background 0.1s;
     flex: 1;
     min-width: 0;
-    max-width: 180px;
+    max-width: 90px;
 }
 .tab:hover {
     color: var(--fg);

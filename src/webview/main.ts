@@ -332,7 +332,7 @@ function buildPanelToolbar(): HTMLElement {
 
     const newBtn = el('button', 'panel-toolbar-btn');
     newBtn.title = 'Start a new chat in a new editor tab';
-    newBtn.innerHTML = '<span style="font-size:14px;line-height:1;">+</span><span>New chat</span>';
+    newBtn.innerHTML = `<img class="panel-toolbar-icon-img" src="${iconsBaseUri}/new.png" alt="new chat">`;
     newBtn.addEventListener('click', () => {
         vscode.postMessage({ type: 'createTab' });
     });
@@ -340,7 +340,7 @@ function buildPanelToolbar(): HTMLElement {
 
     const historyBtn = el('button', 'panel-toolbar-btn');
     historyBtn.title = 'Show previous sessions';
-    historyBtn.innerHTML = '<span style="font-size:13px;line-height:1;">📜</span><span>History</span>';
+    historyBtn.innerHTML = `<img class="panel-toolbar-icon-img" src="${iconsBaseUri}/text.png" alt="history">`;
     historyBtn.addEventListener('click', () => {
         vscode.postMessage({ type: 'getSessions' });
     });

@@ -180,6 +180,14 @@ function renderSessionRow(s: LauncherSessionInfo): HTMLElement {
     main.appendChild(meta);
     row.appendChild(main);
 
+    const deleteBtn = el('button', 'row-action session-delete', '×');
+    deleteBtn.title = 'Delete from history';
+    deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'deleteSession', sessionPath: s.path });
+    });
+    row.appendChild(deleteBtn);
+
     row.addEventListener('click', () => {
         vscode.postMessage({ type: 'openSession', sessionPath: s.path });
     });

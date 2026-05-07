@@ -174,6 +174,7 @@ export type LauncherClientMessage =
     | { type: 'createTab' }
     | { type: 'closeTab'; tabId: string }
     | { type: 'openSession'; sessionPath: string }
+    | { type: 'deleteSession'; sessionPath: string }
     | { type: 'openSettings' };
 
 export type LauncherServerMessage =

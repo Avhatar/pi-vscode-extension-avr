@@ -2,7 +2,7 @@
   "name": "pi-agent",
   "displayName": "Pi Agent",
   "description": "First-class Pi coding agent experience for VS Code",
-  "version": "0.3.1",
+  "version": "0.3.6",
   "publisher": "zetaphor",
   "license": "MIT",
   "icon": "media/pi-icon-full.png",
@@ -72,20 +72,6 @@
         "icon": "$(add)"
       }
     ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "pi-agent.createTab",
-          "when": "view == pi-agent.chat",
-          "group": "navigation@1"
-        },
-        {
-          "command": "pi-agent.openSettings",
-          "when": "view == pi-agent.chat",
-          "group": "navigation@2"
-        }
-      ]
-    },
     "keybindings": [
       {
         "command": "pi-agent.focusChat",

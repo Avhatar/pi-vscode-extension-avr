@@ -41,6 +41,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         this._tabId = tabId;
         this._controller = controller;
         this._extensionUri = extensionUri;
+        this._panel.iconPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'pi-icon-full.png');
 
         this._panel.webview.options = {
             enableScripts: true,
@@ -49,14 +50,14 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         this._panel.webview.html = this._getHtml(this._panel.webview);
 
         const initialName = controller.getTabName(tabId);
-        if (initialName) this._panel.title = initialName;
+        if (initialName) this._panel.title = formatPanelTitle(initialName);
 
         this._disposables.push(
             this._panel.webview.onDidReceiveMessage((msg: ClientMessage) => {
                 this._controller.handleMessage(msg, this._tabId);
             }),
             this._controller.onTabRenamed((e) => {
-                if (e.tabId === this._tabId) this._panel.title = e.name;
+                if (e.tabId === this._tabId) this._panel.title = formatPanelTitle(e.name);
             }),
             this._panel.onDidDispose(() => this.dispose()),
         );
@@ -83,7 +84,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
 
     dispose(): void {
         this._controller.removeSink(this);
-        this._controller.unregisterPanel(this._tabId);
+        this._controller.unregisterPanel(this._tabId, this);
         for (const d of this._disposables) {
             try { d.dispose(); } catch { /* ignore */ }
         }
@@ -136,7 +137,7 @@ export function createChatPanel(
     extensionUri: vscode.Uri,
     column: vscode.ViewColumn = vscode.ViewColumn.Active,
 ): ChatPanel {
-    const title = controller.getTabName(tabId) ?? 'Pi Agent';
+    const title = formatPanelTitle(controller.getTabName(tabId) ?? 'Pi Agent');
     const panel = vscode.window.createWebviewPanel(
         CHAT_PANEL_VIEW_TYPE,
         title,
@@ -148,6 +149,11 @@ export function createChatPanel(
         },
     );
     return new ChatPanel(panel, tabId, controller, extensionUri);
+}
+
+function formatPanelTitle(name: string): string {
+    const title = name.trim() || 'Pi Agent';
+    return title.length > 20 ? `${title.slice(0, 19)}…` : title;
 }
 
 function getNonce(): string {

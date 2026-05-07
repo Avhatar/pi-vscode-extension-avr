@@ -76,6 +76,10 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                     if (tabId) this._controller.openOrFocusPanel(tabId);
                     break;
                 }
+                case 'deleteSession':
+                    await this._controller.deleteHistorySession(msg.sessionPath);
+                    await this._sendState();
+                    break;
                 case 'openSettings':
                     vscode.commands.executeCommand('pi-agent.openSettings');
                     break;
