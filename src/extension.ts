@@ -4,6 +4,8 @@ import { SidebarProvider } from './providers/sidebar';
 import { StatusBarManager } from './providers/status-bar';
 import { SettingsPanel } from './providers/settings-panel';
 import { ChatController } from './controllers/chat-controller';
+import { createChatPanel, CHAT_PANEL_VIEW_TYPE } from './providers/chat-panel';
+import { ChatPanelSerializer } from './providers/chat-panel-serializer';
 
 import { DiffManager, DiffContentProvider } from './providers/diff';
 import { CheckpointManager } from './providers/checkpoint';
@@ -90,6 +92,20 @@ export async function activate(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand('pi-agent.showSessions', () => {
                 controller.showSessions();
             }),
+
+            vscode.commands.registerCommand('pi-agent.openInEditor', () => {
+                const tabId = controller.activeTabId;
+                if (!tabId) {
+                    vscode.window.showWarningMessage('Pi Agent: no active chat to open.');
+                    return;
+                }
+                createChatPanel(tabId, controller, context.extensionUri);
+            }),
+
+            vscode.window.registerWebviewPanelSerializer(
+                CHAT_PANEL_VIEW_TYPE,
+                new ChatPanelSerializer(controller, context.extensionUri),
+            ),
         );
 
         outputChannel.appendLine('Pi Agent extension activated.');

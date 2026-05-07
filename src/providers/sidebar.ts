@@ -6,12 +6,16 @@ import { PiSessionManager } from '../pi/session';
 /**
  * Sidebar webview view. Renders chat HTML and forwards messages between
  * the webview and the {@link ChatController}. All state and tab logic lives
- * in the controller; this class is a thin view.
+ * in the controller; this class is a thin view that follows whichever tab
+ * the controller marks as active (`tabFilter: 'active'`).
  */
 export class SidebarProvider implements vscode.WebviewViewProvider, ChatViewSink {
     private _view?: vscode.WebviewView;
     private _extensionUri: vscode.Uri;
     private _controller: ChatController;
+
+    /** Sidebar always reflects the controller's active tab. */
+    readonly tabFilter = 'active' as const;
 
     constructor(extensionUri: vscode.Uri, controller: ChatController) {
         this._extensionUri = extensionUri;
@@ -28,7 +32,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider, ChatViewSink
     }
 
     async createTab(): Promise<void> {
-        return this._controller.createTab();
+        await this._controller.createTab();
     }
 
     showSessions(): void {
@@ -58,14 +62,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider, ChatViewSink
         webviewView.webview.html = this._getHtml(webviewView.webview);
 
         webviewView.webview.onDidReceiveMessage((msg: ClientMessage) => {
+            // sidebar sends no sourceTabId — the controller routes to the active tab
             this._controller.handleMessage(msg);
         });
 
         webviewView.onDidDispose(() => {
-            this._controller.setSink(undefined);
+            this._controller.removeSink(this);
         });
 
-        this._controller.setSink(this);
+        this._controller.addSink(this);
         this.post({ type: 'ready' });
         this._controller.sendStateSync();
     }
@@ -92,8 +97,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider, ChatViewSink
     <link rel="stylesheet" href="${styleUri}">
     <title>Pi Agent</title>
 </head>
-<body>
-    <div id="app" data-icons-uri="${iconsUri}"></div>
+<body data-mode="sidebar">
+    <div id="app" data-icons-uri="${iconsUri}" data-mode="sidebar"></div>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

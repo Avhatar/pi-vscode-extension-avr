@@ -279,7 +279,7 @@ controller; flush on `attachPanel`.
 
 ```
 [x] Commit 1: ChatController extraction          → 0.2.1 (2026-05-07)
-[ ] Commit 2: ChatPanel optional + serializer    → 0.2.2
+[x] Commit 2: ChatPanel optional + serializer    → 0.2.2 (2026-05-07)
 [ ] Commit 3: Sidebar → launcher                 → 0.3.0
 ```
 
@@ -313,3 +313,31 @@ checkbox, stamp date/version, add notes to the "Log").
 - CHANGELOG stamped: `[0.2.1] - 2026-05-07`.
 - Manual sweep (§7) deferred to the user — extension is installed and ready.
 - Next action: Commit 2 — add `ChatPanel` alongside the sidebar.
+
+### 2026-05-07 — Commit 2 code complete (awaiting verification)
+
+- Multi-sink controller: replaced single `_sink` with a `Set<ChatViewSink>` where each sink declares a `tabFilter` (`'active'` for the sidebar, a specific `tabId` for panels). Internal posts now go through `_postForTab(tabId, msg)`, which routes to every matching sink.
+- `handleMessage(msg, sourceTabId?)` lets panel webviews target their own tab, while the sidebar (no `sourceTabId`) keeps targeting the active tab.
+- `sendStateSync(tabId?)` builds and posts state for a specific tab. The active-tab path is unchanged.
+- New: `controller.findTabIdBySessionPath`, `createTabFromSessionPath`, `getTabName`, and `onTabRenamed` event used by panels to keep their editor-tab title in sync.
+- New `src/providers/chat-panel.ts` — `WebviewPanel` wrapper bound to one `tabId`. Implements `ChatViewSink` with `tabFilter = tabId`. Exposes `createChatPanel(...)` factory used by the `pi-agent.openInEditor` command.
+- New `src/providers/chat-panel-serializer.ts` — `WebviewPanelSerializer` that, on window reload, looks up the tab by `sessionPath` (falling back to creating a new tab from disk if needed) and re-attaches the panel.
+- View type for editor panels: `pi-agent.chatPanel` (distinct from the sidebar view id `pi-agent.chat`, even though both load the same webview bundle).
+- Webview detects mode via `data-mode` attribute on `<div id="app">`. In `panel` mode it (a) hides the in-webview tab strip via CSS + `updateTabs()`, and (b) calls `vscode.setState({ tabId, sessionPath })` after each state sync so the serializer can restore.
+- `package.json`: new command `pi-agent.openInEditor` with the `$(link-external)` icon; placed in `view/title` group `navigation@2` (between New Tab and Sessions).
+- `extension.ts`: registers the command + the `WebviewPanelSerializer`. The serializer needs the controller to be ready, so it's registered after `restorePersistedTabs()`.
+- Protocol: added optional `sessionPath` to `SerializedAgentState` so the webview can serialize it.
+- `npm run compile` and `npx tsc --noEmit` clean. Unit tests: 22 passed, 3 pre-existing failures (unchanged from before).
+- Pending before ticking §8: F5 sweep + `deploy:patch` to ship 0.2.2.
+
+### 2026-05-07 — Commit 2 shipped as 0.2.2
+
+- `npm run deploy:patch` ran clean. `pi-agent-0.2.2.vsix` (39.35 MB) packaged and installed.
+- CHANGELOG stamped: `[0.2.2] - 2026-05-07`.
+- Manual sweep deferred to the user. Smoke tests to run:
+  - Sidebar still functions identically (regression check after multi-sink refactor).
+  - Click `$(link-external)` in the sidebar title → chat opens as an editor tab.
+  - Drag the editor tab into a split, then into a new window — content stays in sync.
+  - Reload Window — every open chat panel returns at its prior position.
+  - Close a panel, then re-open via Session History inside any other panel.
+- Next action: Commit 3 — sidebar becomes a pure launcher; editor panels become the default UX. Target version 0.3.0.

@@ -72,6 +72,13 @@ body {
 }
 .tab-strip::-webkit-scrollbar { display: none; }
 
+/* In panel mode the chat occupies its own editor tab, so we never want the
+   in-webview tab strip — VS Code's native editor tabs serve that role. */
+body[data-mode="panel"] .header,
+[data-mode="panel"] > .header {
+    display: none !important;
+}
+
 .tab {
     display: flex;
     align-items: center;

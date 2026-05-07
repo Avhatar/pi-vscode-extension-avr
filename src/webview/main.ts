@@ -8,7 +8,20 @@ declare function acquireVsCodeApi(): {
 };
 
 const vscode = acquireVsCodeApi();
-const iconsBaseUri = document.getElementById('app')?.dataset.iconsUri ?? '';
+const appEl = document.getElementById('app');
+const iconsBaseUri = appEl?.dataset.iconsUri ?? '';
+/**
+ * 'sidebar' = the chat is shown inside the activity-bar webview-view.
+ * 'panel'   = the chat is shown in a stand-alone editor tab (a `WebviewPanel`).
+ *
+ * Panels are bound to one specific chat tab and need to call
+ * `vscode.setState({ tabId, sessionPath })` so VS Code's
+ * `WebviewPanelSerializer` can restore them after a window reload.
+ */
+const viewMode: 'sidebar' | 'panel' =
+    (appEl?.dataset.mode === 'panel') ? 'panel' : 'sidebar';
+/** When in panel mode, the tab id baked into the HTML at panel creation time. */
+const panelTabId: string | undefined = appEl?.dataset.tabId || undefined;
 
 // ── State ──
 
@@ -190,6 +203,12 @@ function applyStateSync(s: SerializedAgentState): void {
     state.streamingThinkingDuration = s.streamingThinkingDuration ?? 0;
     state.queuedMessages = s.queuedMessages ?? [];
     const tabSwitched = prevTab !== state.activeTabId;
+
+    // In panel mode, persist a tiny pointer (tabId + sessionPath) so VS Code
+    // can re-attach this panel to the right session after a window reload.
+    if (viewMode === 'panel' && s.sessionPath) {
+        vscode.setState({ tabId: panelTabId, sessionPath: s.sessionPath });
+    }
 
     // Purge drafts for tabs that no longer exist
     const liveTabIds = new Set(state.tabs.map((t: TabInfo) => t.id));
@@ -431,9 +450,14 @@ function updateTabs(): void {
     if (!tabStrip) return;
     tabStrip.innerHTML = '';
 
-    // Hide the entire header when only 1 tab — action buttons live in VS Code title bar
+    // Hide the entire header when only 1 tab — action buttons live in VS Code title bar.
+    // In panel mode there are no in-webview tabs at all (the editor tab serves that role).
     if (header) {
-        header.style.display = state.tabs.length <= 1 ? 'none' : '';
+        if (viewMode === 'panel') {
+            header.style.display = 'none';
+        } else {
+            header.style.display = state.tabs.length <= 1 ? 'none' : '';
+        }
     }
 
     for (const tab of state.tabs) {

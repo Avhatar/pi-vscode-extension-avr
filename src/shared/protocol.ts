@@ -69,6 +69,8 @@ export interface SerializedAgentState {
     tools: string[];
     sessionId?: string;
     sessionName?: string;
+    /** Absolute path to the persisted session file (used by webview panels for restoration). */
+    sessionPath?: string;
     contextUsage?: ContextUsageInfo;
     fileChanges?: FileChangeInfo[];
     rollbackPoint?: number | null;

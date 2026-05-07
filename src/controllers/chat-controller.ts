@@ -41,7 +41,17 @@ interface PersistedTabsState {
     activeIndex: number;
 }
 
+/**
+ * A view that displays chat state. The controller routes messages to sinks
+ * whose `tabFilter` matches the message's tab.
+ *
+ * - `tabFilter: 'active'` — receives messages for whichever tab is currently
+ *   active (used by the sidebar, which always shows the active tab).
+ * - `tabFilter: <tabId>` — receives messages only for that specific tab
+ *   (used by editor panels, each bound to one tab).
+ */
 export interface ChatViewSink {
+    readonly tabFilter: string | 'active';
     post(message: ServerMessage): void;
 }
 
@@ -89,10 +99,8 @@ function safeSerialize(obj: any): any {
 /**
  * Owns all chat tab state and routes messages from views to the appropriate
  * tab. View layers (sidebar, editor panels) attach themselves as a
- * `ChatViewSink` and forward webview messages via `handleMessage`.
- *
- * Phase 1 hosts a single sink (the sidebar). Phase 2+ will key sinks by
- * `tabId` so that each editor panel receives only its own updates.
+ * {@link ChatViewSink} via {@link addSink} and forward webview messages via
+ * {@link handleMessage} (passing their bound `tabId` if any).
  */
 export class ChatController implements vscode.Disposable {
     private _outputChannel: vscode.OutputChannel;
@@ -103,7 +111,11 @@ export class ChatController implements vscode.Disposable {
     private _tabSubscriptions = new Map<string, (() => void)[]>();
     private _authChangedSubscription?: vscode.Disposable;
 
-    private _sink?: ChatViewSink;
+    private _sinks = new Set<ChatViewSink>();
+
+    private _onTabRenamed = new vscode.EventEmitter<{ tabId: string; name: string }>();
+    /** Fires when a tab's display name changes — editor panels listen to update their title. */
+    readonly onTabRenamed = this._onTabRenamed.event;
 
     constructor(
         context: vscode.ExtensionContext,
@@ -126,8 +138,12 @@ export class ChatController implements vscode.Disposable {
         });
     }
 
-    setSink(sink: ChatViewSink | undefined): void {
-        this._sink = sink;
+    addSink(sink: ChatViewSink): void {
+        this._sinks.add(sink);
+    }
+
+    removeSink(sink: ChatViewSink): void {
+        this._sinks.delete(sink);
     }
 
     /** Expose the active tab's session for global commands (palette, keybindings). */
@@ -135,12 +151,52 @@ export class ChatController implements vscode.Disposable {
         return this._tabs.get(this._activeTabId)?.session;
     }
 
-    /** Public: create a new agent tab. */
-    async createTab(): Promise<void> {
-        await this._createTab();
+    get activeTabId(): string {
+        return this._activeTabId;
     }
 
-    /** Public: tell the webview to show the session history list. */
+    /** Lookup an existing tab whose session was loaded from `sessionPath`. */
+    findTabIdBySessionPath(sessionPath: string): string | undefined {
+        if (!sessionPath) return undefined;
+        for (const [id, tab] of this._tabs) {
+            if (tab.session.sessionPath === sessionPath) return id;
+        }
+        return undefined;
+    }
+
+    /** Display name of `tabId`, used by panels to set their editor-tab title. */
+    getTabName(tabId: string): string | undefined {
+        return this._tabs.get(tabId)?.name;
+    }
+
+    /**
+     * Load a session from disk into a brand-new tab and return its id.
+     * Used by the panel serializer when restoring a panel whose session
+     * is not currently represented by any tab.
+     */
+    async createTabFromSessionPath(sessionPath: string): Promise<string> {
+        const session = new PiSessionManager(this._outputChannel, this._context.secrets);
+        await session.initializeFromPath(sessionPath);
+
+        const checkpoint = new CheckpointManager();
+        const diff = new DiffManager(session, checkpoint);
+
+        const id = nextTabId();
+        const tab = makeTabState(id, session, diff, checkpoint);
+        this._updateTabName(tab);
+
+        this._tabs.set(id, tab);
+        this._subscribeTab(tab);
+        this._persistTabs();
+        return id;
+    }
+
+    /** Public: create a new agent tab. */
+    async createTab(): Promise<string> {
+        return this._createTab();
+    }
+
+    /** Public: tell the active sidebar view to show the session history list. */
     showSessions(): void {
         this.handleMessage({ type: 'getSessions' });
     }
@@ -149,8 +205,19 @@ export class ChatController implements vscode.Disposable {
         return this._tabs.get(this._activeTabId)!;
     }
 
-    private _post(message: ServerMessage): void {
-        this._sink?.post(message);
+    /** Send a message to every sink whose filter matches `tabId`. */
+    private _postForTab(tabId: string, message: ServerMessage): void {
+        for (const sink of this._sinks) {
+            if (sink.tabFilter === tabId
+                || (sink.tabFilter === 'active' && tabId === this._activeTabId)) {
+                sink.post(message);
+            }
+        }
+    }
+
+    /** Send a message to every sink, regardless of filter. Used for tab-agnostic events. */
+    private _postBroadcast(message: ServerMessage): void {
+        for (const sink of this._sinks) sink.post(message);
     }
 
     private _broadcastModels(): void {
@@ -159,7 +226,7 @@ export class ChatController implements vscode.Disposable {
         const models = tab.session.getModels();
         const current = tab.session.getCurrentModel();
         const thinkingLevel = tab.session.getThinkingLevel();
-        this._post({ type: 'models', models, current, thinkingLevel });
+        this._postForTab(this._activeTabId, { type: 'models', models, current, thinkingLevel });
     }
 
     private _subscribeTab(tab: TabState): void {
@@ -173,9 +240,7 @@ export class ChatController implements vscode.Disposable {
 
         unsubs.push(
             tab.diffManager.onFileChange((change) => {
-                if (tab.id === this._activeTabId) {
-                    this._post({ type: 'fileChange', change });
-                }
+                this._postForTab(tab.id, { type: 'fileChange', change });
             }),
         );
 
@@ -195,8 +260,6 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _handleTabEvent(tab: TabState, event: any): void {
-        const isActive = tab.id === this._activeTabId;
-
         if (event.type === 'agent_start') {
             tab.streamingText = '';
             tab.streamingThinking = '';
@@ -205,7 +268,7 @@ export class ChatController implements vscode.Disposable {
             tab.streamingThinkingDuration = 0;
             tab.agentStartTime = Date.now();
             tab.isStreamingLocal = true;
-            if (isActive) {
+            if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
             }
         }
@@ -237,7 +300,7 @@ export class ChatController implements vscode.Disposable {
             tab.streamingThinkingDuration = 0;
             tab.agentStartTime = 0;
             tab.isStreamingLocal = false;
-            if (isActive) {
+            if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', false);
             } else {
                 tab.hasNotification = true;
@@ -287,19 +350,18 @@ export class ChatController implements vscode.Disposable {
 
         this._updateTabName(tab);
 
-        if (isActive) {
-            this._post({ type: 'agentEvent', event: safeSerialize(event) });
+        // Stream raw events to whoever is watching this tab (the sidebar if active, panels for this tab).
+        this._postForTab(tab.id, { type: 'agentEvent', event: safeSerialize(event) });
 
-            if (
-                event.type === 'agent_start' ||
-                event.type === 'agent_end' ||
-                event.type === 'message_end' ||
-                event.type === 'turn_end'
-            ) {
-                this.sendStateSync();
+        const stateSyncEvents = ['agent_start', 'agent_end', 'message_end', 'turn_end'];
+        if (stateSyncEvents.includes(event.type)) {
+            this.sendStateSync(tab.id);
+            // When activity happens on a non-active tab, also refresh the sidebar
+            // so its tab indicators (streaming spinner / unread dot) update.
+            if (tab.id !== this._activeTabId
+                && (event.type === 'agent_start' || event.type === 'agent_end')) {
+                this.sendStateSync(this._activeTabId);
             }
-        } else if (event.type === 'agent_start' || event.type === 'agent_end') {
-            this.sendStateSync();
         }
     }
 
@@ -308,6 +370,7 @@ export class ChatController implements vscode.Disposable {
         if (sessionName && tab.name !== sessionName) {
             tab.name = sessionName;
             this._persistTabs();
+            this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
             return;
         }
         // Derive tab name from first user message if still default
@@ -325,13 +388,19 @@ export class ChatController implements vscode.Disposable {
                 if (trimmed) {
                     tab.name = trimmed;
                     this._persistTabs();
+                    this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
                 }
             }
         }
     }
 
-    sendStateSync(): void {
-        const tab = this._activeTab;
+    /**
+     * Build the SerializedAgentState for `tabId` and post it to every sink
+     * watching that tab. If `tabId` is omitted, the active tab is used.
+     */
+    sendStateSync(tabId?: string): void {
+        const targetId = tabId ?? this._activeTabId;
+        const tab = this._tabs.get(targetId);
         if (!tab) return;
 
         const state = tab.session.serializeState();
@@ -350,6 +419,7 @@ export class ChatController implements vscode.Disposable {
         state.rollbackPoint = tab.checkpointManager.rollbackPoint;
         state.tabs = this._getTabInfos();
         state.activeTabId = this._activeTabId;
+        state.sessionPath = tab.session.sessionPath ?? undefined;
         state.streamingText = tab.streamingText;
         state.streamingThinking = tab.streamingThinking;
         state.isThinking = tab.isThinking;
@@ -369,7 +439,7 @@ export class ChatController implements vscode.Disposable {
                 assistantOrdinal++;
             }
         }
-        this._post({ type: 'stateSync', state });
+        this._postForTab(targetId, { type: 'stateSync', state });
     }
 
     private _getTabInfos(): TabInfo[] {
@@ -382,9 +452,16 @@ export class ChatController implements vscode.Disposable {
         }));
     }
 
-    async handleMessage(msg: ClientMessage): Promise<void> {
+    /**
+     * Process a webview message. `sourceTabId` identifies the panel that
+     * sent the message; if omitted, the message is routed to the active tab
+     * (matches the sidebar's behaviour of always operating on the active tab).
+     */
+    async handleMessage(msg: ClientMessage, sourceTabId?: string): Promise<void> {
         try {
-            const tab = this._activeTab;
+            const targetId = sourceTabId ?? this._activeTabId;
+            const tab = this._tabs.get(targetId);
+            if (!tab) return;
 
             switch (msg.type) {
                 case 'prompt': {
@@ -405,23 +482,23 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'queueMessage':
                     tab.queuedMessages.push(msg.text);
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'editQueuedMessage':
                     if (msg.index >= 0 && msg.index < tab.queuedMessages.length && msg.text.trim()) {
                         tab.queuedMessages[msg.index] = msg.text.trim();
                     }
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'removeQueuedMessage':
                     if (msg.index >= 0 && msg.index < tab.queuedMessages.length) {
                         tab.queuedMessages.splice(msg.index, 1);
                     }
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'cancelQueue':
                     tab.queuedMessages = [];
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'followUp':
                     await tab.session.followUp(msg.text);
@@ -433,16 +510,16 @@ export class ChatController implements vscode.Disposable {
                     const models = tab.session.getModels();
                     const current = tab.session.getCurrentModel();
                     const thinkingLevel = tab.session.getThinkingLevel();
-                    this._post({ type: 'models', models, current, thinkingLevel });
+                    this._postForTab(tab.id, { type: 'models', models, current, thinkingLevel });
                     break;
                 }
                 case 'setModel':
                     await tab.session.setModel(msg.provider, msg.modelId);
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'setThinkingLevel':
                     tab.session.setThinkingLevel(msg.level);
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'newSession':
                     await tab.session.newSession();
@@ -460,7 +537,8 @@ export class ChatController implements vscode.Disposable {
                     tab.isStreamingLocal = false;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
-                    this.sendStateSync();
+                    this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
+                    this.sendStateSync(tab.id);
                     break;
                 case 'loadSession':
                     await tab.session.loadSession(msg.sessionPath);
@@ -480,20 +558,20 @@ export class ChatController implements vscode.Disposable {
                     tab.name = 'New Agent'; // reset so _updateTabName re-derives from first message
                     this._updateTabName(tab);
                     this._persistTabs();
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'getSessions': {
                     const sessions = await tab.session.getSessions();
                     const currentId = tab.session.session?.sessionId;
-                    this._post({ type: 'sessions', sessions, currentSessionId: currentId });
+                    this._postForTab(tab.id, { type: 'sessions', sessions, currentSessionId: currentId });
                     break;
                 }
                 case 'getState':
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'getSkills': {
                     const skills = tab.session.getSkills();
-                    this._post({ type: 'skills', skills });
+                    this._postForTab(tab.id, { type: 'skills', skills });
                     break;
                 }
                 case 'approveToolCall':
@@ -515,7 +593,7 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'undoFileChange':
                     await tab.diffManager.undoFileChange(msg.filePath, msg.toolCallId);
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 case 'restoreCheckpoint': {
                     const restored = await tab.checkpointManager.restoreCheckpoint(msg.messageIndex);
@@ -533,7 +611,7 @@ export class ChatController implements vscode.Disposable {
                             `Restored ${restored.length} file(s) to checkpoint.`
                         );
                     }
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 }
                 case 'redoCheckpoint': {
@@ -551,7 +629,7 @@ export class ChatController implements vscode.Disposable {
                             `Re-applied ${redone.length} file(s).`
                         );
                     }
-                    this.sendStateSync();
+                    this.sendStateSync(tab.id);
                     break;
                 }
                 case 'confirmAction': {
@@ -560,7 +638,7 @@ export class ChatController implements vscode.Disposable {
                         { modal: true },
                         'Yes',
                     );
-                    this._post({
+                    this._postForTab(tab.id, {
                         type: 'confirmResult',
                         action: msg.action,
                         confirmed: answer === 'Yes',
@@ -582,20 +660,20 @@ export class ChatController implements vscode.Disposable {
                     break;
             }
         } catch (err: any) {
-            this._post({ type: 'error', message: err.message ?? String(err) });
+            // Errors from a panel-bound message route back to that panel; for sidebar
+            // (no sourceTabId) they go to whoever currently shows the active tab.
+            const targetId = sourceTabId ?? this._activeTabId;
+            this._postForTab(targetId, { type: 'error', message: err.message ?? String(err) });
         }
     }
 
     private _requestToolApproval(tab: TabState, toolCallId: string, toolName: string, args: any): Promise<boolean> {
         return new Promise<boolean>((resolve) => {
             tab.pendingApprovals.set(toolCallId, { resolve });
-
-            if (tab.id === this._activeTabId) {
-                this._post({
-                    type: 'toolCallPending',
-                    pending: { toolCallId, toolName, args: safeSerialize(args) },
-                });
-            }
+            this._postForTab(tab.id, {
+                type: 'toolCallPending',
+                pending: { toolCallId, toolName, args: safeSerialize(args) },
+            });
         });
     }
 
@@ -604,13 +682,11 @@ export class ChatController implements vscode.Disposable {
         if (pending) {
             tab.pendingApprovals.delete(toolCallId);
             pending.resolve(approved);
-            if (tab.id === this._activeTabId) {
-                this._post({ type: 'toolCallResolved', toolCallId });
-            }
+            this._postForTab(tab.id, { type: 'toolCallResolved', toolCallId });
         }
     }
 
-    private async _createTab(): Promise<void> {
+    private async _createTab(): Promise<string> {
         const newSession = new PiSessionManager(this._outputChannel, this._context.secrets);
         await newSession.initialize();
 
@@ -624,7 +700,8 @@ export class ChatController implements vscode.Disposable {
 
         this._activeTabId = id;
         this._persistTabs();
-        this.sendStateSync();
+        this.sendStateSync(id);
+        return id;
     }
 
     private async _closeTab(tabId: string): Promise<void> {
@@ -646,7 +723,7 @@ export class ChatController implements vscode.Disposable {
         }
 
         this._persistTabs();
-        this.sendStateSync();
+        this.sendStateSync(this._activeTabId);
     }
 
     private _switchTab(tabId: string): void {
@@ -663,7 +740,7 @@ export class ChatController implements vscode.Disposable {
         }
 
         this._persistTabs();
-        this.sendStateSync();
+        this.sendStateSync(this._activeTabId);
     }
 
     private _persistTabs(): void {
@@ -731,7 +808,7 @@ export class ChatController implements vscode.Disposable {
         this._activeTabId = restoredIds[activeIdx];
 
         this._outputChannel.appendLine(`Restored ${restoredIds.length} tab(s).`);
-        this.sendStateSync();
+        this.sendStateSync(this._activeTabId);
     }
 
     private _findCutoffIndex(messages: any[], rollbackPoint: number): number {
@@ -754,6 +831,7 @@ export class ChatController implements vscode.Disposable {
         this._tabSubscriptions.clear();
         this._authChangedSubscription?.dispose();
         this._authChangedSubscription = undefined;
-        this._sink = undefined;
+        this._sinks.clear();
+        this._onTabRenamed.dispose();
     }
 }
