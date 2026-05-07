@@ -4,7 +4,11 @@
 
 Pi Agent is a VS Code extension providing a sidebar chat UI for the Pi coding agent SDK (`@mariozechner/pi-coding-agent`). It supports multi-tab sessions, inline diffs, tool approval, checkpoints/rollback, a dedicated settings page, message queuing during streaming, mid-stream steering, and slash-command skills.
 
-## Build & Test
+## Language
+
+**English only.** Every artefact that lives in the repository must be written in English: source code, identifiers, comments, commit messages, CHANGELOG entries, READMEs, design docs, agent skills (`.pi/skills/**`), issue templates, configuration files, UI strings — without exception. This applies even when the conversation with the user is in another language.
+
+The chat with the user can be in any language they prefer; the moment something is being written to a file or commit message in this repo, switch to English.
 
 ```bash
 npm install          # install dependencies
