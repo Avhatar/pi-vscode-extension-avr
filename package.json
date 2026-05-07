@@ -2,7 +2,7 @@
   "name": "pi-agent",
   "displayName": "Pi Agent",
   "description": "First-class Pi coding agent experience for VS Code",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "zetaphor",
   "license": "MIT",
   "icon": "media/pi-icon-full.png",

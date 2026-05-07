@@ -46,8 +46,11 @@ export async function activate(context: vscode.ExtensionContext) {
             createChatPanel(tabId, controller, context.extensionUri);
         });
 
-        // Restore tabs from previous session before any view is shown
-        await controller.restorePersistedTabs();
+        // Phase 3 relies on VS Code's `WebviewPanelSerializer` to bring panels
+        // (and their backing tabs) back across reloads, so we no longer need
+        // our own eager `restorePersistedTabs()` call. Clear any leftover
+        // pre-0.3.0 state so users upgrading don't see ghost "Open chats".
+        context.workspaceState.update('pi-agent.tabs', undefined);
 
         const launcherView = new LauncherView(context.extensionUri, controller);
 

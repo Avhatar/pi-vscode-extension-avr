@@ -227,20 +227,25 @@ export class ChatController implements vscode.Disposable {
 
     /** Build a snapshot of launcher state (open tabs + recent closed sessions). */
     async computeLauncherState(): Promise<LauncherState> {
-        const tabs: LauncherTabInfo[] = [...this._tabs.values()].map(tab => ({
-            id: tab.id,
-            name: tab.name,
-            isStreaming: tab.isStreamingLocal,
-            hasNotification: tab.hasNotification,
-            isOpen: this._openPanels.has(tab.id),
-            modelLabel: tab.session.getCurrentModel()?.id,
-        }));
+        // "Open chats" only includes tabs with a visible editor panel. A
+        // bare TabState without a panel is an internal placeholder (e.g. the
+        // initial empty tab), not something the user thinks of as open.
+        const tabs: LauncherTabInfo[] = [...this._tabs.values()]
+            .filter(tab => this._openPanels.has(tab.id))
+            .map(tab => ({
+                id: tab.id,
+                name: tab.name,
+                isStreaming: tab.isStreamingLocal,
+                hasNotification: tab.hasNotification,
+                isOpen: true,
+                modelLabel: tab.session.getCurrentModel()?.id,
+            }));
 
-        // Build the recent-sessions list from the active tab's session manager
-        // (all sessions share the same on-disk store). Mark sessions whose
-        // path matches an existing tab so the UI can hide duplicates.
+        // Mark sessions whose path matches a panel-attached tab so the
+        // History section doesn't duplicate them.
         const openPaths = new Set(
             [...this._tabs.values()]
+                .filter(t => this._openPanels.has(t.id))
                 .map(t => t.session.sessionPath)
                 .filter((p): p is string => !!p),
         );

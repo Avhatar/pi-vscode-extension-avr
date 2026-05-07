@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-07
+
+### Fixed
+- "Open chats" section in the launcher no longer lists ghost entries that aren't actually open in any editor tab. The list now reflects only chats with a visible panel; everything else lives under "History". Stale tab data persisted by pre-0.3.0 versions is cleared automatically on first launch.
+
 ## [0.3.0] - 2026-05-07
 
 ### Changed
