@@ -826,6 +826,14 @@ body[data-mode="panel"] .tab-strip,
     position: relative;
 }
 
+@media (min-width: 700px) {
+    body[data-mode="panel"] .input-container {
+        width: 50%;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+
 /* ── Input ── */
 .input-area {
     padding: 10px 14px 2px;

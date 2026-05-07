@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-07
+
+### Changed
+- The prompt input in chat editor windows is now half-width and centered, leaving free space on both sides.
+
 ## [0.5.0] - 2026-05-07
 
 ### Changed

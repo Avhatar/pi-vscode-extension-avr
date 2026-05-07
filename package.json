@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "First-class AI coding agent experience for VS Code",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/pi-code-icon-full.png",
