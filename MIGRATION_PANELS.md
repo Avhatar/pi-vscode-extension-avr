@@ -43,7 +43,7 @@ Target UX (matching Claude Code in VS Code):
 | D5 | Session history | Permanent (already in the Pi SDK via `.pi/sessions/`); a `$(history)` button inside every panel | 2026-05-07 |
 | D6 | Last-active | Remembered across VS Code sessions | 2026-05-07 |
 | D7 | Memory | Not optimised; `retainContextWhenHidden: true` everywhere by default | 2026-05-07 |
-| D8 | Where `ChatController` lives | TBD — `src/controllers/` or `src/providers/` | open |
+| D8 | Where `ChatController` lives | `src/controllers/chat-controller.ts` (new directory; cleaner separation: controllers / providers / webview / pi) | 2026-05-07 |
 
 ---
 
@@ -214,11 +214,6 @@ internal tab bar inside the webview is removed. The
 
 ## 5. Open questions
 
-- **D8** — where does `ChatController` live? Options:
-  - `src/controllers/chat-controller.ts` (new directory, semantically
-    cleaner)
-  - `src/providers/chat-controller.ts` (next to the rest)
-
 - **Q1** — do we need an unread/streaming indicator on a closed panel in
   the launcher? `TabState` already has `hasNotification`. Surface it in the
   launcher as a badge next to the chat row.
@@ -283,7 +278,7 @@ controller; flush on `attachPanel`.
 ## 8. Progress
 
 ```
-[ ] Commit 1: ChatController extraction          → 0.2.1
+[x] Commit 1: ChatController extraction          → 0.2.1 (2026-05-07)
 [ ] Commit 2: ChatPanel optional + serializer    → 0.2.2
 [ ] Commit 3: Sidebar → launcher                 → 0.3.0
 ```
@@ -300,4 +295,21 @@ checkbox, stamp date/version, add notes to the "Log").
 
 - Architecture agreed (D1–D7).
 - This document created.
-- Next action: lock D8 and start Commit 1.
+- D8 locked: `ChatController` lives in `src/controllers/chat-controller.ts`.
+- Next action: Commit 1 — extract `ChatController`.
+
+### 2026-05-07 — Commit 1 code complete (awaiting verification)
+
+- Created `src/controllers/chat-controller.ts` with all tab/session/event/persistence logic moved out of `SidebarProvider`.
+- `src/providers/sidebar.ts` is now a thin `ChatViewSink` that forwards webview messages to the controller and posts replies back.
+- `src/extension.ts` constructs `ChatController` separately and wires it into commands; controller is added to `context.subscriptions` so it disposes cleanly on deactivate.
+- `npm run compile` and `npx tsc --noEmit` are clean. `npm run test:unit`: 22 passed, 3 pre-existing failures unrelated to refactor (test fixtures reference a model that's not in the registry — both before and after the change).
+- Behaviour change worth noting: under the old code, side-bar collapse/expand disposed all tab-event subscriptions (so streaming events arriving while the side-bar was hidden were dropped). The controller now keeps subscriptions alive across view dispose; cleanup happens only on extension deactivate via `context.subscriptions`. This is closer to what we'll need in Phase 2 when the same controller services multiple panels.
+- Pending before ticking the checkbox in §8: F5 manual smoke (see §7 sweep), then `npm run deploy:patch` to publish 0.2.1.
+
+### 2026-05-07 — Commit 1 shipped as 0.2.1
+
+- `npm run deploy:patch` ran clean. `pi-agent-0.2.1.vsix` (39.35 MB) packaged and installed.
+- CHANGELOG stamped: `[0.2.1] - 2026-05-07`.
+- Manual sweep (§7) deferred to the user — extension is installed and ready.
+- Next action: Commit 2 — add `ChatPanel` alongside the sidebar.

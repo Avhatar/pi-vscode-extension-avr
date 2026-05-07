@@ -3,11 +3,12 @@ import { PiSessionManager } from './pi/session';
 import { SidebarProvider } from './providers/sidebar';
 import { StatusBarManager } from './providers/status-bar';
 import { SettingsPanel } from './providers/settings-panel';
+import { ChatController } from './controllers/chat-controller';
 
 import { DiffManager, DiffContentProvider } from './providers/diff';
 import { CheckpointManager } from './providers/checkpoint';
 
-let sidebarRef: SidebarProvider | undefined;
+let controllerRef: ChatController | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     const outputChannel = vscode.window.createOutputChannel('Pi Agent');
@@ -20,7 +21,7 @@ export async function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(
             context.secrets.onDidChange(async (e) => {
                 if (e.key.startsWith('pi-agent.apiKey.')) {
-                    await sidebarRef?.activeSession?.reloadCredentials();
+                    await controllerRef?.activeSession?.reloadCredentials();
                     outputChannel.appendLine(`Credentials reloaded after change to ${e.key}`);
                 }
             }),
@@ -31,15 +32,19 @@ export async function activate(context: vscode.ExtensionContext) {
         const statusBar = new StatusBarManager(initialSession);
 
         const diffManager = new DiffManager(initialSession, checkpointManager);
-        const sidebarProvider = new SidebarProvider(
-            context.extensionUri, context, initialSession, diffManager, checkpointManager, outputChannel,
+
+        const controller = new ChatController(
+            context, initialSession, diffManager, checkpointManager, outputChannel,
         );
-        sidebarRef = sidebarProvider;
+        controllerRef = controller;
 
         // Restore tabs from previous session before the webview is shown
-        await sidebarProvider.restorePersistedTabs();
+        await controller.restorePersistedTabs();
+
+        const sidebarProvider = new SidebarProvider(context.extensionUri, controller);
 
         context.subscriptions.push(
+            controller,
             vscode.window.registerWebviewViewProvider('pi-agent.chat', sidebarProvider),
             vscode.workspace.registerTextDocumentContentProvider('pi-diff', diffContentProvider),
             statusBar,
@@ -49,25 +54,25 @@ export async function activate(context: vscode.ExtensionContext) {
             outputChannel,
 
             vscode.commands.registerCommand('pi-agent.newChat', async () => {
-                await sidebarProvider.activeSession?.newSession();
-                sidebarProvider.sendStateSync();
+                await controller.activeSession?.newSession();
+                controller.sendStateSync();
             }),
 
             vscode.commands.registerCommand('pi-agent.abort', async () => {
-                await sidebarProvider.activeSession?.abort();
+                await controller.activeSession?.abort();
             }),
 
             vscode.commands.registerCommand('pi-agent.selectModel', async () => {
-                await sidebarProvider.activeSession?.showModelPicker();
-                sidebarProvider.sendStateSync();
+                await controller.activeSession?.showModelPicker();
+                controller.sendStateSync();
             }),
 
             vscode.commands.registerCommand('pi-agent.toggleThinking', async () => {
-                const level = sidebarProvider.activeSession?.cycleThinkingLevel();
+                const level = controller.activeSession?.cycleThinkingLevel();
                 if (level) {
                     vscode.window.showInformationMessage(`Thinking level: ${level}`);
                 }
-                sidebarProvider.sendStateSync();
+                controller.sendStateSync();
             }),
 
             vscode.commands.registerCommand('pi-agent.focusChat', () => {
@@ -79,11 +84,11 @@ export async function activate(context: vscode.ExtensionContext) {
             }),
 
             vscode.commands.registerCommand('pi-agent.createTab', async () => {
-                await sidebarProvider.createTab();
+                await controller.createTab();
             }),
 
             vscode.commands.registerCommand('pi-agent.showSessions', () => {
-                sidebarProvider.showSessions();
+                controller.showSessions();
             }),
         );
 
@@ -95,6 +100,6 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
-    sidebarRef = undefined;
+    controllerRef = undefined;
     await PiSessionManager.disposeGlobal();
 }
