@@ -1,10 +1,8 @@
 # Pi Code for VS Code
 
-A VS Code extension that provides a first-class UI for [Mario Zechner's Pi coding agent](https://github.com/badlogic/pi-mono) — an AI agent that can read, write, edit files, run commands, search your codebase, and more, all from within the editor.
+A VS Code extension that provides a chat UI for [Mario Zechner's Pi coding agent](https://github.com/badlogic/pi-mono) — an AI agent that can read, write, edit files, run commands, search your codebase, and more, all from within the editor.
 
 > This is a downstream fork of the upstream `pi-vscode-extension`. The fork takes the UX in a Claude Code direction — chats live as editor tabs rather than inside the sidebar — and bundles selected Pi ecosystem packages directly inside the VSIX. See **[Why this fork](#why-this-fork)** below for the full diff.
-
-![Pi Code screenshot](screenshot.png)
 
 ## Why this fork
 
@@ -47,10 +45,10 @@ Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle
 Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
 
 ### Settings Page with OAuth Login
-A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API connection, default model and thinking level, tool execution behavior, and session management. API keys are stored securely via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity — unlocking subscription-only models without leaving VS Code, with a manual authorization-code paste fallback when the local OAuth callback can't be reached.
+A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API connection, default model and thinking level, tool execution behavior, and session management. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
 
-### Bundled Pi Extensions (Web Access Out of the Box)
-Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Works out of the box via Exa MCP without any API keys; optionally reads `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys to upgrade to a different backend. No `pi install` step required.
+### Bundled Pi Extensions
+Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Uses Exa MCP by default with no API keys required; optionally reads `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys to switch to a different backend. No `pi install` step required.
 
 ### Image Attachments
 Paste images directly into the chat input, drop them onto the chat panel, or pick a file via the paperclip button next to the model picker. Attached images appear as previews before sending and remain in the chat history. Large images are resized automatically; image-capable models receive them inline with the prompt.
@@ -59,7 +57,7 @@ Paste images directly into the chat input, drop them onto the chat panel, or pic
 When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer shows percent used in the 5-hour and weekly windows with colour cues at 50% and 90%. A tooltip details the plan, exact reset times, and remaining credit balance. Each assistant message footer also shows the per-turn delta (`5h +1.2% · week +0.3%`) so you can see how much each turn cost. Hidden for non-Codex models and for token-billed API key accounts.
 
 ### Tool Approval
-When auto-approve is disabled (the default), each tool call pauses execution and shows an inline approval card in the chat with the tool name, arguments preview, and Approve/Reject buttons. This gives you full control over what the agent executes before it happens.
+When auto-approve is disabled (the default), each tool call pauses execution and shows an inline approval card in the chat with the tool name, arguments preview, and Approve/Reject buttons, so you can review or block each tool call before it runs.
 
 ### Message Queuing & Steering
 While the agent is streaming, you can **queue** follow-up messages that will be sent automatically once the current generation finishes. Queued messages appear in a collapsible list above the input with inline edit and delete controls. You can also **steer** the agent mid-generation (Ctrl+Enter) to inject guidance into the current response without waiting.
