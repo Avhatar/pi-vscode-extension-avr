@@ -73,10 +73,40 @@ body {
 .tab-strip::-webkit-scrollbar { display: none; }
 
 /* In panel mode the chat occupies its own editor tab, so we never want the
-   in-webview tab strip — VS Code's native editor tabs serve that role. */
-body[data-mode="panel"] .header,
-[data-mode="panel"] > .header {
+   in-webview tab strip — VS Code's native editor tabs serve that role.
+   The header still exists in panel mode but is repurposed as a toolbar
+   (.panel-toolbar) holding "New" / "History" buttons. */
+body[data-mode="panel"] .tab-strip,
+[data-mode="panel"] > .header > .tab-strip {
     display: none !important;
+}
+
+/* Panel-mode toolbar: a small action bar at the top of every editor chat panel,
+   giving the user "New chat" and "History" without going back to the launcher. */
+.panel-toolbar {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 4px 6px;
+}
+.panel-toolbar .panel-toolbar-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font: inherit;
+    line-height: 1.2;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.panel-toolbar .panel-toolbar-btn:hover {
+    background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08));
+}
+.panel-toolbar-spacer {
+    flex: 1;
 }
 
 .tab {

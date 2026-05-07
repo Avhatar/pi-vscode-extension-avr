@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { PiSessionManager } from './pi/session';
-import { SidebarProvider } from './providers/sidebar';
+import { LauncherView } from './providers/launcher-view';
 import { StatusBarManager } from './providers/status-bar';
 import { SettingsPanel } from './providers/settings-panel';
 import { ChatController } from './controllers/chat-controller';
@@ -40,14 +40,21 @@ export async function activate(context: vscode.ExtensionContext) {
         );
         controllerRef = controller;
 
-        // Restore tabs from previous session before the webview is shown
+        // Wire the panel-opening factory so the controller can spawn editor
+        // panels itself (used by `createTab` and the launcher).
+        controller.setPanelOpener((tabId) => {
+            createChatPanel(tabId, controller, context.extensionUri);
+        });
+
+        // Restore tabs from previous session before any view is shown
         await controller.restorePersistedTabs();
 
-        const sidebarProvider = new SidebarProvider(context.extensionUri, controller);
+        const launcherView = new LauncherView(context.extensionUri, controller);
 
         context.subscriptions.push(
             controller,
-            vscode.window.registerWebviewViewProvider('pi-agent.chat', sidebarProvider),
+            launcherView,
+            vscode.window.registerWebviewViewProvider('pi-agent.chat', launcherView),
             vscode.workspace.registerTextDocumentContentProvider('pi-diff', diffContentProvider),
             statusBar,
 
@@ -56,8 +63,9 @@ export async function activate(context: vscode.ExtensionContext) {
             outputChannel,
 
             vscode.commands.registerCommand('pi-agent.newChat', async () => {
-                await controller.activeSession?.newSession();
-                controller.sendStateSync();
+                // "New Chat" now means a fresh session in a fresh editor tab,
+                // matching the launcher's behaviour.
+                await controller.createTab();
             }),
 
             vscode.commands.registerCommand('pi-agent.abort', async () => {
@@ -78,7 +86,14 @@ export async function activate(context: vscode.ExtensionContext) {
             }),
 
             vscode.commands.registerCommand('pi-agent.focusChat', () => {
-                vscode.commands.executeCommand('pi-agent.chat.focus');
+                // Reveal the active chat panel if there is one; otherwise fall
+                // back to focusing the launcher.
+                const tabId = controller.activeTabId;
+                if (tabId) {
+                    controller.openOrFocusPanel(tabId);
+                } else {
+                    vscode.commands.executeCommand('pi-agent.chat.focus');
+                }
             }),
 
             vscode.commands.registerCommand('pi-agent.openSettings', () => {
@@ -90,16 +105,8 @@ export async function activate(context: vscode.ExtensionContext) {
             }),
 
             vscode.commands.registerCommand('pi-agent.showSessions', () => {
-                controller.showSessions();
-            }),
-
-            vscode.commands.registerCommand('pi-agent.openInEditor', () => {
-                const tabId = controller.activeTabId;
-                if (!tabId) {
-                    vscode.window.showWarningMessage('Pi Agent: no active chat to open.');
-                    return;
-                }
-                createChatPanel(tabId, controller, context.extensionUri);
+                // Surface the launcher (which already lists session history).
+                vscode.commands.executeCommand('pi-agent.chat.focus');
             }),
 
             vscode.window.registerWebviewPanelSerializer(

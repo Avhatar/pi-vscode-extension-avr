@@ -280,7 +280,7 @@ controller; flush on `attachPanel`.
 ```
 [x] Commit 1: ChatController extraction          → 0.2.1 (2026-05-07)
 [x] Commit 2: ChatPanel optional + serializer    → 0.2.2 (2026-05-07)
-[ ] Commit 3: Sidebar → launcher                 → 0.3.0
+[x] Commit 3: Sidebar → launcher                 → 0.3.0 (2026-05-07)
 ```
 
 After every commit: `npm run deploy:patch` (or `:minor` for the last one),
@@ -341,3 +341,34 @@ checkbox, stamp date/version, add notes to the "Log").
   - Reload Window — every open chat panel returns at its prior position.
   - Close a panel, then re-open via Session History inside any other panel.
 - Next action: Commit 3 — sidebar becomes a pure launcher; editor panels become the default UX. Target version 0.3.0.
+
+### 2026-05-07 — Commit 3 code complete (awaiting verification)
+
+- **Launcher** is now the sidebar webview. New files: `src/providers/launcher-view.ts`, `src/webview/launcher.ts`, `src/webview/styles/launcher.css`. Built as a 4th esbuild bundle (`out/webview/launcher.js`).
+- Launcher shows two sections: **Open chats** (tabs currently in memory, with streaming spinners and unread dots) and **History** (closed sessions from `.pi/sessions/`). Each row clicks through to either revealing the existing panel or opening a new one for that session.
+- Header buttons: `+ New chat` (primary) and `⚙` (settings).
+- Removing a chat from the launcher list calls `controller.dropTab(id)` — the on-disk session is preserved, so the user can always re-open it from History (per D5).
+- **Panel toolbar**: every chat editor panel now has a small toolbar at the top with `+ New chat` and `📜 History` buttons, so you don't have to jump back to the launcher to spawn a sibling chat or browse old sessions.
+- **Controller upgrades**: panel registry (`Map<tabId, panel>`), `setPanelOpener(...)` factory, `openOrFocusPanel`, `dropTab`, `computeLauncherState()`, `onLauncherStateChanged` event. `_createTab` now auto-opens an editor panel via the registered opener.
+- **Commands**: `pi-agent.newChat` and `pi-agent.createTab` both create a tab and open a panel for it. `pi-agent.focusChat` reveals the active panel (or the launcher if none). `pi-agent.openInEditor` removed (no longer needed). `pi-agent.showSessions` now reveals the launcher.
+- **Deleted**: `src/providers/sidebar.ts` (replaced by `launcher-view.ts`). The chat-in-sidebar code path is gone.
+- **Webview/main.ts** preserves backwards-compatibility: in panel mode, `.header` is repurposed as the panel toolbar (instead of the tab strip). Sidebar mode (the now-removed chat-in-sidebar UX) still works in code, but no longer reachable since `LauncherView` doesn't load `webview/main.js`.
+- View type for editor panels remains `pi-agent.chatPanel`; serializer untouched, so 0.2.2 panels restore cleanly after upgrade.
+- `npm run compile` + `npx tsc --noEmit` clean. Unit tests: 22 passed / 3 pre-existing failures (unchanged).
+- Open question Q2 (Esc / global commands targeting last-focused panel rather than `_activeTabId`) intentionally left for a follow-up — current commands hit `controller.activeTabId`, which is "good enough" but doesn't track which editor panel the user has focus on. Acceptable v1.
+- Pending before ticking §8: F5 sweep (especially: session history persistence, drag-to-new-window, reload restore) + `deploy:minor` to publish 0.3.0.
+
+### 2026-05-07 — Commit 3 shipped as 0.3.0 — migration complete
+
+- `npm run deploy:minor` clean. `pi-agent-0.3.0.vsix` (39.36 MB, 8 files in `out/`) packaged and installed.
+- CHANGELOG stamped: `[0.3.0] - 2026-05-07`. Three published versions trace the migration: 0.2.1 (controller refactor), 0.2.2 (panels alongside sidebar), 0.3.0 (launcher).
+- All three checkboxes in §8 ticked; the Sidebar-WebviewView → Editor-WebviewPanel migration is functionally done.
+- Smoke tests for the user to run after Reload Window:
+  - Sidebar shows the launcher (no chat). New chat button opens an editor panel.
+  - Existing 0.2.2 panels (if any) restore via the unchanged serializer.
+  - Inside any panel: `+ New chat` opens a sibling panel; `📜 History` lists past sessions.
+  - "×" on a launcher row removes it from the list but the session remains under History.
+- **Follow-ups parked** (not blocking 0.3.0):
+  - Q1 — unread / streaming badges per launcher row already present, but could be more prominent.
+  - Q2 — global commands (`pi-agent.abort` / Esc, `pi-agent.selectModel`, `pi-agent.toggleThinking`) still target `controller.activeTabId` instead of the user's currently-focused panel. Wire `panel.onDidChangeViewState` → `controller.setActive(tabId)` to fix.
+  - Cleanup — `webview/main.ts` still contains the now-unreachable sidebar-mode tab strip rendering. Safe to delete in a follow-up patch.

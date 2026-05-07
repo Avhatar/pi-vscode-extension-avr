@@ -318,15 +318,56 @@ function handleStreamingDelta(ae: any): void {
 
 let skeletonBuilt = false;
 
+/**
+ * Build the panel-mode toolbar with "New chat" and "History" buttons. The
+ * sidebar variant uses VS Code's `view/title` menu instead, so this only
+ * runs for editor panels.
+ */
+function buildPanelToolbar(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.gap = '4px';
+    wrap.style.width = '100%';
+
+    const newBtn = el('button', 'panel-toolbar-btn');
+    newBtn.title = 'Start a new chat in a new editor tab';
+    newBtn.innerHTML = '<span style="font-size:14px;line-height:1;">+</span><span>New chat</span>';
+    newBtn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'createTab' });
+    });
+    wrap.appendChild(newBtn);
+
+    const historyBtn = el('button', 'panel-toolbar-btn');
+    historyBtn.title = 'Show previous sessions';
+    historyBtn.innerHTML = '<span style="font-size:13px;line-height:1;">📜</span><span>History</span>';
+    historyBtn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'getSessions' });
+    });
+    wrap.appendChild(historyBtn);
+
+    const spacer = el('div', 'panel-toolbar-spacer');
+    wrap.appendChild(spacer);
+
+    return wrap;
+}
+
 function render(): void {
     const app = document.getElementById('app')!;
     app.innerHTML = '';
     skeletonBuilt = false;
 
-    // Header: tab-strip only (action buttons moved to VS Code view/title)
+    // Header: in sidebar mode it holds the multi-tab strip; in panel mode it
+    // becomes a toolbar with `New` and `History` buttons (so the user does not
+    // have to jump back to the launcher for those).
     const header = el('div', 'header');
-    const tabStrip = el('div', 'tab-strip');
-    header.appendChild(tabStrip);
+    if (viewMode === 'panel') {
+        header.classList.add('panel-toolbar');
+        header.appendChild(buildPanelToolbar());
+    } else {
+        const tabStrip = el('div', 'tab-strip');
+        header.appendChild(tabStrip);
+    }
     app.appendChild(header);
 
     // Messages container (persistent, children managed by updateMessages)
@@ -451,13 +492,10 @@ function updateTabs(): void {
     tabStrip.innerHTML = '';
 
     // Hide the entire header when only 1 tab — action buttons live in VS Code title bar.
-    // In panel mode there are no in-webview tabs at all (the editor tab serves that role).
+    // (Panel mode has no `.tab-strip`, so we already returned above; in panel mode
+    // the header instead hosts the New / History toolbar and stays visible.)
     if (header) {
-        if (viewMode === 'panel') {
-            header.style.display = 'none';
-        } else {
-            header.style.display = state.tabs.length <= 1 ? 'none' : '';
-        }
+        header.style.display = state.tabs.length <= 1 ? 'none' : '';
     }
 
     for (const tab of state.tabs) {

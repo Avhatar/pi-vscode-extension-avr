@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { PiSessionManager } from '../pi/session';
-import type { ClientMessage, ServerMessage, TabInfo } from '../shared/protocol';
+import type {
+    ClientMessage, ServerMessage, TabInfo,
+    LauncherState, LauncherTabInfo, LauncherSessionInfo,
+} from '../shared/protocol';
 import { DiffManager } from '../providers/diff';
 import { CheckpointManager } from '../providers/checkpoint';
 import { onAuthChanged } from '../pi/auth';
@@ -117,6 +120,16 @@ export class ChatController implements vscode.Disposable {
     /** Fires when a tab's display name changes — editor panels listen to update their title. */
     readonly onTabRenamed = this._onTabRenamed.event;
 
+    private _onLauncherStateChanged = new vscode.EventEmitter<void>();
+    /** Fires when the launcher's view of the world (open tabs, streaming, etc.) changes. */
+    readonly onLauncherStateChanged = this._onLauncherStateChanged.event;
+
+    /** Tracks which `tabId`s currently have a visible editor panel. */
+    private _openPanels = new Map<string, { reveal(viewColumn?: vscode.ViewColumn): void }>();
+
+    /** Wired by the host (extension.ts) to construct a `ChatPanel` for a tab. */
+    private _panelOpener?: (tabId: string) => void;
+
     constructor(
         context: vscode.ExtensionContext,
         initialSession: PiSessionManager,
@@ -144,6 +157,111 @@ export class ChatController implements vscode.Disposable {
 
     removeSink(sink: ChatViewSink): void {
         this._sinks.delete(sink);
+    }
+
+    /**
+     * Register the factory that creates an editor `ChatPanel` for a given
+     * tab. Called once during activation by `extension.ts`.
+     */
+    setPanelOpener(opener: (tabId: string) => void): void {
+        this._panelOpener = opener;
+    }
+
+    /** Called by `ChatPanel` when its constructor finishes. */
+    registerPanel(tabId: string, panel: { reveal(viewColumn?: vscode.ViewColumn): void }): void {
+        this._openPanels.set(tabId, panel);
+        this._onLauncherStateChanged.fire();
+    }
+
+    /** Called by `ChatPanel.dispose`. */
+    unregisterPanel(tabId: string): void {
+        if (this._openPanels.delete(tabId)) {
+            this._onLauncherStateChanged.fire();
+        }
+    }
+
+    /**
+     * Reveal the panel for `tabId` if one exists, otherwise create a new one
+     * via the registered `_panelOpener`.
+     */
+    openOrFocusPanel(tabId: string): void {
+        const existing = this._openPanels.get(tabId);
+        if (existing) {
+            existing.reveal();
+            return;
+        }
+        this._panelOpener?.(tabId);
+    }
+
+    /**
+     * Drop the in-memory `TabState` for `tabId` (also disposing any open panel).
+     * The underlying session file on disk is left intact so the user can
+     * reopen the chat from "recent sessions".
+     */
+    async dropTab(tabId: string): Promise<void> {
+        const panel = this._openPanels.get(tabId);
+        if (panel && 'dispose' in panel && typeof (panel as any).dispose === 'function') {
+            try { (panel as any).dispose(); } catch { /* ignore */ }
+        }
+
+        const tab = this._tabs.get(tabId);
+        if (!tab) {
+            this._onLauncherStateChanged.fire();
+            return;
+        }
+
+        this._unsubscribeTab(tabId);
+        tab.diffManager.dispose();
+        tab.checkpointManager.dispose();
+        await tab.session.dispose();
+        this._tabs.delete(tabId);
+
+        if (tabId === this._activeTabId) {
+            const next = this._tabs.keys().next().value;
+            this._activeTabId = next ?? '';
+        }
+
+        this._persistTabs();
+        this._onLauncherStateChanged.fire();
+    }
+
+    /** Build a snapshot of launcher state (open tabs + recent closed sessions). */
+    async computeLauncherState(): Promise<LauncherState> {
+        const tabs: LauncherTabInfo[] = [...this._tabs.values()].map(tab => ({
+            id: tab.id,
+            name: tab.name,
+            isStreaming: tab.isStreamingLocal,
+            hasNotification: tab.hasNotification,
+            isOpen: this._openPanels.has(tab.id),
+            modelLabel: tab.session.getCurrentModel()?.id,
+        }));
+
+        // Build the recent-sessions list from the active tab's session manager
+        // (all sessions share the same on-disk store). Mark sessions whose
+        // path matches an existing tab so the UI can hide duplicates.
+        const openPaths = new Set(
+            [...this._tabs.values()]
+                .map(t => t.session.sessionPath)
+                .filter((p): p is string => !!p),
+        );
+        let recentSessions: LauncherSessionInfo[] = [];
+        const anySession = this._tabs.values().next().value?.session;
+        if (anySession) {
+            try {
+                const sessions = await anySession.getSessions();
+                recentSessions = sessions.map((s: any) => ({
+                    path: s.path,
+                    name: s.name,
+                    firstMessage: s.firstMessage,
+                    lastModified: s.lastModified,
+                    isOpen: openPaths.has(s.path),
+                }));
+            } catch {
+                recentSessions = [];
+            }
+        }
+
+        return { tabs, recentSessions };
     }
 
     /** Expose the active tab's session for global commands (palette, keybindings). */
@@ -201,8 +319,8 @@ export class ChatController implements vscode.Disposable {
         this.handleMessage({ type: 'getSessions' });
     }
 
-    private get _activeTab(): TabState {
-        return this._tabs.get(this._activeTabId)!;
+    private get _activeTab(): TabState | undefined {
+        return this._tabs.get(this._activeTabId);
     }
 
     /** Send a message to every sink whose filter matches `tabId`. */
@@ -271,6 +389,7 @@ export class ChatController implements vscode.Disposable {
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
             }
+            this._onLauncherStateChanged.fire();
         }
 
         if (event.type === 'message_end' && event.message?.role === 'assistant') {
@@ -306,6 +425,7 @@ export class ChatController implements vscode.Disposable {
                 tab.hasNotification = true;
             }
             this._persistTabs();
+            this._onLauncherStateChanged.fire();
 
             if (tab.queuedMessages.length > 0) {
                 const text = tab.queuedMessages.shift()!;
@@ -371,6 +491,7 @@ export class ChatController implements vscode.Disposable {
             tab.name = sessionName;
             this._persistTabs();
             this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
+            this._onLauncherStateChanged.fire();
             return;
         }
         // Derive tab name from first user message if still default
@@ -389,6 +510,7 @@ export class ChatController implements vscode.Disposable {
                     tab.name = trimmed;
                     this._persistTabs();
                     this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
+                    this._onLauncherStateChanged.fire();
                 }
             }
         }
@@ -700,6 +822,11 @@ export class ChatController implements vscode.Disposable {
 
         this._activeTabId = id;
         this._persistTabs();
+        this._onLauncherStateChanged.fire();
+        // Auto-open an editor panel for the new tab. After Phase 3 the
+        // sidebar is a launcher, so without this the user would create a
+        // tab and have nowhere to type into it.
+        this._panelOpener?.(id);
         this.sendStateSync(id);
         return id;
     }
@@ -719,11 +846,12 @@ export class ChatController implements vscode.Disposable {
         this._tabs.delete(tabId);
 
         if (wasActive) {
-            this._activeTabId = this._tabs.keys().next().value!;
+            this._activeTabId = this._tabs.keys().next().value ?? '';
         }
 
         this._persistTabs();
-        this.sendStateSync(this._activeTabId);
+        this._onLauncherStateChanged.fire();
+        if (this._activeTabId) this.sendStateSync(this._activeTabId);
     }
 
     private _switchTab(tabId: string): void {
@@ -732,6 +860,7 @@ export class ChatController implements vscode.Disposable {
         this._activeTabId = tabId;
 
         const tab = this._activeTab;
+        if (!tab) return;
         tab.hasNotification = false;
         if (tab.isStreamingLocal) {
             vscode.commands.executeCommand('setContext', 'pi-agent.isStreaming', true);
@@ -740,6 +869,7 @@ export class ChatController implements vscode.Disposable {
         }
 
         this._persistTabs();
+        this._onLauncherStateChanged.fire();
         this.sendStateSync(this._activeTabId);
     }
 
@@ -832,6 +962,9 @@ export class ChatController implements vscode.Disposable {
         this._authChangedSubscription?.dispose();
         this._authChangedSubscription = undefined;
         this._sinks.clear();
+        this._openPanels.clear();
+        this._panelOpener = undefined;
         this._onTabRenamed.dispose();
+        this._onLauncherStateChanged.dispose();
     }
 }

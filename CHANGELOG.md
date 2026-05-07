@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-07
+
+### Changed
+- The sidebar is now a **launcher**: it lists open chats and a history of previous sessions, and gives one-click buttons to start a new chat or open settings. The chat itself lives in editor-area panels — not in the sidebar — so it can be split, dragged into another editor group, or moved into a separate window, just like Claude Code.
+- Starting a new chat (sidebar `+`, palette command, or `Ctrl+Shift+N`) now opens an editor panel directly. Clicking a previous session in the launcher reopens it as a panel.
+
+### Added
+- Toolbar at the top of every chat panel with **New chat** and **History** buttons, so you don't need to switch back to the launcher to spawn a sibling chat or jump to an older session.
+- Launcher shows live indicators per chat (streaming spinner, unread dot) and lets you remove a chat from the list (the underlying session is preserved on disk and remains available under "History").
+
 ## [0.2.2] - 2026-05-07
 
 ### Added

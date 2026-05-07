@@ -62,6 +62,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         );
 
         this._controller.addSink(this);
+        this._controller.registerPanel(this._tabId, this);
         // Send an initial 'ready' to mirror the sidebar's bootstrap, then push state.
         this.post({ type: 'ready' });
         this._controller.sendStateSync(this._tabId);
@@ -82,6 +83,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
 
     dispose(): void {
         this._controller.removeSink(this);
+        this._controller.unregisterPanel(this._tabId);
         for (const d of this._disposables) {
             try { d.dispose(); } catch { /* ignore */ }
         }

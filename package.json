@@ -2,7 +2,7 @@
   "name": "pi-agent",
   "displayName": "Pi Agent",
   "description": "First-class Pi coding agent experience for VS Code",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "zetaphor",
   "license": "MIT",
   "icon": "media/pi-icon-full.png",
@@ -70,11 +70,6 @@
         "command": "pi-agent.createTab",
         "title": "Pi: New Agent Tab",
         "icon": "$(add)"
-      },
-      {
-        "command": "pi-agent.openInEditor",
-        "title": "Pi: Open Chat in Editor",
-        "icon": "$(link-external)"
       }
     ],
     "menus": {
@@ -85,19 +80,9 @@
           "group": "navigation@1"
         },
         {
-          "command": "pi-agent.openInEditor",
-          "when": "view == pi-agent.chat",
-          "group": "navigation@2"
-        },
-        {
-          "command": "pi-agent.showSessions",
-          "when": "view == pi-agent.chat",
-          "group": "navigation@3"
-        },
-        {
           "command": "pi-agent.openSettings",
           "when": "view == pi-agent.chat",
-          "group": "navigation@4"
+          "group": "navigation@2"
         }
       ]
     },

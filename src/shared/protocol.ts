@@ -137,6 +137,48 @@ export type ClientMessage =
     | { type: 'removeQueuedMessage'; index: number }
     | { type: 'cancelQueue' };
 
+// ── Launcher (sidebar) ──
+//
+// The sidebar webview is a launcher: it lists currently-open chats and
+// recent (closed) sessions and lets the user open a chat as an editor
+// panel. It does not host the chat itself.
+
+export interface LauncherTabInfo {
+    id: string;
+    name: string;
+    isStreaming: boolean;
+    hasNotification: boolean;
+    /** True if a `WebviewPanel` is currently visible for this tab. */
+    isOpen: boolean;
+    /** Optional: provider/model id for a small badge. */
+    modelLabel?: string;
+}
+
+export interface LauncherSessionInfo {
+    path: string;
+    name?: string;
+    firstMessage?: string;
+    lastModified?: number;
+    /** True if this session is already represented by an open tab. */
+    isOpen: boolean;
+}
+
+export interface LauncherState {
+    tabs: LauncherTabInfo[];
+    recentSessions: LauncherSessionInfo[];
+}
+
+export type LauncherClientMessage =
+    | { type: 'getLauncherState' }
+    | { type: 'openTab'; tabId: string }
+    | { type: 'createTab' }
+    | { type: 'closeTab'; tabId: string }
+    | { type: 'openSession'; sessionPath: string }
+    | { type: 'openSettings' };
+
+export type LauncherServerMessage =
+    | { type: 'launcherState'; state: LauncherState };
+
 // Settings webview -> Extension messages
 export type SettingsClientMessage =
     | { type: 'getSettings' }
