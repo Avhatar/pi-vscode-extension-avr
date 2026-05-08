@@ -9,6 +9,7 @@ import { DiffManager } from '../providers/diff';
 import { CheckpointManager } from '../providers/checkpoint';
 import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
+import { WorkspaceFileMentions } from '../workspace/file-mentions';
 import type { CodexTurnUsage, CodexTurnWindowDelta, CodexUsageSnapshot, CodexUsageWindow } from '../shared/protocol';
 
 interface MessageMeta {
@@ -120,6 +121,7 @@ export class ChatController implements vscode.Disposable {
     private _tabSubscriptions = new Map<string, (() => void)[]>();
     private _authChangedSubscription?: vscode.Disposable;
     private _codexUsageUnsubscribe?: () => void;
+    private _fileMentions: WorkspaceFileMentions;
 
     private _sinks = new Set<ChatViewSink>();
 
@@ -146,6 +148,8 @@ export class ChatController implements vscode.Disposable {
     ) {
         this._context = context;
         this._outputChannel = outputChannel;
+        this._fileMentions = new WorkspaceFileMentions(outputChannel);
+        this._fileMentions.warmup();
 
         const id = nextTabId();
         const tab = makeTabState(id, initialSession, initialDiffManager, initialCheckpointManager);
@@ -419,7 +423,7 @@ export class ChatController implements vscode.Disposable {
 
         unsubs.push(
             tab.session.events.onAll((event) => {
-                this._handleTabEvent(tab, event);
+                void this._handleTabEvent(tab, event);
             }),
         );
 
@@ -444,7 +448,7 @@ export class ChatController implements vscode.Disposable {
         }
     }
 
-    private _handleTabEvent(tab: TabState, event: any): void {
+    private async _handleTabEvent(tab: TabState, event: any): Promise<void> {
         if (event.type === 'agent_start') {
             tab.streamingText = '';
             tab.streamingThinking = '';
@@ -518,7 +522,7 @@ export class ChatController implements vscode.Disposable {
                 const turnIdx = tab.turnCounter;
                 tab.checkpointManager.startTurn(turnIdx);
                 tab.diffManager.setCurrentTurn(turnIdx);
-                tab.session.prompt(text);
+                tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(text));
             }
         }
 
@@ -679,11 +683,11 @@ export class ChatController implements vscode.Disposable {
                     const turnIdx = tab.turnCounter;
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
-                    await tab.session.prompt(msg.text, msg.images);
+                    await tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
                     break;
                 }
                 case 'steer':
-                    await tab.session.steer(msg.text, msg.images);
+                    await tab.session.steer(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
                     break;
                 case 'queueMessage':
                     tab.queuedMessages.push(msg.text);
@@ -706,7 +710,7 @@ export class ChatController implements vscode.Disposable {
                     this.sendStateSync(tab.id);
                     break;
                 case 'followUp':
-                    await tab.session.followUp(msg.text, msg.images);
+                    await tab.session.followUp(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
                     break;
                 case 'abort':
                     await tab.session.abort();
@@ -777,6 +781,27 @@ export class ChatController implements vscode.Disposable {
                 case 'getSkills': {
                     const skills = tab.session.getSkills();
                     this._postForTab(tab.id, { type: 'skills', skills });
+                    break;
+                }
+                case 'searchWorkspaceFiles': {
+                    if (!this._fileMentions.isReady) {
+                        const indexing = this._fileMentions.ensureIndexed();
+                        this._postForTab(tab.id, {
+                            type: 'workspaceFileSuggestions',
+                            requestId: msg.requestId,
+                            query: msg.query,
+                            isIndexing: true,
+                            items: [],
+                        });
+                        await indexing;
+                    }
+                    const items = await this._fileMentions.search(msg.query);
+                    this._postForTab(tab.id, {
+                        type: 'workspaceFileSuggestions',
+                        requestId: msg.requestId,
+                        query: msg.query,
+                        items,
+                    });
                     break;
                 }
                 case 'approveToolCall':
@@ -1046,6 +1071,7 @@ export class ChatController implements vscode.Disposable {
         this._authChangedSubscription = undefined;
         this._codexUsageUnsubscribe?.();
         this._codexUsageUnsubscribe = undefined;
+        this._fileMentions.dispose();
         this._sinks.clear();
         this._openPanels.clear();
         this._panelOpener = undefined;

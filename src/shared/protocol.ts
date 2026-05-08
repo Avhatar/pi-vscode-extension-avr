@@ -155,6 +155,12 @@ export interface SkillInfo {
     disableModelInvocation: boolean;
 }
 
+export interface WorkspaceFileSuggestion {
+    relativePath: string;
+    basename: string;
+    insertText: string;
+}
+
 export interface SessionInfo {
     id: string;
     name?: string;
@@ -189,6 +195,7 @@ export type ClientMessage =
     | { type: 'switchTab'; tabId: string }
     | { type: 'openSettings' }
     | { type: 'getSkills' }
+    | { type: 'searchWorkspaceFiles'; query: string; requestId: number }
     | { type: 'queueMessage'; text: string }
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
@@ -263,6 +270,7 @@ export type ServerMessage =
     | { type: 'toolCallPending'; pending: ToolCallPendingInfo }
     | { type: 'toolCallResolved'; toolCallId: string }
     | { type: 'skills'; skills: SkillInfo[] }
+    | { type: 'workspaceFileSuggestions'; requestId: number; query: string; isIndexing?: boolean; items: WorkspaceFileSuggestion[] }
     | { type: 'codexUsage'; usage: CodexUsageSnapshot | null }
     | { type: 'error'; message: string };
 

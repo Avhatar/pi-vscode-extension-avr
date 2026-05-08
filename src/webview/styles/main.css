@@ -925,10 +925,39 @@ body[data-mode="panel"] .tab-strip,
     background: rgba(255, 255, 255, 0.08);
 }
 
+.input-text-wrap {
+    position: relative;
+    min-height: 28px;
+}
+
+.input-highlight {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    color: var(--input-fg);
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    user-select: none;
+}
+
+.input-file-mention {
+    color: var(--link);
+    font-weight: 500;
+}
+
 #input {
+    position: relative;
+    z-index: 1;
     width: 100%;
     background: transparent;
-    color: var(--input-fg);
+    color: transparent;
+    caret-color: var(--input-fg);
+    -webkit-text-fill-color: transparent;
     border: none;
     padding: 0;
     font-family: inherit;
@@ -941,7 +970,10 @@ body[data-mode="panel"] .tab-strip,
     scrollbar-width: none;
 }
 #input::-webkit-scrollbar { display: none; }
-#input::placeholder { color: var(--muted); }
+#input::placeholder {
+    color: var(--muted);
+    -webkit-text-fill-color: var(--muted);
+}
 #input { user-select: text; }
 
 /* ── Input footer ── */
@@ -1792,6 +1824,47 @@ body[data-mode="panel"] .tab-strip,
 .queued-edit-cancel:hover {
     background: rgba(244, 135, 113, 0.15);
     color: var(--error-fg);
+}
+
+/* ── Workspace file mention menu ── */
+.file-mention-menu {
+    max-height: 220px;
+    overflow-y: auto;
+    border-bottom: 1px solid var(--border);
+}
+.file-mention-item {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 14px;
+    cursor: pointer;
+    gap: 2px;
+}
+.file-mention-item:hover {
+    background: var(--hover-bg, rgba(255, 255, 255, 0.05));
+}
+.file-mention-item-active {
+    background: var(--hover-bg, rgba(255, 255, 255, 0.08));
+}
+.file-mention-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.file-mention-path {
+    font-size: 11px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.file-mention-status {
+    padding: 8px 14px;
+    color: var(--muted);
+    font-size: 12px;
 }
 
 /* ── Slash command menu ── */

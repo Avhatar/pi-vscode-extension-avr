@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.7.0",
+  "version": "0.8.2",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/pi-code-icon-full.png",
@@ -148,6 +148,36 @@
           "minimum": 0,
           "maximum": 100,
           "description": "Show a warning when context usage exceeds this percentage of the context window"
+        },
+        "pi-code.fileMentions.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable @ file mentions in chat input for files in the opened workspace."
+        },
+        "pi-code.fileMentions.useDefaultExcludes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use Pi Code's built-in exclude patterns when indexing workspace files for @ mentions."
+        },
+        "pi-code.fileMentions.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional glob patterns to exclude from @ file mention suggestions."
+        },
+        "pi-code.fileMentions.maxSuggestions": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Maximum number of @ file mention suggestions to show."
+        },
+        "pi-code.fileMentions.configPath": {
+          "type": "string",
+          "default": ".pi/file-mentions.json",
+          "description": "Workspace-relative JSON config file for @ file mention indexing settings."
         }
       }
     }

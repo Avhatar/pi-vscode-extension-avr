@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -165,6 +165,9 @@ function handleMessage(msg: ServerMessage): void {
         case 'skills':
             state.skills = msg.skills;
             break;
+        case 'workspaceFileSuggestions':
+            handleWorkspaceFileSuggestions(msg.requestId, msg.query, msg.items, !!msg.isIndexing);
+            break;
         case 'codexUsage':
             state.codexUsage = msg.usage ?? null;
             updateInputArea();
@@ -248,6 +251,7 @@ function applyStateSync(s: SerializedAgentState): void {
                 inputEl.value = draft;
                 inputEl.style.height = 'auto';
                 inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+                updateInputHighlights(inputEl);
             }
         }
         renderAttachmentPreview();
@@ -424,8 +428,12 @@ function render(): void {
     slashMenu.id = 'slash-menu';
     slashMenu.style.display = 'none';
     inputContainer.appendChild(slashMenu);
+    const fileMentionMenu = el('div', 'file-mention-menu');
+    fileMentionMenu.id = 'file-mention-menu';
+    fileMentionMenu.style.display = 'none';
+    inputContainer.appendChild(fileMentionMenu);
     const area = el('div', 'input-area');
-    area.innerHTML = `<div id="attachment-preview" class="attachment-preview" style="display: none;"></div><textarea id="input" placeholder="Ask Pi anything..." rows="1"></textarea><input id="image-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>`;
+    area.innerHTML = `<div id="attachment-preview" class="attachment-preview" style="display: none;"></div><div class="input-text-wrap"><div id="input-highlight" class="input-highlight" aria-hidden="true"></div><textarea id="input" placeholder="Ask Pi anything..." rows="1"></textarea></div><input id="image-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>`;
     inputContainer.appendChild(area);
     const footer = el('div', 'input-footer');
     inputContainer.appendChild(footer);
@@ -709,7 +717,7 @@ function updateInputArea(): void {
             const text = input?.value.trim();
             if (text) {
                 vscode.postMessage({ type: 'queueMessage', text });
-                if (input) { input.value = ''; input.style.height = 'auto'; }
+                if (input) { input.value = ''; input.style.height = 'auto'; updateInputHighlights(input); }
             } else {
                 vscode.postMessage({ type: 'abort' });
             }
@@ -727,7 +735,7 @@ function updateInputArea(): void {
         const text = input?.value.trim();
         if (text) {
             vscode.postMessage({ type: 'steer', text });
-            if (input) { input.value = ''; input.style.height = 'auto'; }
+            if (input) { input.value = ''; input.style.height = 'auto'; updateInputHighlights(input); }
             showSteerToast(text);
         }
     });
@@ -2226,6 +2234,43 @@ function bindStableEvents(): void {
 
 
     input?.addEventListener('keydown', (e) => {
+        if (isFileMentionMenuVisible()) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (fileMentionMenuItems.length > 0) {
+                    fileMentionMenuIndex = Math.min(fileMentionMenuIndex + 1, fileMentionMenuItems.length - 1);
+                    const menu = document.getElementById('file-mention-menu');
+                    if (menu) renderFileMentionMenu(menu);
+                }
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (fileMentionMenuItems.length > 0) {
+                    fileMentionMenuIndex = Math.max(fileMentionMenuIndex - 1, 0);
+                    const menu = document.getElementById('file-mention-menu');
+                    if (menu) renderFileMentionMenu(menu);
+                }
+                return;
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (fileMentionMenuItems.length > 0) {
+                    selectFileMentionItem(fileMentionMenuIndex);
+                }
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                hideFileMentionMenu();
+                return;
+            }
+        }
+
         if (isSlashMenuVisible()) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -2270,6 +2315,7 @@ function bindStableEvents(): void {
                     }
                     input.value = '';
                     input.style.height = 'auto';
+                    updateInputHighlights(input);
                 }
             } else {
                 sendMessage();
@@ -2285,7 +2331,14 @@ function bindStableEvents(): void {
         if (!input) return;
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+        updateInputHighlights(input);
         updateSlashMenu(input);
+        updateFileMentionMenu(input);
+    });
+
+    input?.addEventListener('scroll', () => {
+        if (!input) return;
+        syncInputHighlightScroll(input);
     });
 
     input?.addEventListener('paste', (e) => {
@@ -2427,6 +2480,7 @@ function sendMessage(): void {
     const text = typedText || (images && images.length > 1 ? 'Please inspect the attached images.' : 'Please inspect the attached image.');
     input.value = '';
     input.style.height = 'auto';
+    updateInputHighlights(input);
     draftTexts.delete(state.activeTabId);
     clearImageAttachments();
     userHasScrolled = false;
@@ -2448,6 +2502,189 @@ function bindCopyButtons(): void {
             });
         });
     });
+}
+
+// ── Input mention highlighting ──
+
+function updateInputHighlights(input?: HTMLTextAreaElement | null): void {
+    const textInput = input ?? document.getElementById('input') as HTMLTextAreaElement | null;
+    const highlight = document.getElementById('input-highlight') as HTMLElement | null;
+    if (!textInput || !highlight) return;
+
+    highlight.innerHTML = textInput.value ? renderInputHighlightHtml(textInput.value) : '';
+    syncInputHighlightScroll(textInput);
+}
+
+function syncInputHighlightScroll(input: HTMLTextAreaElement): void {
+    const highlight = document.getElementById('input-highlight') as HTMLElement | null;
+    if (!highlight) return;
+    highlight.scrollTop = input.scrollTop;
+    highlight.scrollLeft = input.scrollLeft;
+}
+
+function renderInputHighlightHtml(text: string): string {
+    const mentionRegex = /@\{[^}\r\n]+\}|@[^\s{}]+/g;
+    let html = '';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = mentionRegex.exec(text)) !== null) {
+        const mention = match[0];
+        html += escHtml(text.slice(lastIndex, match.index));
+        html += `<span class="input-file-mention">${escHtml(mention)}</span>`;
+        lastIndex = match.index + mention.length;
+    }
+
+    html += escHtml(text.slice(lastIndex));
+    if (text.endsWith('\n')) html += '<br>';
+    return html;
+}
+
+// ── Workspace file mention menu ──
+
+let fileMentionMenuIndex = 0;
+let fileMentionMenuItems: WorkspaceFileSuggestion[] = [];
+let fileMentionLatestRequestId = 0;
+let fileMentionSearchTimer: ReturnType<typeof setTimeout> | undefined;
+let fileMentionIsIndexing = false;
+
+function updateFileMentionMenu(input: HTMLTextAreaElement): void {
+    const menu = document.getElementById('file-mention-menu');
+    if (!menu) return;
+
+    const token = getActiveFileMentionToken(input);
+    if (!token) {
+        hideFileMentionMenu();
+        return;
+    }
+
+    hideSlashMenu();
+    fileMentionMenuIndex = 0;
+    fileMentionIsIndexing = true;
+    fileMentionMenuItems = [];
+    renderFileMentionMenu(menu);
+    menu.style.display = '';
+
+    if (fileMentionSearchTimer) clearTimeout(fileMentionSearchTimer);
+    fileMentionSearchTimer = setTimeout(() => {
+        fileMentionSearchTimer = undefined;
+        const requestId = ++fileMentionLatestRequestId;
+        vscode.postMessage({ type: 'searchWorkspaceFiles', query: token.query, requestId });
+    }, 100);
+}
+
+function handleWorkspaceFileSuggestions(requestId: number, query: string, items: WorkspaceFileSuggestion[], isIndexing: boolean): void {
+    if (requestId < fileMentionLatestRequestId) return;
+    const input = document.getElementById('input') as HTMLTextAreaElement | null;
+    const token = input ? getActiveFileMentionToken(input) : null;
+    if (!input || !token || token.query !== query) return;
+
+    fileMentionLatestRequestId = requestId;
+    fileMentionMenuItems = items ?? [];
+    fileMentionIsIndexing = isIndexing;
+    fileMentionMenuIndex = Math.min(fileMentionMenuIndex, Math.max(0, fileMentionMenuItems.length - 1));
+
+    const menu = document.getElementById('file-mention-menu');
+    if (!menu) return;
+    renderFileMentionMenu(menu);
+    menu.style.display = '';
+}
+
+function renderFileMentionMenu(menu: HTMLElement): void {
+    if (fileMentionIsIndexing) {
+        menu.innerHTML = '<div class="file-mention-status">Indexing workspace files...</div>';
+        return;
+    }
+
+    if (fileMentionMenuItems.length === 0) {
+        menu.innerHTML = '<div class="file-mention-status">No matching files</div>';
+        return;
+    }
+
+    fileMentionMenuIndex = Math.max(0, Math.min(fileMentionMenuIndex, fileMentionMenuItems.length - 1));
+    menu.innerHTML = fileMentionMenuItems.map((item, i) => {
+        const active = i === fileMentionMenuIndex ? ' file-mention-item-active' : '';
+        return `<div class="file-mention-item${active}" data-index="${i}">
+            <span class="file-mention-name">${escHtml(item.basename)}</span>
+            <span class="file-mention-path">${escHtml(item.relativePath)}</span>
+        </div>`;
+    }).join('');
+
+    menu.querySelectorAll('.file-mention-item').forEach((item) => {
+        item.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const idx = parseInt((item as HTMLElement).dataset.index ?? '0', 10);
+            selectFileMentionItem(idx);
+        });
+    });
+
+    scrollActiveFileMentionItemIntoView(menu);
+}
+
+function scrollActiveFileMentionItemIntoView(menu: HTMLElement): void {
+    const active = menu.querySelector('.file-mention-item-active') as HTMLElement | null;
+    if (!active) return;
+    active.scrollIntoView({ block: 'nearest' });
+}
+
+function selectFileMentionItem(index: number): void {
+    const input = document.getElementById('input') as HTMLTextAreaElement | null;
+    if (!input) return;
+
+    const item = fileMentionMenuItems[index];
+    if (!item) return;
+
+    const token = getActiveFileMentionToken(input);
+    if (!token) return;
+
+    const text = input.value;
+    input.value = text.slice(0, token.matchStart) + item.insertText + text.slice(token.cursorPos);
+    const newPos = token.matchStart + item.insertText.length;
+    input.setSelectionRange(newPos, newPos);
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+    updateInputHighlights(input);
+
+    hideFileMentionMenu();
+    input.focus();
+}
+
+function hideFileMentionMenu(): void {
+    if (fileMentionSearchTimer) {
+        clearTimeout(fileMentionSearchTimer);
+        fileMentionSearchTimer = undefined;
+    }
+    const menu = document.getElementById('file-mention-menu');
+    if (menu) {
+        menu.style.display = 'none';
+        menu.innerHTML = '';
+    }
+    fileMentionMenuItems = [];
+    fileMentionMenuIndex = 0;
+    fileMentionIsIndexing = false;
+}
+
+function isFileMentionMenuVisible(): boolean {
+    const menu = document.getElementById('file-mention-menu');
+    return !!menu && menu.style.display !== 'none';
+}
+
+function getActiveFileMentionToken(input: HTMLTextAreaElement): { matchStart: number; cursorPos: number; query: string } | null {
+    const text = input.value;
+    const cursorPos = input.selectionStart;
+    if (cursorPos !== input.selectionEnd) return null;
+
+    const beforeCursor = text.slice(0, cursorPos);
+    const match = beforeCursor.match(/(?:^|[\s([{:,;])(@\{([^}\r\n]*)$|@([^\s{}]*))$/);
+    if (!match) return null;
+
+    const token = match[1];
+    const query = match[2] ?? match[3] ?? '';
+    return {
+        matchStart: beforeCursor.length - token.length,
+        cursorPos,
+        query,
+    };
 }
 
 // ── Slash command menu ──
@@ -2525,6 +2762,7 @@ function selectSlashItem(index: number): void {
         input.value = text.slice(0, matchStart) + replacement + text.slice(cursorPos);
         const newPos = matchStart + replacement.length;
         input.setSelectionRange(newPos, newPos);
+        updateInputHighlights(input);
     }
 
     hideSlashMenu();

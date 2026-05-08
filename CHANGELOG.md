@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-05-08
+
+### Changed
+- File mentions in the chat input are now highlighted in blue so referenced files stand out before sending.
+
+## [0.8.1] - 2026-05-08
+
+### Fixed
+- File mention suggestions now stay focused and scroll correctly when navigating long result lists with the keyboard.
+
+## [0.8.0] - 2026-05-08
+
+### Added
+- Chat input now supports `@` workspace file mentions with cached suggestions, configurable excludes, and minimal prompt references so the agent knows which files may be useful to inspect.
+
 ## [0.7.0] - 2026-05-08
 
 ### Added
