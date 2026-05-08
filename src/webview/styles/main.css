@@ -365,8 +365,7 @@ body[data-mode="panel"] .tab-strip,
 
 /* ── Message groups ── */
 .message-group-user {
-    margin-top: 0;
-    margin-bottom: 8px;
+    margin: 8px;
 }
 
 .message-group-current-user {

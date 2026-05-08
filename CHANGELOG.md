@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- User prompt cards in chat now have a small inset instead of touching the view edges.
+
 ## [0.8.8] - 2026-05-08
 
 ### Fixed
