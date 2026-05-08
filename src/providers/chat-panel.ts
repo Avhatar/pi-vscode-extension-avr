@@ -41,7 +41,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         this._tabId = tabId;
         this._controller = controller;
         this._extensionUri = extensionUri;
-        this._panel.iconPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'pi-code-icon-full.png');
+        this._panel.iconPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'icons', 'piIcon1.png');
 
         this._panel.webview.options = {
             enableScripts: true,

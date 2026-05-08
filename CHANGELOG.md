@@ -7,8 +7,29 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-05-08
+
+### Changed
+- New marketplace icon featuring the pi symbol in curly braces.
+- Activity Bar icon redrawn to match the new pi-in-braces motif and resized to fill the slot.
+- Empty-state welcome icon now uses the same pi-in-braces glyph as the rest of the UI.
+- Editor tab icon for chat panels now uses the new pi-in-braces artwork.
+
+## [0.8.11] - 2026-05-08
+
+### Changed
+- Inline file change previews now match command output spacing and use clearer Write/Edit headers.
+
+## [0.8.10] - 2026-05-08
+
+### Fixed
+- Edit results now consistently render as compact side-by-side diff previews instead of plain tool output cards.
+
+## [0.8.9] - 2026-05-08
+
 ### Changed
 - User prompt cards in chat now have a small inset instead of touching the view edges.
+- Inline file change previews now show side-by-side before and after panes for easier review.
 
 ## [0.8.8] - 2026-05-08
 

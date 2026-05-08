@@ -1208,10 +1208,15 @@ body[data-mode="panel"] .tab-strip,
 }
 
 .welcome-icon {
-    font-size: 48px;
     margin-bottom: 16px;
-    font-weight: 700;
     opacity: 0.3;
+    color: var(--vscode-foreground);
+    line-height: 0;
+}
+
+.welcome-icon svg {
+    width: 64px;
+    height: 64px;
 }
 
 .welcome-title {
@@ -1278,9 +1283,9 @@ body[data-mode="panel"] .tab-strip,
 /* ── Inline diff cards ── */
 .diff-card {
     margin: 0 0 8px 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--card-bg);
+    border: none;
+    border-radius: 0;
+    background: transparent;
     overflow: hidden;
     box-sizing: border-box;
 }
@@ -1291,9 +1296,9 @@ body[data-mode="panel"] .tab-strip,
 .diff-file-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    font-size: 12px;
+    gap: 8px;
+    padding: 6px 16px;
+    font-size: var(--vscode-font-size, 13px) !important;
     cursor: pointer;
     transition: background 0.15s;
     user-select: none;
@@ -1343,39 +1348,103 @@ body[data-mode="panel"] .tab-strip,
 }
 
 .diff-view {
-    border-top: 1px solid var(--border);
+    position: relative;
+    margin: 0 16px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     max-height: 250px;
-    overflow-y: auto;
-    overflow-x: auto;
+    overflow: auto;
     font-family: var(--font-mono);
     font-size: 11px;
     line-height: 1.5;
+    background: rgba(0, 0, 0, 0.15);
 }
 .diff-view::-webkit-scrollbar { width: 4px; height: 4px; }
 .diff-view::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
 
-.diff-line {
-    padding: 0 12px;
-    white-space: pre;
-    min-height: 1.5em;
+.diff-view-expandable {
+    cursor: pointer;
 }
-.diff-line-add {
-    background: rgba(115, 201, 145, 0.12);
-    color: var(--success-fg);
+
+.diff-view-collapsed {
+    max-height: 4.5em;
+    overflow: hidden;
 }
-.diff-line-del {
-    background: rgba(244, 135, 113, 0.12);
-    color: var(--error-fg);
-}
-.diff-line-ctx {
+
+.diff-view-collapsed::after {
+    content: 'Click to expand';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 10px 12px 3px;
+    text-align: right;
+    font-family: var(--vscode-font-family, sans-serif);
+    font-size: 10px;
     color: var(--muted);
+    background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.15) 70%);
+    pointer-events: none;
 }
-.diff-line-hunk {
-    color: var(--link);
-    background: rgba(55, 148, 255, 0.06);
+
+.diff-view-expanded {
+    max-height: 250px;
+    overflow: auto;
+}
+
+.diff-side-by-side {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    table-layout: auto;
+}
+
+.diff-cell {
+    width: 50%;
+    padding: 0 10px;
+    height: 1.5em;
+    vertical-align: top;
+    white-space: pre;
+    color: var(--vscode-editor-foreground, var(--fg));
+}
+
+.diff-cell-right {
+    border-left: 1px solid var(--vscode-diffEditor-border, var(--border));
+}
+
+.diff-cell-add {
+    background: var(--vscode-diffEditor-insertedLineBackground, rgba(115, 201, 145, 0.16));
+}
+
+.diff-cell-del {
+    background: var(--vscode-diffEditor-removedLineBackground, rgba(244, 135, 113, 0.16));
+}
+
+.diff-cell-ctx {
+    color: var(--vscode-editor-foreground, var(--fg));
+}
+
+.diff-cell-empty,
+.diff-gap {
+    background-image: repeating-linear-gradient(
+        -45deg,
+        transparent 0,
+        transparent 4px,
+        var(--vscode-diffEditor-diagonalFill, rgba(204, 204, 204, 0.16)) 4px,
+        var(--vscode-diffEditor-diagonalFill, rgba(204, 204, 204, 0.16)) 5px
+    );
+}
+
+.diff-gap {
+    height: 16px;
+    padding: 0;
+    border-top: 1px solid var(--vscode-diffEditor-border, var(--border));
+    border-bottom: 1px solid var(--vscode-diffEditor-border, var(--border));
+}
+
+.diff-notice {
+    padding: 2px 10px;
+    color: var(--muted);
     font-style: italic;
-    padding-top: 4px;
-    padding-bottom: 4px;
 }
 
 /* ── Changed files section ── */

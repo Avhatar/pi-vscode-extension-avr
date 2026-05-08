@@ -526,6 +526,7 @@ function updateMessages(): void {
     bindCheckpointButtons();
     bindRedoButtons();
     bindDiffButtons();
+    bindDiffPreviewToggles();
     bindToolClickable();
 }
 
@@ -927,7 +928,15 @@ function buildWelcome(): HTMLElement {
         </div>
     `;
     w.innerHTML = `
-        <div class="welcome-icon">&pi;</div>
+        <div class="welcome-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M7 2.5 Q3 2.5 3 6 V10 Q3 12 1.5 12 Q3 12 3 14 V18 Q3 21.5 7 21.5"/>
+                <path d="M17 2.5 Q21 2.5 21 6 V10 Q21 12 22.5 12 Q21 12 21 14 V18 Q21 21.5 17 21.5"/>
+                <path d="M6 8 H18"/>
+                <path d="M9.5 8 V17.5"/>
+                <path d="M14 8 V15.5 Q14 17.5 16 17.5"/>
+            </svg>
+        </div>
         <div class="welcome-title">Pi Code</div>
         <div class="welcome-subtitle">Ask anything. Pi can read, write, and execute code for you.</div>
         ${noAuthBanner}
@@ -1112,6 +1121,7 @@ function renderInlineFileChange(change: FileChangeInfo): void {
     }
 
     bindDiffButtons();
+    bindDiffPreviewToggles();
     scrollToBottom();
 }
 
@@ -1134,10 +1144,12 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
         statsHtml += `</span>`;
     }
 
+    const actionLabel = change.toolName === 'write' ? 'Write' : 'Edit';
+
     card.innerHTML = `
         <div class="diff-file-header" data-filepath="${escHtml(change.filePath)}" data-toolcallid="${escHtml(change.toolCallId)}">
-            <span class="diff-file-icon">${change.isNew ? '&#10010;' : '&#9998;'}</span>
-            <span class="diff-file-name">${escHtml(fileName)}</span>
+            <span class="tool-icon">${getToolIcon(change.toolName)}</span>
+            <span class="diff-file-name">${actionLabel} ${escHtml(fileName)}</span>
             ${dirPath ? `<span class="diff-file-dir">${escHtml(dirPath)}</span>` : ''}
             ${statsHtml}
             ${change.isNew ? '<span class="diff-new-badge">NEW</span>' : ''}
@@ -1145,8 +1157,13 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
     `;
 
     if (change.diff) {
-        const diffView = el('div', 'diff-view');
-        diffView.innerHTML = renderDiffLines(change.diff);
+        const renderedDiff = renderDiffLines(change.diff);
+        const diffView = el('div', `diff-view${renderedDiff.rowCount > 3 ? ' diff-view-expandable diff-view-collapsed' : ''}`);
+        if (renderedDiff.rowCount > 3) {
+            diffView.dataset.moreRows = String(renderedDiff.rowCount - 3);
+            diffView.title = 'Click to expand the full diff';
+        }
+        diffView.innerHTML = renderedDiff.html;
         card.appendChild(diffView);
     }
 
@@ -1162,26 +1179,106 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
     return wrapper;
 }
 
-function renderDiffLines(diff: string): string {
-    const lines = diff.split('\n');
-    const htmlLines: string[] = [];
+function renderDiffLines(diff: string): { html: string; rowCount: number } {
+    const lines = diff.replace(/\r\n/g, '\n').split('\n');
+    const rows: string[] = [];
+    let rowCount = 0;
+    let removed: string[] = [];
+    let added: string[] = [];
+    let hasRenderedRows = false;
 
-    for (const line of lines) {
-        if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+    const pushRow = (row: string, countsAsContent = true) => {
+        rows.push(row);
+        if (countsAsContent) rowCount++;
+    };
+
+    const flushChanges = () => {
+        if (removed.length === 0 && added.length === 0) return;
+
+        const count = Math.max(removed.length, added.length);
+        for (let i = 0; i < count; i++) {
+            pushRow(renderDiffPairRow(
+                removed[i] ?? '',
+                added[i] ?? '',
+                removed[i] === undefined ? 'empty' : 'del',
+                added[i] === undefined ? 'empty' : 'add',
+            ));
+        }
+
+        removed = [];
+        added = [];
+        hasRenderedRows = true;
+    };
+
+    for (const rawLine of lines) {
+        if (rawLine.startsWith('--- ') || rawLine.startsWith('+++ ')) {
             continue;
         }
-        if (line.startsWith('@@')) {
-            htmlLines.push(`<div class="diff-line diff-line-hunk">${escHtml(line)}</div>`);
-        } else if (line.startsWith('+')) {
-            htmlLines.push(`<div class="diff-line diff-line-add">${escHtml(line)}</div>`);
-        } else if (line.startsWith('-')) {
-            htmlLines.push(`<div class="diff-line diff-line-del">${escHtml(line)}</div>`);
-        } else {
-            htmlLines.push(`<div class="diff-line diff-line-ctx">${escHtml(line)}</div>`);
+
+        if (rawLine.startsWith('@@')) {
+            flushChanges();
+            if (hasRenderedRows) {
+                pushRow(renderDiffGapRow(), false);
+            }
+            continue;
         }
+
+        if (rawLine.startsWith('-')) {
+            removed.push(rawLine.slice(1));
+            continue;
+        }
+
+        if (rawLine.startsWith('+')) {
+            added.push(rawLine.slice(1));
+            continue;
+        }
+
+        flushChanges();
+
+        if (rawLine.startsWith('\\ No newline')) {
+            pushRow(renderDiffNoticeRow(rawLine));
+            hasRenderedRows = true;
+            continue;
+        }
+
+        const text = rawLine.startsWith(' ') ? rawLine.slice(1) : rawLine;
+        pushRow(renderDiffPairRow(text, text, 'ctx', 'ctx'));
+        hasRenderedRows = true;
     }
 
-    return htmlLines.join('');
+    flushChanges();
+
+    return {
+        html: `<table class="diff-side-by-side" role="presentation"><tbody>${rows.join('')}</tbody></table>`,
+        rowCount,
+    };
+}
+
+type DiffCellKind = 'ctx' | 'add' | 'del' | 'empty';
+
+function renderDiffPairRow(
+    leftText: string,
+    rightText: string,
+    leftKind: DiffCellKind,
+    rightKind: DiffCellKind,
+): string {
+    return `<tr class="diff-row">
+        ${renderDiffCell(leftText, leftKind, 'left')}
+        ${renderDiffCell(rightText, rightKind, 'right')}
+    </tr>`;
+}
+
+function renderDiffCell(text: string, kind: DiffCellKind, side: 'left' | 'right'): string {
+    const content = kind === 'empty' ? '&nbsp;' : escHtml(text);
+    return `<td class="diff-cell diff-cell-${side} diff-cell-${kind}">${content}</td>`;
+}
+
+function renderDiffGapRow(): string {
+    return `<tr class="diff-row diff-row-gap"><td class="diff-gap" colspan="2" aria-hidden="true">&nbsp;</td></tr>`;
+}
+
+function renderDiffNoticeRow(text: string): string {
+    return `<tr class="diff-row diff-row-notice"><td class="diff-notice" colspan="2">${escHtml(text)}</td></tr>`;
 }
 
 // ── Message rendering ──
@@ -1192,7 +1289,8 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
     if (role === 'toolResult' || role === 'tool') {
         const toolName = msg.toolName ?? '';
         if (toolName === 'edit' || toolName === 'write') {
-            const matchingChange = findFileChangeForToolResult(msg);
+            const matchingChange = findFileChangeForToolResult(msg)
+                ?? buildFileChangeFromToolResult(msg, state.messages, index);
             if (matchingChange) {
                 return buildDiffCard(matchingChange, msg);
             }
@@ -1288,6 +1386,99 @@ function findFileChangeForToolResult(msg: any): FileChangeInfo | undefined {
         if (match) return match;
     }
     return undefined;
+}
+
+function buildFileChangeFromToolResult(msg: any, allMessages: any[], msgIndex: number): FileChangeInfo | undefined {
+    if (msg.isError) return undefined;
+
+    const toolName = msg.toolName ?? '';
+    if (toolName !== 'edit' && toolName !== 'write') return undefined;
+
+    const toolCallId = msg.toolCallId ?? msg.tool_call_id ?? `tool-result-${msgIndex}`;
+    const matchingCall = findToolCallInMessages(allMessages, msgIndex, toolCallId);
+    const parsedArgs = getParsedToolArgs(matchingCall);
+    const filePath = parsedArgs?.path ?? parsedArgs?.file_path ?? extractPathFromToolResultText(extractText(msg));
+    if (!filePath) return undefined;
+
+    const diff = extractToolResultDiff(msg)
+        ?? (toolName === 'edit' ? buildDiffFromEditArgs(parsedArgs) : undefined);
+    if (!diff) return undefined;
+
+    const stats = countDiffStats(diff);
+    return {
+        filePath,
+        toolCallId,
+        toolName,
+        isNew: false,
+        diff,
+        addedLines: stats.added,
+        removedLines: stats.removed,
+        turnIndex: 0,
+    };
+}
+
+function getParsedToolArgs(toolCall: any): any {
+    const args = toolCall?.arguments ?? toolCall?.args ?? toolCall?.input ?? toolCall?.function?.arguments ?? {};
+    return typeof args === 'string' ? tryParseJSON(args) : args;
+}
+
+function extractToolResultDiff(msg: any): string | undefined {
+    const candidates = [
+        msg.details?.diff,
+        msg.result?.details?.diff,
+        msg._result?.details?.diff,
+    ];
+    return candidates.find((value) => typeof value === 'string' && value.trim().length > 0);
+}
+
+function extractPathFromToolResultText(text: string): string {
+    const match = text.match(/\bin\s+(.+?)\.?$/m);
+    return match?.[1]?.trim() ?? '';
+}
+
+function buildDiffFromEditArgs(args: any): string | undefined {
+    const edits = getEditItems(args);
+    if (edits.length === 0) return undefined;
+
+    const lines: string[] = [];
+    edits.forEach((edit, index) => {
+        if (index > 0) lines.push('@@');
+        for (const line of splitToolIoLines(edit.oldText)) lines.push(`-${line}`);
+        for (const line of splitToolIoLines(edit.newText)) lines.push(`+${line}`);
+    });
+    return lines.join('\n');
+}
+
+function getEditItems(args: any): { oldText: string; newText: string }[] {
+    if (!args || typeof args !== 'object') return [];
+
+    let rawEdits = args.edits;
+    if (typeof rawEdits === 'string') {
+        const parsed = tryParseJSON(rawEdits);
+        if (Array.isArray(parsed)) rawEdits = parsed;
+    }
+
+    const edits = Array.isArray(rawEdits) ? rawEdits : [];
+    const normalized = edits
+        .filter((edit: any) => typeof edit?.oldText === 'string' && typeof edit?.newText === 'string')
+        .map((edit: any) => ({ oldText: edit.oldText, newText: edit.newText }));
+
+    if (typeof args.oldText === 'string' && typeof args.newText === 'string') {
+        normalized.push({ oldText: args.oldText, newText: args.newText });
+    }
+
+    return normalized;
+}
+
+function countDiffStats(diff: string): { added: number; removed: number } {
+    let added = 0;
+    let removed = 0;
+    for (const line of diff.replace(/\r\n/g, '\n').split('\n')) {
+        if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
+        if (line.startsWith('+')) added++;
+        else if (line.startsWith('-')) removed++;
+    }
+    return { added, removed };
 }
 
 function removePreparingPlaceholder(): void {
@@ -1391,15 +1582,16 @@ function getToolIcon(name: string): string {
 }
 
 function getToolLabel(name: string, args: any): string {
+    const filePath = args?.path ?? args?.file_path;
     switch (name.toLowerCase()) {
         case 'bash':
             return args?.command ? truncate(args.command, 60) : 'Execute command';
         case 'read':
-            return args?.path ? `Read ${truncate(args.path, 50)}` : 'Read file';
+            return filePath ? `Read ${truncate(filePath, 50)}` : 'Read file';
         case 'write':
-            return args?.path ? `Write ${truncate(args.path, 50)}` : 'Write file';
+            return filePath ? `Write ${truncate(filePath, 50)}` : 'Write file';
         case 'edit':
-            return args?.path ? `Edit ${truncate(args.path, 50)}` : 'Edit file';
+            return filePath ? `Edit ${truncate(filePath, 50)}` : 'Edit file';
         case 'glob':
             return args?.pattern ? `Glob ${truncate(args.pattern, 50)}` : 'Find files';
         case 'grep':
@@ -1684,14 +1876,16 @@ function renderToolStart(event: any): void {
     const container = document.getElementById('streaming-message');
     if (!container) return;
 
-    if ((event.toolName === 'edit' || event.toolName === 'write') && event.args?.path) {
+    const editFilePath = event.args?.path ?? event.args?.file_path;
+    if ((event.toolName === 'edit' || event.toolName === 'write') && editFilePath) {
         const card = el('div', 'diff-card loading');
         card.id = `tool-${event.toolCallId}`;
-        const fileName = (event.args.path as string).split('/').pop() ?? event.args.path;
+        const fileName = (editFilePath as string).split('/').pop() ?? editFilePath;
+        const actionLabel = event.toolName === 'write' ? 'Write' : 'Edit';
         card.innerHTML = `
             <div class="diff-file-header">
-                <span class="diff-file-icon">&#9998;</span>
-                <span class="diff-file-name">${escHtml(fileName)}</span>
+                <span class="tool-icon">${getToolIcon(event.toolName)}</span>
+                <span class="diff-file-name">${actionLabel} ${escHtml(fileName)}</span>
                 <span class="tool-status running">running</span>
             </div>
         `;
@@ -2558,6 +2752,19 @@ function bindDiffButtons(): void {
             if (filePath && toolCallId) {
                 vscode.postMessage({ type: 'openDiff', filePath, toolCallId });
             }
+        });
+    });
+}
+
+function bindDiffPreviewToggles(): void {
+    document.querySelectorAll('.diff-view-expandable:not([data-toggle-bound])').forEach((view) => {
+        view.setAttribute('data-toggle-bound', '1');
+        view.addEventListener('click', () => {
+            view.classList.toggle('diff-view-collapsed');
+            view.classList.toggle('diff-view-expanded');
+            (view as HTMLElement).title = view.classList.contains('diff-view-collapsed')
+                ? 'Click to expand the full diff'
+                : 'Click to collapse the diff preview';
         });
     });
 }
