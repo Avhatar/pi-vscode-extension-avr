@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-08
+
+### Added
+- MCP adapter support is now bundled and loaded automatically, enabling MCP tools without a separate `pi install` step.
+
 ## [0.6.2] - 2026-05-07
 
 ### Changed

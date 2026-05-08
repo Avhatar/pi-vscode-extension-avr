@@ -10,6 +10,7 @@ import * as path from 'node:path';
  */
 export const BUNDLED_PI_PACKAGES: readonly string[] = [
     'pi-web-access',
+    'pi-mcp-adapter',
 ];
 
 const EXTENSION_ROOT = path.resolve(__dirname, '..');

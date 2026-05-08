@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/pi-code-icon-full.png",
@@ -172,6 +172,7 @@
     "@mariozechner/pi-agent-core": "^0.70.2",
     "@mariozechner/pi-coding-agent": "^0.70.2",
     "marked": "^18.0.2",
+    "pi-mcp-adapter": "^2.5.4",
     "pi-web-access": "^0.10.7"
   },
   "devDependencies": {
