@@ -9,6 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - "Preparing next moves..." placeholder now shows a spinning ring next to the label so it's obvious the agent is still thinking.
+- The sidebar now focuses on chat history only: open chats are no longer duplicated there, and history starts collapsed while remembering its expanded state.
 
 ## [0.8.12] - 2026-05-08
 

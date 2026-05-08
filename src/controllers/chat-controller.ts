@@ -294,11 +294,11 @@ export class ChatController implements vscode.Disposable {
         this._onLauncherStateChanged.fire();
     }
 
-    /** Build a snapshot of launcher state (open tabs + recent closed sessions). */
-    async computeLauncherState(): Promise<LauncherState> {
-        // "Open chats" only includes tabs with a visible editor panel. A
-        // bare TabState without a panel is an internal placeholder (e.g. the
-        // initial empty tab), not something the user thinks of as open.
+    /** Build a snapshot of launcher state (panel tabs + recent sessions). */
+    async computeLauncherState(): Promise<Omit<LauncherState, 'historyCollapsed'>> {
+        // Track only tabs with a visible editor panel. A bare TabState without
+        // a panel is an internal placeholder (e.g. the initial empty tab), not
+        // something the user thinks of as open.
         const tabs: LauncherTabInfo[] = [...this._tabs.values()]
             .filter(tab => this._openPanels.has(tab.id))
             .map(tab => ({

@@ -1,6 +1,6 @@
 import type {
     LauncherClientMessage, LauncherServerMessage, LauncherState,
-    LauncherTabInfo, LauncherSessionInfo,
+    LauncherSessionInfo,
 } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
@@ -11,7 +11,7 @@ declare function acquireVsCodeApi(): {
 
 const vscode = acquireVsCodeApi();
 
-let currentState: LauncherState = { tabs: [], recentSessions: [] };
+let currentState: LauncherState = { tabs: [], recentSessions: [], historyCollapsed: true };
 
 window.addEventListener('message', (event) => {
     const msg = event.data as LauncherServerMessage;
@@ -62,7 +62,6 @@ function render(): void {
     root.innerHTML = '';
 
     root.appendChild(renderToolbar());
-    root.appendChild(renderOpenTabs());
     root.appendChild(renderRecentSessions());
 }
 
@@ -88,73 +87,36 @@ function renderToolbar(): HTMLElement {
     return bar;
 }
 
-function renderOpenTabs(): HTMLElement {
-    const section = el('div', 'section');
-    const heading = el('div', 'section-heading', 'Open chats');
-    section.appendChild(heading);
-
-    if (currentState.tabs.length === 0) {
-        const empty = el('div', 'empty', 'No active chats. Click “New chat” to start one.');
-        section.appendChild(empty);
-        return section;
-    }
-
-    const list = el('div', 'tab-list');
-    for (const tab of currentState.tabs) {
-        list.appendChild(renderTabRow(tab));
-    }
-    section.appendChild(list);
-    return section;
-}
-
-function renderTabRow(tab: LauncherTabInfo): HTMLElement {
-    const row = el('div', 'tab-row' + (tab.isOpen ? '' : ' tab-row-closed'));
-    row.dataset.tabId = tab.id;
-
-    const icon = el('span', 'tab-status');
-    if (tab.isStreaming) {
-        icon.classList.add('status-streaming');
-        icon.innerHTML = '<span class="spinner"></span>';
-    } else if (tab.hasNotification) {
-        icon.classList.add('status-unread');
-        icon.textContent = '●';
-    } else {
-        icon.classList.add('status-idle');
-        icon.textContent = '◌';
-    }
-    row.appendChild(icon);
-
-    const main = el('div', 'tab-main');
-    const name = el('div', 'tab-name', tab.name || 'Untitled');
-    main.appendChild(name);
-    if (tab.modelLabel) {
-        const sub = el('div', 'tab-sub', tab.modelLabel);
-        main.appendChild(sub);
-    }
-    row.appendChild(main);
-
-    const closeBtn = el('button', 'row-action', '×');
-    closeBtn.title = 'Remove from list (session is preserved on disk)';
-    closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        vscode.postMessage({ type: 'closeTab', tabId: tab.id });
-    });
-    row.appendChild(closeBtn);
-
-    row.addEventListener('click', () => {
-        vscode.postMessage({ type: 'openTab', tabId: tab.id });
-    });
-
-    return row;
+function setHistoryCollapsed(collapsed: boolean): void {
+    currentState = { ...currentState, historyCollapsed: collapsed };
+    render();
+    vscode.postMessage({ type: 'setHistoryCollapsed', collapsed });
 }
 
 function renderRecentSessions(): HTMLElement {
     const section = el('div', 'section');
-    const heading = el('div', 'section-heading', 'History');
+
+    // Show only sessions that aren't currently open in editor tabs.
+    const closed = currentState.recentSessions.filter(s => !s.isOpen);
+
+    const heading = el('button', 'section-heading section-heading-button');
+    heading.type = 'button';
+    heading.setAttribute('aria-expanded', String(!currentState.historyCollapsed));
+    heading.title = currentState.historyCollapsed ? 'Expand history' : 'Collapse history';
+
+    const chevron = el('span', 'section-chevron', currentState.historyCollapsed ? '▶' : '▼');
+    heading.appendChild(chevron);
+    heading.appendChild(el('span', 'section-title', 'History'));
+    heading.appendChild(el('span', 'section-count', String(closed.length)));
+    heading.addEventListener('click', () => {
+        setHistoryCollapsed(!currentState.historyCollapsed);
+    });
     section.appendChild(heading);
 
-    // Show only sessions that aren't currently open (those are already up top).
-    const closed = currentState.recentSessions.filter(s => !s.isOpen);
+    if (currentState.historyCollapsed) {
+        return section;
+    }
+
     if (closed.length === 0) {
         const empty = el('div', 'empty', 'No previous sessions yet.');
         section.appendChild(empty);

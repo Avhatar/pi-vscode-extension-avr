@@ -203,9 +203,8 @@ export type ClientMessage =
 
 // ── Launcher (sidebar) ──
 //
-// The sidebar webview is a launcher: it lists currently-open chats and
-// recent (closed) sessions and lets the user open a chat as an editor
-// panel. It does not host the chat itself.
+// The sidebar webview is a launcher: it shows recent sessions and lets the
+// user open a chat as an editor panel. It does not host the chat itself.
 
 export interface LauncherTabInfo {
     id: string;
@@ -230,6 +229,7 @@ export interface LauncherSessionInfo {
 export interface LauncherState {
     tabs: LauncherTabInfo[];
     recentSessions: LauncherSessionInfo[];
+    historyCollapsed: boolean;
 }
 
 export type LauncherClientMessage =
@@ -239,6 +239,7 @@ export type LauncherClientMessage =
     | { type: 'closeTab'; tabId: string }
     | { type: 'openSession'; sessionPath: string }
     | { type: 'deleteSession'; sessionPath: string }
+    | { type: 'setHistoryCollapsed'; collapsed: boolean }
     | { type: 'openSettings' };
 
 export type LauncherServerMessage =

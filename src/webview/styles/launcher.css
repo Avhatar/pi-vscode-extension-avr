@@ -81,6 +81,38 @@ body {
     margin-top: 4px;
 }
 
+.section-heading-button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+}
+.section-heading-button:hover {
+    color: var(--vscode-foreground);
+    background: var(--vscode-toolbar-hoverBackground);
+    border-radius: var(--row-radius);
+}
+.section-chevron {
+    width: 1em;
+    flex-shrink: 0;
+    font-size: 0.9em;
+}
+.section-title {
+    flex: 1;
+}
+.section-count {
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.9em;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
 .empty {
     color: var(--vscode-descriptionForeground);
     font-style: italic;
@@ -88,16 +120,14 @@ body {
     font-size: 0.92em;
 }
 
-/* ── Tab rows (open chats) ── */
+/* ── Session rows ── */
 
-.tab-list,
 .session-list {
     display: flex;
     flex-direction: column;
     gap: 1px;
 }
 
-.tab-row,
 .session-row {
     display: flex;
     align-items: center;
@@ -108,39 +138,10 @@ body {
     user-select: none;
     min-width: 0;
 }
-.tab-row:hover,
 .session-row:hover {
     background: var(--vscode-list-hoverBackground);
 }
 
-.tab-row-closed {
-    opacity: 0.7;
-}
-
-.tab-status {
-    width: 14px;
-    text-align: center;
-    flex-shrink: 0;
-    font-size: 10px;
-    line-height: 1;
-}
-.status-idle { color: var(--vscode-descriptionForeground); }
-.status-unread { color: var(--vscode-charts-orange, var(--vscode-notificationsWarningIcon-foreground, #e2c08d)); }
-.status-streaming .spinner {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border: 1.5px solid currentColor;
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: launcher-spin 0.9s linear infinite;
-    vertical-align: middle;
-}
-@keyframes launcher-spin {
-    to { transform: rotate(360deg); }
-}
-
-.tab-main,
 .session-main {
     flex: 1;
     min-width: 0;
@@ -149,14 +150,12 @@ body {
     gap: 1px;
 }
 
-.tab-name,
 .session-name {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
 
-.tab-sub,
 .session-meta {
     font-size: 0.85em;
     color: var(--vscode-descriptionForeground);
@@ -177,7 +176,6 @@ body {
     line-height: 1;
     border-radius: 3px;
 }
-.tab-row:hover .row-action,
 .session-row:hover .row-action {
     visibility: visible;
 }

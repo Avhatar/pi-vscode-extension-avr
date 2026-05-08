@@ -3,20 +3,23 @@ import type { LauncherClientMessage, LauncherServerMessage } from '../shared/pro
 import { ChatController } from '../controllers/chat-controller';
 
 /**
- * Sidebar webview view that acts as a launcher: shows currently-open chat
- * panels and recent (closed) sessions, plus quick actions to start a new
- * chat or open settings. The chat itself lives in editor-area
- * `WebviewPanel`s; the launcher only points at them.
+ * Sidebar webview view that acts as a launcher: shows recent sessions and
+ * quick actions to start a new chat or open settings. The chat itself lives
+ * in editor-area `WebviewPanel`s; the launcher only points at them.
  */
 export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposable {
+    private static readonly HISTORY_COLLAPSED_KEY = 'pi-code.launcher.historyCollapsed';
+
     private _view?: vscode.WebviewView;
     private _extensionUri: vscode.Uri;
     private _controller: ChatController;
+    private _globalState: vscode.Memento;
     private _stateSubscription?: vscode.Disposable;
 
-    constructor(extensionUri: vscode.Uri, controller: ChatController) {
+    constructor(extensionUri: vscode.Uri, controller: ChatController, globalState: vscode.Memento) {
         this._extensionUri = extensionUri;
         this._controller = controller;
+        this._globalState = globalState;
     }
 
     resolveWebviewView(
@@ -80,6 +83,10 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                     await this._controller.deleteHistorySession(msg.sessionPath);
                     await this._sendState();
                     break;
+                case 'setHistoryCollapsed':
+                    await this._globalState.update(LauncherView.HISTORY_COLLAPSED_KEY, msg.collapsed);
+                    await this._sendState();
+                    break;
                 case 'openSettings':
                     vscode.commands.executeCommand('pi-code.openSettings');
                     break;
@@ -93,7 +100,13 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
     private async _sendState(): Promise<void> {
         if (!this._view) return;
         const state = await this._controller.computeLauncherState();
-        this._post({ type: 'launcherState', state });
+        this._post({
+            type: 'launcherState',
+            state: {
+                ...state,
+                historyCollapsed: this._globalState.get<boolean>(LauncherView.HISTORY_COLLAPSED_KEY, true),
+            },
+        });
     }
 
     private _post(message: LauncherServerMessage): void {

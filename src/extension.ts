@@ -52,10 +52,10 @@ export async function activate(context: vscode.ExtensionContext) {
         // Phase 3 relies on VS Code's `WebviewPanelSerializer` to bring panels
         // (and their backing tabs) back across reloads, so we no longer need
         // our own eager `restorePersistedTabs()` call. Clear any leftover
-        // pre-0.3.0 state so users upgrading don't see ghost "Open chats".
+        // pre-0.3.0 tab state so users upgrading don't see ghost entries.
         context.workspaceState.update('pi-code.tabs', undefined);
 
-        const launcherView = new LauncherView(context.extensionUri, controller);
+        const launcherView = new LauncherView(context.extensionUri, controller, context.globalState);
 
         context.subscriptions.push(
             controller,
