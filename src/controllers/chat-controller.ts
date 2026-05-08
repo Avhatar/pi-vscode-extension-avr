@@ -44,6 +44,8 @@ interface TabState {
     isStreamingLocal: boolean;
     /** Codex usage snapshot captured at agent_start; used to compute per-turn delta on agent_end. */
     codexTurnBaseline?: CodexUsageSnapshot | null;
+    /** Set when a provider error has already been surfaced to the UI for the current run, so the agent_end fallback doesn't duplicate it. */
+    errorReportedThisRun: boolean;
 }
 
 interface PersistedTabsState {
@@ -95,6 +97,7 @@ function makeTabState(
         pendingApprovals: new Map(),
         queuedMessages: [],
         isStreamingLocal: false,
+        errorReportedThisRun: false,
     };
 }
 
@@ -104,6 +107,46 @@ function safeSerialize(obj: any): any {
     } catch {
         return { type: obj?.type, _serializationFailed: true };
     }
+}
+
+const PROVIDER_ERROR_MAX = 1200;
+
+/**
+ * Format a provider error (Gemini quota, OpenAI auth, Anthropic 5xx, raw fetch
+ * failures, ...) into something readable in the chat banner. We extract a JSON
+ * `error.message` if the body looks like a Google/OpenAI error envelope, then
+ * cap length so a multi-KB stack/JSON dump doesn't blow up the UI.
+ */
+function formatProviderError(raw: string | undefined): string {
+    const fallback = 'The AI provider returned an error.';
+    if (!raw) { return fallback; }
+    const cleaned = extractErrorMessage(raw).trim();
+    if (!cleaned) { return fallback; }
+    return cleaned.length > PROVIDER_ERROR_MAX
+        ? `${cleaned.slice(0, PROVIDER_ERROR_MAX)}…`
+        : cleaned;
+}
+
+function extractErrorMessage(raw: string): string {
+    const jsonStart = raw.indexOf('{');
+    if (jsonStart >= 0) {
+        const candidate = raw.slice(jsonStart);
+        try {
+            const parsed = JSON.parse(candidate);
+            const msg = parsed?.error?.message ?? parsed?.message;
+            if (typeof msg === 'string' && msg.length > 0) {
+                const status = parsed?.error?.status ? ` (${parsed.error.status})` : '';
+                return `${msg}${status}`;
+            }
+        } catch { /* fall through to raw */ }
+    }
+    return raw;
+}
+
+function trimErrorForStatus(raw: string | undefined): string {
+    if (!raw) { return 'provider error'; }
+    const msg = extractErrorMessage(raw).replace(/\s+/g, ' ').trim();
+    return msg.length > 80 ? `${msg.slice(0, 80)}…` : msg;
 }
 
 /**
@@ -457,11 +500,25 @@ export class ChatController implements vscode.Disposable {
             tab.streamingThinkingDuration = 0;
             tab.agentStartTime = Date.now();
             tab.isStreamingLocal = true;
+            tab.errorReportedThisRun = false;
             tab.codexTurnBaseline = getCodexUsageStore().getCurrent();
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
             }
             this._onLauncherStateChanged.fire();
+        }
+
+        if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'error'
+            && event.assistantMessageEvent.reason === 'error') {
+            const raw = event.assistantMessageEvent.error?.errorMessage;
+            this._postAgentError(tab, raw);
+        }
+
+        if (event.type === 'auto_retry_start') {
+            const delaySec = Math.max(1, Math.round((event.delayMs ?? 0) / 1000));
+            const reason = trimErrorForStatus(event.errorMessage);
+            const text = `Pi: rate limited, retry ${event.attempt}/${event.maxAttempts} in ${delaySec}s — ${reason}`;
+            vscode.window.setStatusBarMessage(text, (delaySec + 2) * 1000);
         }
 
         if (event.type === 'message_end' && event.message?.role === 'assistant') {
@@ -484,6 +541,18 @@ export class ChatController implements vscode.Disposable {
         }
 
         if (event.type === 'agent_end') {
+            if (!tab.errorReportedThisRun) {
+                const msgs = tab.session.getMessages();
+                for (let i = msgs.length - 1; i >= 0; i--) {
+                    const m = msgs[i] as any;
+                    if (m?.role === 'assistant') {
+                        if (m.stopReason === 'error' && typeof m.errorMessage === 'string') {
+                            this._postAgentError(tab, m.errorMessage);
+                        }
+                        break;
+                    }
+                }
+            }
             const baseline = tab.codexTurnBaseline;
             tab.codexTurnBaseline = undefined;
             const after = getCodexUsageStore().getCurrent();
@@ -895,6 +964,18 @@ export class ChatController implements vscode.Disposable {
             const targetId = sourceTabId ?? this._activeTabId;
             this._postForTab(targetId, { type: 'error', message: err.message ?? String(err) });
         }
+    }
+
+    private _postAgentError(tab: TabState, raw: string | undefined): void {
+        if (tab.errorReportedThisRun) { return; }
+        tab.errorReportedThisRun = true;
+        tab.streamingText = '';
+        tab.streamingThinking = '';
+        tab.isThinking = false;
+        tab.thinkingStartTime = 0;
+        tab.streamingThinkingDuration = 0;
+        const message = formatProviderError(raw);
+        this._postForTab(tab.id, { type: 'error', message });
     }
 
     private _requestToolApproval(tab: TabState, toolCallId: string, toolName: string, args: any): Promise<boolean> {

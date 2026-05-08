@@ -1996,7 +1996,16 @@ function showError(message: string): void {
         errEl.appendChild(action);
     }
 
-    container.appendChild(errEl);
+    // Place the banner just before the trailing 30vh spacer so it sits at the
+    // end of the natural message flow. Appending to `container` would land it
+    // *after* the spacer (visually mid-screen); inserting before #streaming-message
+    // would survive only until the next applyStateSync wipes that region.
+    const spacerEl = container.querySelector('.messages-spacer');
+    if (spacerEl) {
+        container.insertBefore(errEl, spacerEl);
+    } else {
+        container.appendChild(errEl);
+    }
     scrollToBottom();
 }
 

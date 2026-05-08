@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-05-08
+
+### Added
+- The agent now auto-loads `.claude/CLAUDE.md` (and any files it `@`-imports) at the start of each turn, and surfaces per-folder `CLAUDE.md` files whenever it touches paths in that subtree, so per-directory rules are honored without manual reads.
+
+### Fixed
+- MCP servers configured in `.mcp.json` / `.pi/mcp.json` are now picked up correctly; bundled Pi extensions (including the MCP adapter) register their tools at session start instead of staying invisible.
+
+## [0.8.4] - 2026-05-08
+
+### Fixed
+- Provider error banner now sits at the end of the message flow next to the last reply, instead of floating in the middle of the screen below the trailing spacer.
+
+## [0.8.3] - 2026-05-08
+
+### Fixed
+- Provider errors (Gemini quota / 429, expired keys, network failures) are now shown as a red banner in the chat instead of failing silently. JSON-shaped error envelopes are unwrapped so the message is human-readable.
+- When the SDK auto-retries after a rate limit, a transient status-bar message reports the attempt and remaining delay so the chat no longer looks frozen.
+
 ## [0.8.2] - 2026-05-08
 
 ### Changed

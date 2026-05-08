@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as process from 'node:process';
 import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@mariozechner/pi-coding-agent';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment } from '../shared/protocol';
 import { EventRouter } from './events';
@@ -7,6 +8,7 @@ import { getModelRegistry, getAvailableModels, findModel, disposeModelRegistry }
 import { createCodexMonitorExtension } from './codex-monitor';
 import { getCodexUsageStore } from './codex-usage-store';
 import { getBundledPiPackagePaths } from './bundled-packages';
+import { createClaudeMdInjectorExtension } from './claude-md-injector';
 
 export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
 
@@ -42,6 +44,11 @@ export class PiSessionManager {
         const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
 
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
+        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
+        // typically the VS Code install directory, not the workspace, so those configs are missed.
+        // Chdir to the workspace folder so adapters resolve project files correctly.
+        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
         const authStorage = await getAuthStorage(this._secrets);
         this._modelRegistry = await getModelRegistry();
 
@@ -64,6 +71,8 @@ export class PiSessionManager {
         }
 
         const { session, modelFallbackMessage } = await createAgentSession(opts);
+
+        await this._bindExtensions(session);
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
@@ -92,6 +101,7 @@ export class PiSessionManager {
                     usageStore.updateFromHeaders(headers);
                 },
             }),
+            createClaudeMdInjectorExtension(),
         ];
         const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const loader = new DefaultResourceLoader({
@@ -108,6 +118,28 @@ export class PiSessionManager {
             );
         }
         return loader;
+    }
+
+    // Fires session_start to extensions (e.g. pi-mcp-adapter requires this to initialize its server registry).
+    // Mirrors the bindExtensions call that print-mode / interactive-mode / rpc-mode do internally.
+    // Without this, bundled extensions stay in their initial state and tools registered via session_start never appear.
+    private async _bindExtensions(session: AgentSession): Promise<void> {
+        const bindings: any = {
+            commandContextActions: {
+                waitForIdle: () => session.agent.waitForIdle(),
+                reload: async () => { await session.reload(); },
+                newSession: async () => undefined,
+                fork: async () => ({ cancelled: false }),
+                navigateTree: async () => ({ cancelled: false }),
+                switchSession: async () => undefined,
+            },
+            onError: (err: any) => {
+                this._outputChannel.appendLine(
+                    `Extension error (${err.extensionPath}): ${err.error}`,
+                );
+            },
+        };
+        await session.bindExtensions(bindings);
     }
 
     private async _applyDefaultSettings(session: AgentSession): Promise<void> {
@@ -183,6 +215,11 @@ export class PiSessionManager {
 
         const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
+        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
+        // typically the VS Code install directory, not the workspace, so those configs are missed.
+        // Chdir to the workspace folder so adapters resolve project files correctly.
+        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
         const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         this._sessionManager = SM.create(cwd);
 
@@ -204,6 +241,8 @@ export class PiSessionManager {
 
         const { session } = await createAgentSession(opts);
 
+        await this._bindExtensions(session);
+
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
         await this._applyDefaultSettings(session);
@@ -218,6 +257,11 @@ export class PiSessionManager {
         this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
         const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
+        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
+        // typically the VS Code install directory, not the workspace, so those configs are missed.
+        // Chdir to the workspace folder so adapters resolve project files correctly.
+        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
         const authStorage = await getAuthStorage(this._secrets);
         this._modelRegistry = await getModelRegistry();
         this._sessionManager = SM.open(sessionPath, undefined);
@@ -239,6 +283,9 @@ export class PiSessionManager {
         }
 
         const { session } = await createAgentSession(opts);
+
+        await this._bindExtensions(session);
+
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
         await this._applyDefaultSettings(session);
@@ -253,6 +300,11 @@ export class PiSessionManager {
     async getSessions(): Promise<SessionInfo[]> {
         const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
+        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
+        // typically the VS Code install directory, not the workspace, so those configs are missed.
+        // Chdir to the workspace folder so adapters resolve project files correctly.
+        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
         const sessions = await SM.list(cwd);
         return sessions.map((s: any) => ({
             id: s.id ?? s.sessionId ?? '',
@@ -270,6 +322,11 @@ export class PiSessionManager {
 
         const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
+        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
+        // typically the VS Code install directory, not the workspace, so those configs are missed.
+        // Chdir to the workspace folder so adapters resolve project files correctly.
+        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
         this._sessionManager = SM.open(sessionPath, undefined);
 
         const resourceLoader = await this._buildResourceLoader(cwd);
@@ -281,6 +338,8 @@ export class PiSessionManager {
             sessionManager: this._sessionManager,
             resourceLoader,
         });
+
+        await this._bindExtensions(session);
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());

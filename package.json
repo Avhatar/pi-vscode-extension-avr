@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.8.2",
+  "version": "0.8.5",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/pi-code-icon-full.png",
