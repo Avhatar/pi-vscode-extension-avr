@@ -365,11 +365,19 @@ body[data-mode="panel"] .tab-strip,
 
 /* ── Message groups ── */
 .message-group-user {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.message-group-current-user {
     position: sticky;
     top: 0;
     z-index: 10;
-    margin-top: 0;
-    margin-bottom: 8px;
+}
+
+.message-group-current-user .message-user {
+    max-height: calc(4.8em + 32px);
+    overflow: hidden;
 }
 
 .message-group-assistant {
@@ -671,6 +679,59 @@ body[data-mode="panel"] .tab-strip,
 
 .tool-body {
     margin: 0 16px;
+}
+
+.tool-io-summary {
+    list-style: none;
+    cursor: pointer;
+    outline: none;
+    display: block;
+}
+.tool-io-summary::-webkit-details-marker { display: none; }
+.tool-io-summary::marker { display: none; content: ''; }
+.tool-io-card[open] .tool-io-preview { display: none; }
+.tool-io-preview,
+.tool-io-full {
+    margin: 0 16px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+}
+.tool-io-row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    border-top: 1px solid var(--border);
+}
+.tool-io-row:first-child { border-top: none; }
+.tool-io-label {
+    padding: 6px 8px;
+    border-right: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.5;
+    text-transform: uppercase;
+    user-select: none;
+}
+.tool-io-value {
+    margin: 0;
+    padding: 6px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+}
+.tool-io-preview .tool-io-value {
+    white-space: pre;
+    word-break: normal;
+    overflow: hidden;
+    text-overflow: clip;
+}
+.tool-io-full .tool-io-value {
+    max-height: none;
 }
 
 /* ── Clickable tool cards (read) ── */

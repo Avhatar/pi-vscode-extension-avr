@@ -7,8 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-05-08
+
+### Fixed
+- Only the latest user prompt now sticks to the top of the chat, and the sticky prompt is capped to three lines so skill runs and long prompts no longer overlap or cover the conversation.
+
+## [0.8.7] - 2026-05-08
+
 ### Changed
 - Build/deploy instructions now clarify that rebuild and install requests should always run, reusing the current version when there are no new changes.
+- Command-like tool cards now show compact IN/OUT previews with full output available on expand.
 
 ## [0.8.6] - 2026-05-08
 

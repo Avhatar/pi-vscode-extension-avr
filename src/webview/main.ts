@@ -480,6 +480,13 @@ function updateMessages(): void {
         let dimming = false;
         let redoPlaced = false;
 
+        let lastUserMessageIndex = -1;
+        for (let i = 0; i < state.messages.length; i++) {
+            if ((state.messages[i].role ?? 'unknown') === 'user') {
+                lastUserMessageIndex = i;
+            }
+        }
+
         for (let i = 0; i < state.messages.length; i++) {
             const msg = state.messages[i];
             const role = msg.role ?? 'unknown';
@@ -491,7 +498,12 @@ function updateMessages(): void {
                 }
             }
 
-            const msgEl = renderMessage(msg, i, role === 'user' ? userMsgCount : undefined);
+            const msgEl = renderMessage(
+                msg,
+                i,
+                role === 'user' ? userMsgCount : undefined,
+                role === 'user' && i === lastUserMessageIndex,
+            );
             if (dimming) {
                 msgEl.classList.add('dimmed');
             }
@@ -1174,7 +1186,7 @@ function renderDiffLines(diff: string): string {
 
 // ── Message rendering ──
 
-function renderMessage(msg: any, index: number, turnNumber?: number): HTMLElement {
+function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPrompt = false): HTMLElement {
     const role = msg.role ?? 'unknown';
 
     if (role === 'toolResult' || role === 'tool') {
@@ -1189,7 +1201,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number): HTMLElemen
     }
 
     if (role === 'user') {
-        const group = el('div', 'message-group-user');
+        const group = el('div', `message-group-user${isStickyPrompt ? ' message-group-current-user' : ''}`);
 
         const wrapper = el('div', `message message-${role}`);
         if (turnNumber !== undefined && !state.isStreaming) {
@@ -1430,10 +1442,101 @@ function formatToolArgs(args: any): string {
     }).join('\n');
 }
 
+const COMMAND_LIKE_TOOLS = new Set(['bash', 'sh', 'shell', 'zsh', 'fish', 'cmd', 'powershell', 'pwsh', 'python', 'node']);
+const COMMAND_INPUT_KEYS = ['command', 'cmd', 'script', 'code'];
+const TOOL_IO_PREVIEW_LINE_LIMIT = 4;
+
 function buildStatusHtml(status: string): string {
     if (status === 'done') return '';
     const label = status.charAt(0).toUpperCase() + status.slice(1);
     return `<span class="tool-status ${status}">${label}</span>`;
+}
+
+function isCommandLikeTool(name: string, args: any): boolean {
+    const normalized = (name ?? '').toLowerCase();
+    if (COMMAND_LIKE_TOOLS.has(normalized)) return true;
+    if (!args || typeof args !== 'object') return false;
+    return COMMAND_INPUT_KEYS.some(key => typeof args[key] === 'string');
+}
+
+function getCommandInputText(args: any): string {
+    if (!args) return '';
+    if (typeof args === 'string') return args;
+    if (typeof args !== 'object') return '';
+    for (const key of COMMAND_INPUT_KEYS) {
+        const value = args[key];
+        if (typeof value === 'string') return value;
+    }
+    return '';
+}
+
+function splitToolIoLines(text: string): string[] {
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    while (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+    return lines;
+}
+
+function takeToolIoLines(lines: string[], limit: number): string {
+    if (limit <= 0) return '';
+    const selected = lines.slice(0, limit);
+    if (lines.length > limit && selected.length > 0) {
+        const last = selected.length - 1;
+        selected[last] = selected[last] ? `${selected[last]} …` : '…';
+    }
+    return selected.join('\n');
+}
+
+function buildToolIoPreview(input: string, output: string): { input: string; output: string } {
+    const inputLines = splitToolIoLines(input || '(no input)');
+    const outputLines = splitToolIoLines(output || '(no output)');
+    const inputLimit = Math.min(inputLines.length, Math.min(2, TOOL_IO_PREVIEW_LINE_LIMIT - 1));
+    const outputLimit = Math.max(1, TOOL_IO_PREVIEW_LINE_LIMIT - inputLimit);
+    return {
+        input: takeToolIoLines(inputLines, inputLimit),
+        output: takeToolIoLines(outputLines, outputLimit),
+    };
+}
+
+function appendToolIoRow(container: HTMLElement, label: string, value: string): void {
+    const row = el('div', 'tool-io-row');
+    const labelEl = el('div', 'tool-io-label');
+    labelEl.textContent = label;
+    const valueEl = el('pre', 'tool-io-value');
+    valueEl.textContent = value;
+    row.append(labelEl, valueEl);
+    container.appendChild(row);
+}
+
+function appendToolIoRows(container: HTMLElement, input: string, output: string, preview: boolean): void {
+    const displayInput = input || '(no input)';
+    const displayOutput = output || '(no output)';
+    const values = preview ? buildToolIoPreview(displayInput, displayOutput) : { input: displayInput, output: displayOutput };
+    appendToolIoRow(container, 'IN', values.input);
+    appendToolIoRow(container, 'OUT', values.output);
+}
+
+function buildToolIoCard(headerHtml: string, input: string, output: string, className = 'tool-card tool-expandable'): HTMLDetailsElement {
+    const details = document.createElement('details');
+    details.className = `${className} tool-io-card`;
+
+    const summary = el('summary', 'tool-io-summary');
+    const header = el('div', 'tool-header');
+    header.innerHTML = headerHtml;
+    const arrow = el('span', 'tool-expand-arrow');
+    arrow.innerHTML = '&#9656;';
+    header.appendChild(arrow);
+    summary.appendChild(header);
+
+    const preview = el('div', 'tool-io-preview');
+    appendToolIoRows(preview, input, output, true);
+    summary.appendChild(preview);
+    details.appendChild(summary);
+
+    const body = el('div', 'tool-body tool-io-full');
+    appendToolIoRows(body, input, output, false);
+    details.appendChild(body);
+
+    return details;
 }
 
 function buildToolCard(tc: any): HTMLElement {
@@ -1496,41 +1599,51 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
     const nameLower = toolName.toLowerCase();
 
     const matchingCall = findToolCallInMessages(allMessages, msgIndex, toolCallId);
-    const args = matchingCall?.arguments ?? matchingCall?.args ?? matchingCall?.input ?? {};
+    const args = matchingCall?.arguments ?? matchingCall?.args ?? matchingCall?.input ?? matchingCall?.function?.arguments ?? {};
     const parsedArgs = typeof args === 'string' ? tryParseJSON(args) : args;
     const label = toolName ? getToolLabel(toolName, parsedArgs) : 'Tool Result';
     const icon = getToolIcon(toolName ?? '');
-    const isBash = nameLower === 'bash';
     const isRead = nameLower === 'read';
+    const isCommandLike = isCommandLikeTool(toolName, parsedArgs);
     const filePath = parsedArgs?.path ?? parsedArgs?.file_path ?? '';
 
     const resultContent = extractText(msg);
-    const hasBody = !!(resultContent || isBash) && !isRead;
+    const hasBody = !!(resultContent || isCommandLike) && !isRead;
 
     const footer = buildToolFooter(msg, allMessages, msgIndex);
 
     if (hasBody) {
         const wrapper = el('div', 'tool-card-wrapper');
 
-        const details = document.createElement('details');
-        details.className = 'tool-card tool-expandable';
-
-        details.innerHTML = `
-            <summary class="tool-header">
+        if (isCommandLike) {
+            const headerHtml = `
                 <span class="tool-icon">${icon}</span>
                 <span class="tool-name">${escHtml(label)}</span>
                 ${buildStatusHtml(isError ? 'error' : 'done')}
-                <span class="tool-expand-arrow">&#9656;</span>
-            </summary>
-        `;
+            `;
+            const details = buildToolIoCard(headerHtml, getCommandInputText(parsedArgs), resultContent);
+            wrapper.appendChild(details);
+        } else {
+            const details = document.createElement('details');
+            details.className = 'tool-card tool-expandable';
 
-        const body = el('div', 'tool-body');
-        const result = el('pre', 'tool-result');
-        result.textContent = resultContent || '(no output)';
-        if (!resultContent) result.classList.add('empty');
-        body.appendChild(result);
-        details.appendChild(body);
-        wrapper.appendChild(details);
+            details.innerHTML = `
+                <summary class="tool-header">
+                    <span class="tool-icon">${icon}</span>
+                    <span class="tool-name">${escHtml(label)}</span>
+                    ${buildStatusHtml(isError ? 'error' : 'done')}
+                    <span class="tool-expand-arrow">&#9656;</span>
+                </summary>
+            `;
+
+            const body = el('div', 'tool-body');
+            const result = el('pre', 'tool-result');
+            result.textContent = resultContent || '(no output)';
+            if (!resultContent) result.classList.add('empty');
+            body.appendChild(result);
+            details.appendChild(body);
+            wrapper.appendChild(details);
+        }
 
         if (footer) wrapper.appendChild(footer);
         return wrapper;
@@ -1596,6 +1709,7 @@ function renderToolStart(event: any): void {
     card.id = `tool-${event.toolCallId}`;
     card.dataset.toolName = event.toolName;
     if (isRead && filePath) card.dataset.filepath = filePath;
+    if (isCommandLikeTool(event.toolName, parsedArgs)) card.dataset.toolInput = getCommandInputText(parsedArgs);
 
     card.innerHTML = `
         <div class="tool-header">
@@ -1640,22 +1754,12 @@ function renderToolEnd(event: any): void {
 
     const toolName = (card as HTMLElement).dataset.toolName ?? '';
     const text = extractToolResultText(event.result);
-    const isBash = toolName.toLowerCase() === 'bash';
-    const hasBody = !!(text || isBash);
+    const isCommandLike = isCommandLikeTool(toolName, undefined);
+    const hasBody = !!(text || isCommandLike);
 
     if (hasBody) {
-        const details = document.createElement('details');
-        details.className = card.className.replace('tool-card', 'tool-card tool-expandable');
-        details.id = card.id;
-        details.dataset.toolName = toolName;
-        if (card.dataset.filepath) details.dataset.filepath = card.dataset.filepath;
-
-        const headerEl = card.querySelector('.tool-header');
-        const nameHtml = headerEl?.innerHTML ?? '';
-
-        details.innerHTML = `<summary class="tool-header">${nameHtml}</summary>`;
-
-        const statusEl = details.querySelector('.tool-status');
+        const headerEl = card.querySelector('.tool-header') as HTMLElement | null;
+        const statusEl = headerEl?.querySelector('.tool-status');
         if (statusEl) {
             if (event.isError) {
                 statusEl.textContent = 'error';
@@ -1664,17 +1768,31 @@ function renderToolEnd(event: any): void {
                 statusEl.remove();
             }
         }
+        const nameHtml = headerEl?.innerHTML ?? '';
 
-        const arrow = el('span', 'tool-expand-arrow');
-        arrow.innerHTML = '&#9656;';
-        details.querySelector('summary')?.appendChild(arrow);
+        let details: HTMLDetailsElement;
+        if (isCommandLike) {
+            details = buildToolIoCard(nameHtml, (card as HTMLElement).dataset.toolInput ?? '', text, card.className.replace('tool-card', 'tool-card tool-expandable'));
+        } else {
+            details = document.createElement('details');
+            details.className = card.className.replace('tool-card', 'tool-card tool-expandable');
+            details.innerHTML = `<summary class="tool-header">${nameHtml}</summary>`;
 
-        const body = el('div', 'tool-body');
-        const resultEl = el('pre', 'tool-result');
-        resultEl.textContent = text || '(no output)';
-        if (!text) resultEl.classList.add('empty');
-        body.appendChild(resultEl);
-        details.appendChild(body);
+            const arrow = el('span', 'tool-expand-arrow');
+            arrow.innerHTML = '&#9656;';
+            details.querySelector('summary')?.appendChild(arrow);
+
+            const body = el('div', 'tool-body');
+            const resultEl = el('pre', 'tool-result');
+            resultEl.textContent = text || '(no output)';
+            if (!text) resultEl.classList.add('empty');
+            body.appendChild(resultEl);
+            details.appendChild(body);
+        }
+
+        details.id = card.id;
+        details.dataset.toolName = toolName;
+        if ((card as HTMLElement).dataset.filepath) details.dataset.filepath = (card as HTMLElement).dataset.filepath;
 
         card.replaceWith(details);
         bindToolClickable();
