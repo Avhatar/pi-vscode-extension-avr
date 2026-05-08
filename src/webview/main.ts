@@ -1491,7 +1491,12 @@ function showPreparingPlaceholder(): void {
     if (document.getElementById('preparing-placeholder')) return;
     const ph = el('div', 'preparing-placeholder');
     ph.id = 'preparing-placeholder';
-    ph.textContent = 'Preparing next moves...';
+    const spinner = el('span', 'preparing-spinner');
+    spinner.setAttribute('aria-hidden', 'true');
+    const label = el('span', 'preparing-label');
+    label.textContent = 'Preparing next moves...';
+    ph.appendChild(spinner);
+    ph.appendChild(label);
     container.appendChild(ph);
     scrollToBottom();
 }

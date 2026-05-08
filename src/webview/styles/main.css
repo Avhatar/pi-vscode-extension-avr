@@ -886,9 +886,33 @@ body[data-mode="panel"] .tab-strip,
 .streaming-message:empty { display: none; }
 
 .preparing-placeholder {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 12px 16px;
     font-size: 13px;
     color: var(--muted);
+}
+
+.preparing-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid var(--border);
+    border-top-color: var(--btn-bg);
+    border-radius: 50%;
+    /* Optical nudge baked into the keyframes: a base translateY would be overridden by the rotate transform on every tick and cause a jitter. */
+    animation: preparing-spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes preparing-spin {
+    from { transform: translateY(1px) rotate(0deg); }
+    to   { transform: translateY(1px) rotate(360deg); }
+}
+
+.preparing-label {
+    line-height: 1;
     animation: preparing-pulse 2s ease-in-out infinite;
 }
 

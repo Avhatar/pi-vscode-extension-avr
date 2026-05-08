@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- "Preparing next moves..." placeholder now shows a spinning ring next to the label so it's obvious the agent is still thinking.
+
 ## [0.8.12] - 2026-05-08
 
 ### Changed
