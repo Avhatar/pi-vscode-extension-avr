@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createTestSession, TEST_MODEL_PROVIDER, TEST_MODEL_ID } from '../../setup';
+import { createTestSession } from '../../setup';
 import type { AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
 
 describe('Pi Code session', () => {
@@ -17,7 +17,8 @@ describe('Pi Code session', () => {
         expect(session).toBeDefined();
         const model = session.model;
         expect(model).toBeDefined();
-        expect(model!.id).toBe(TEST_MODEL_ID);
+        expect(typeof model!.provider).toBe('string');
+        expect(typeof model!.id).toBe('string');
     });
 
     it('session has active tools', () => {

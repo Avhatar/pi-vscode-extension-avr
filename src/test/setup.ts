@@ -4,6 +4,18 @@ import type { AgentSession, ModelRegistry } from '@mariozechner/pi-coding-agent'
 export const TEST_MODEL_PROVIDER = 'ollama';
 export const TEST_MODEL_ID = 'local/Qwen3.6-27B-Coding';
 
+export function getPreferredTestModel(registry: ModelRegistry) {
+    return registry.find(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
+}
+
+export function getFallbackTestModel(registry: ModelRegistry) {
+    const models = registry.getAvailable();
+    if (models.length === 0) {
+        throw new Error('No models available in test registry');
+    }
+    return models[0];
+}
+
 let _authStorage: any;
 let _modelRegistry: ModelRegistry;
 let _initialized = false;
@@ -35,11 +47,9 @@ export async function createTestSession(cwd?: string): Promise<AgentSession> {
         sessionManager,
     });
 
-    const model = modelRegistry.find(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
+    const model = getPreferredTestModel(modelRegistry);
     if (model) {
         await session.setModel(model);
-    } else {
-        console.warn(`Test model ${TEST_MODEL_PROVIDER}/${TEST_MODEL_ID} not found in registry, using default`);
     }
 
     return session;

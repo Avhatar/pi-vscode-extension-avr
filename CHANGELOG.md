@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Build/deploy instructions now clarify that rebuild and install requests should always run, reusing the current version when there are no new changes.
+
+## [0.8.6] - 2026-05-08
+
+### Fixed
+- Unit tests now adapt to the available model registry instead of failing when a local Ollama test model is not installed.
+- The full test suite now builds its integration-test runner before launching VS Code integration tests.
+- Packaged extensions no longer include generated integration-test artifacts after local test runs.
+
 ## [0.8.5] - 2026-05-08
 
 ### Added

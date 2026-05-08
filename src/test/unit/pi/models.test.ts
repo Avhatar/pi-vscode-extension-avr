@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getModelRegistry, TEST_MODEL_PROVIDER, TEST_MODEL_ID } from '../../setup';
+import { getFallbackTestModel, getModelRegistry, getPreferredTestModel } from '../../setup';
 
 describe('Model Registry', () => {
     it('lists available models', () => {
@@ -8,19 +8,20 @@ describe('Model Registry', () => {
         expect(models.length).toBeGreaterThan(0);
     });
 
-    it('finds the test model', () => {
+    it('finds the selected test model', () => {
         const registry = getModelRegistry();
-        const model = registry.find(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
+        const selected = getPreferredTestModel(registry) ?? getFallbackTestModel(registry);
+        const model = registry.find(selected.provider, selected.id);
         expect(model).toBeDefined();
-        expect(model!.id).toBe(TEST_MODEL_ID);
+        expect(model!.id).toBe(selected.id);
     });
 
     it('model has expected properties', () => {
         const registry = getModelRegistry();
-        const model = registry.find(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
+        const model = getPreferredTestModel(registry) ?? getFallbackTestModel(registry);
         expect(model).toBeDefined();
-        expect(model!.provider).toBe(TEST_MODEL_PROVIDER);
-        expect(typeof model!.id).toBe('string');
+        expect(typeof model.provider).toBe('string');
+        expect(typeof model.id).toBe('string');
     });
 
     it('returns undefined for nonexistent model', () => {

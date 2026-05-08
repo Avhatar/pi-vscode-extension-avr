@@ -6,6 +6,7 @@ src/**
 .gitignore
 vitest.config.ts
 tsconfig.json
+tsconfig.integration.json
 esbuild.js
 TODO.md
 AGENTS.md
@@ -14,5 +15,6 @@ CLAUDE.md
 .claude/**
 scripts/**
 .pi/**
+out/test/**
 *.map
 *.vsix

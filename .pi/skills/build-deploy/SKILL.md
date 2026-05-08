@@ -2,7 +2,9 @@
 name: build-deploy
 description: >-
   Build, package, and install the Pi Code VS Code extension locally.
-  Includes versioning: bump version, maintain CHANGELOG.md, deploy with auto-increment.
+  Always build and install on request, even when there are no local changes.
+  Includes versioning: bump version only when there are changes since the previous build;
+  otherwise rebuild and install the current version without changing it.
   Use when: user asks to build, compile, deploy, package, install, update the extension,
   create a VSIX, apply code changes, bump version, or release.
   Triggers: build, deploy, package, install, vsix, compile, ship, release, update extension,
@@ -18,26 +20,46 @@ The project uses [Semantic Versioning](https://semver.org/) and maintains
 
 ### Workflow for the agent
 
-**Every time you make code changes**, before deploying:
+When the user asks to build, package, deploy, install, update the extension, or get a fresh VSIX:
 
-1. **Add entries to `CHANGELOG.md`** under `## [Unreleased]` using the appropriate
-   subsections: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
-2. **Choose the bump type** based on what changed:
-   - **patch** (`0.1.1` → `0.1.2`) — bug fixes, small tweaks, no new features
-   - **minor** (`0.1.2` → `0.2.0`) — new features, backward-compatible
-   - **major** (`0.2.0` → `1.0.0`) — breaking changes
-3. **Deploy with version bump:**
-   ```bash
-   npm run deploy:patch   # or deploy:minor / deploy:major
-   ```
+1. **Always build and install. Do not refuse or ask whether to proceed just because there
+   are no local changes.** The requested outcome is a current VSIX installed into VS Code.
+2. **Check whether a version bump is needed:**
+   - If there are no changes compared with the previous build/release, or the user only
+     wants to reinstall the already-versioned build, run plain `npm run deploy`.
+   - If there are local code/product changes that have not been released yet, document them
+     in `CHANGELOG.md`, choose the appropriate bump type, and run the matching deploy script.
+3. **Every time you make code changes**, before deploying with a version bump:
+   - Add entries to `CHANGELOG.md` under `## [Unreleased]` using the appropriate
+     subsections: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
+   - Choose the bump type based on what changed:
+     - **patch** (`0.1.1` → `0.1.2`) — bug fixes, small tweaks, no new features
+     - **minor** (`0.1.2` → `0.2.0`) — new features, backward-compatible
+     - **major** (`0.2.0` → `1.0.0`) — breaking changes
+   - Deploy with version bump:
+     ```bash
+     npm run deploy:patch   # or deploy:minor / deploy:major
+     ```
 
-This single command will:
+Plain deploy without a bump:
+```bash
+npm run deploy
+```
+
+Versioned deploy commands will:
 - Validate that `[Unreleased]` in CHANGELOG.md has content (fails if empty)
 - Bump version in `package.json`
 - Stamp `[Unreleased]` → `[x.y.z] - YYYY-MM-DD` in CHANGELOG.md
 - Add a fresh empty `[Unreleased]` section on top
 - Sync `package-lock.json`
 - Compile, prune, package VSIX, restore deps, install into VS Code
+
+Plain `npm run deploy` will:
+- Compile the extension
+- Prune dev dependencies
+- Package the current `package.json` version into a VSIX
+- Restore dev dependencies
+- Install that VSIX into VS Code with `--force`
 
 ### CHANGELOG.md format
 
@@ -71,7 +93,9 @@ npm run version:patch    # or version:minor / version:major
 
 ### Deploy without version bump
 
-Use plain `npm run deploy` if version was already bumped, or for re-deploys.
+Use plain `npm run deploy` when there are no changes compared with the previous build,
+when version was already bumped, or for any re-deploy/reinstall request. This still
+builds, packages, and installs the extension.
 
 ## Pipeline Steps (manual)
 
