@@ -42,6 +42,8 @@ interface TabState {
     queuedMessages: string[];
     /** Locally tracked streaming flag – the SDK's isStreaming lags behind agent_end. */
     isStreamingLocal: boolean;
+    /** True while SDK context compaction is running. */
+    isCompacting: boolean;
     /** Codex usage snapshot captured at agent_start; used to compute per-turn delta on agent_end. */
     codexTurnBaseline?: CodexUsageSnapshot | null;
     /** Set when a provider error has already been surfaced to the UI for the current run, so the agent_end fallback doesn't duplicate it. */
@@ -97,6 +99,7 @@ function makeTabState(
         pendingApprovals: new Map(),
         queuedMessages: [],
         isStreamingLocal: false,
+        isCompacting: false,
         errorReportedThisRun: false,
     };
 }
@@ -304,7 +307,7 @@ export class ChatController implements vscode.Disposable {
             .map(tab => ({
                 id: tab.id,
                 name: tab.name,
-                isStreaming: tab.isStreamingLocal,
+                isStreaming: tab.isStreamingLocal || tab.isCompacting,
                 hasNotification: tab.hasNotification,
                 isOpen: true,
                 modelLabel: tab.session.getCurrentModel()?.id,
@@ -521,6 +524,22 @@ export class ChatController implements vscode.Disposable {
             vscode.window.setStatusBarMessage(text, (delaySec + 2) * 1000);
         }
 
+        if (event.type === 'compaction_start') {
+            tab.isCompacting = true;
+            if (tab.id === this._activeTabId) {
+                vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
+            }
+            this._onLauncherStateChanged.fire();
+        }
+
+        if (event.type === 'compaction_end') {
+            tab.isCompacting = false;
+            if (tab.id === this._activeTabId && !tab.isStreamingLocal) {
+                vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
+            }
+            this._onLauncherStateChanged.fire();
+        }
+
         if (event.type === 'message_end' && event.message?.role === 'assistant') {
             const msgs = tab.session.getMessages();
             let assistantOrdinal = 0;
@@ -582,16 +601,26 @@ export class ChatController implements vscode.Disposable {
 
             if (tab.queuedMessages.length > 0) {
                 const text = tab.queuedMessages.shift()!;
-                if (tab.checkpointManager.rollbackPoint !== null) {
-                    tab.checkpointManager.discardSuspended();
-                    tab.diffManager.discardSuspended();
-                    tab.suspendedMessages = [];
+                const compactInstructions = parseCompactCommand(text);
+                if (compactInstructions !== null) {
+                    try {
+                        await tab.session.compact(compactInstructions);
+                    } catch {
+                        // The SDK emits compaction_end with a user-facing error message.
+                    }
+                    this.sendStateSync(tab.id);
+                } else {
+                    if (tab.checkpointManager.rollbackPoint !== null) {
+                        tab.checkpointManager.discardSuspended();
+                        tab.diffManager.discardSuspended();
+                        tab.suspendedMessages = [];
+                    }
+                    tab.turnCounter++;
+                    const turnIdx = tab.turnCounter;
+                    tab.checkpointManager.startTurn(turnIdx);
+                    tab.diffManager.setCurrentTurn(turnIdx);
+                    tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(text));
                 }
-                tab.turnCounter++;
-                const turnIdx = tab.turnCounter;
-                tab.checkpointManager.startTurn(turnIdx);
-                tab.diffManager.setCurrentTurn(turnIdx);
-                tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(text));
             }
         }
 
@@ -626,7 +655,7 @@ export class ChatController implements vscode.Disposable {
         // Stream raw events to whoever is watching this tab (the sidebar if active, panels for this tab).
         this._postForTab(tab.id, { type: 'agentEvent', event: safeSerialize(event) });
 
-        const stateSyncEvents = ['agent_start', 'agent_end', 'message_end', 'turn_end'];
+        const stateSyncEvents = ['agent_start', 'agent_end', 'message_end', 'turn_end', 'compaction_start', 'compaction_end'];
         if (stateSyncEvents.includes(event.type)) {
             this.sendStateSync(tab.id);
             // When activity happens on a non-active tab, also refresh the sidebar
@@ -635,6 +664,10 @@ export class ChatController implements vscode.Disposable {
                 && (event.type === 'agent_start' || event.type === 'agent_end')) {
                 this.sendStateSync(this._activeTabId);
             }
+        }
+
+        if (event.type === 'compaction_end' && event.errorMessage) {
+            this._postForTab(tab.id, { type: 'error', message: event.errorMessage });
         }
     }
 
@@ -684,6 +717,7 @@ export class ChatController implements vscode.Disposable {
         // returns (in finishRun), so reading it here during agent_end would
         // still see `true` and the webview would think the agent is still working.
         state.isStreaming = tab.isStreamingLocal;
+        state.isCompacting = tab.isCompacting;
         if (tab.suspendedMessages.length > 0) {
             state.messages = [
                 ...state.messages,
@@ -725,7 +759,7 @@ export class ChatController implements vscode.Disposable {
             id,
             name: tab.name,
             isActive: id === this._activeTabId,
-            isStreaming: tab.isStreamingLocal,
+            isStreaming: tab.isStreamingLocal || tab.isCompacting,
             hasNotification: tab.hasNotification,
         }));
     }
@@ -743,6 +777,16 @@ export class ChatController implements vscode.Disposable {
 
             switch (msg.type) {
                 case 'prompt': {
+                    const compactInstructions = parseCompactCommand(msg.text);
+                    if (compactInstructions !== null) {
+                        try {
+                            await tab.session.compact(compactInstructions);
+                        } catch {
+                            // The SDK emits compaction_end with a user-facing error message.
+                        }
+                        this.sendStateSync(tab.id);
+                        break;
+                    }
                     if (tab.checkpointManager.rollbackPoint !== null) {
                         tab.checkpointManager.discardSuspended();
                         tab.diffManager.discardSuspended();
@@ -813,6 +857,7 @@ export class ChatController implements vscode.Disposable {
                     tab.streamingThinkingDuration = 0;
                     tab.agentStartTime = 0;
                     tab.isStreamingLocal = false;
+                    tab.isCompacting = false;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
                     this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
@@ -831,6 +876,7 @@ export class ChatController implements vscode.Disposable {
                     tab.streamingThinkingDuration = 0;
                     tab.agentStartTime = 0;
                     tab.isStreamingLocal = false;
+                    tab.isCompacting = false;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
                     tab.name = 'New Agent'; // reset so _updateTabName re-derives from first message
@@ -1207,4 +1253,13 @@ function computeWindowDelta(
         afterPercent: after.percentUsed,
         deltaPercent,
     };
+}
+
+function parseCompactCommand(text: string): string | undefined | null {
+    const trimmed = text.trim();
+    if (trimmed === '/compact') return undefined;
+    if (trimmed.startsWith('/compact ')) {
+        return trimmed.slice('/compact '.length).trim() || undefined;
+    }
+    return null;
 }

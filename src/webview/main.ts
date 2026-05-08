@@ -35,9 +35,28 @@ const MAX_IMAGES_PER_MESSAGE = 5;
 const MAX_IMAGE_DIMENSION = 2000;
 const JPEG_RESIZE_QUALITY = 0.88;
 
+type SlashMenuItem = {
+    kind: 'builtin' | 'skill';
+    name: string;
+    displayName: string;
+    description: string;
+    insertText: string;
+};
+
+const BUILTIN_SLASH_COMMANDS: SlashMenuItem[] = [
+    {
+        kind: 'builtin',
+        name: 'compact',
+        displayName: '/compact',
+        description: 'Summarize older conversation context while keeping recent work available.',
+        insertText: '/compact ',
+    },
+];
+
 const state: {
     messages: any[];
     isStreaming: boolean;
+    isCompacting: boolean;
     model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
     thinkingLevel?: string;
     tools: string[];
@@ -48,7 +67,7 @@ const state: {
     isThinking: boolean;
     thinkingStartTime: number;
     streamingThinkingDuration: number;
-    contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
+    contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null; estimated?: boolean };
     fileChanges: FileChangeInfo[];
     rollbackPoint: number | null;
     availableModels: any[];
@@ -62,6 +81,7 @@ const state: {
 } = {
     messages: [],
     isStreaming: false,
+    isCompacting: false,
     tools: [],
     streamingText: '',
     streamingThinking: '',
@@ -207,6 +227,7 @@ function applyStateSync(s: SerializedAgentState): void {
 
     state.messages = s.messages ?? [];
     state.isStreaming = s.isStreaming;
+    state.isCompacting = s.isCompacting ?? false;
     state.model = s.model;
     state.thinkingLevel = s.thinkingLevel;
     state.tools = s.tools ?? [];
@@ -266,8 +287,12 @@ function applyStateSync(s: SerializedAgentState): void {
         updateInputArea();
         updateChangedFiles();
         updateQueuedMessageBanner();
-        if (state.isStreaming) {
+        if (state.isCompacting) {
+            showPreparingPlaceholder('Compacting...');
+        } else if (state.isStreaming) {
             ensurePreparingPlaceholder();
+        } else {
+            removePreparingPlaceholder();
         }
         updateScrollButton();
     }
@@ -296,6 +321,16 @@ function handleAgentEvent(event: any): void {
             state.isThinking = false;
             dismissSteerToast();
             updateStreamingUI();
+            updateInputArea();
+            break;
+        case 'compaction_start':
+            state.isCompacting = true;
+            showPreparingPlaceholder('Compacting...');
+            updateInputArea();
+            break;
+        case 'compaction_end':
+            state.isCompacting = false;
+            removePreparingPlaceholder();
             updateInputArea();
             break;
         case 'tool_execution_start':
@@ -480,15 +515,16 @@ function updateMessages(): void {
         let dimming = false;
         let redoPlaced = false;
 
-        let lastUserMessageIndex = -1;
-        for (let i = 0; i < state.messages.length; i++) {
-            if ((state.messages[i].role ?? 'unknown') === 'user') {
-                lastUserMessageIndex = i;
+        const displayItems = getDisplayMessageItems();
+        let lastUserMessageDisplayIndex = -1;
+        for (let i = 0; i < displayItems.length; i++) {
+            if ((displayItems[i].msg.role ?? 'unknown') === 'user') {
+                lastUserMessageDisplayIndex = i;
             }
         }
 
-        for (let i = 0; i < state.messages.length; i++) {
-            const msg = state.messages[i];
+        for (let displayIndex = 0; displayIndex < displayItems.length; displayIndex++) {
+            const { msg, sourceIndex } = displayItems[displayIndex];
             const role = msg.role ?? 'unknown';
 
             if (role === 'user') {
@@ -500,9 +536,9 @@ function updateMessages(): void {
 
             const msgEl = renderMessage(
                 msg,
-                i,
+                sourceIndex,
                 role === 'user' ? userMsgCount : undefined,
-                role === 'user' && i === lastUserMessageIndex,
+                role === 'user' && displayIndex === lastUserMessageDisplayIndex,
             );
             if (dimming) {
                 msgEl.classList.add('dimmed');
@@ -528,6 +564,44 @@ function updateMessages(): void {
     bindDiffButtons();
     bindDiffPreviewToggles();
     bindToolClickable();
+}
+
+function getDisplayMessageItems(): Array<{ msg: any; sourceIndex: number }> {
+    const compactions: Array<{ msg: any; sourceIndex: number; timestamp: number }> = [];
+    const items: Array<{ msg: any; sourceIndex: number }> = [];
+
+    for (let i = 0; i < state.messages.length; i++) {
+        const msg = state.messages[i];
+        if ((msg.role ?? 'unknown') === 'compactionSummary') {
+            const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : Number.MAX_SAFE_INTEGER;
+            compactions.push({ msg, sourceIndex: i, timestamp });
+        } else {
+            items.push({ msg, sourceIndex: i });
+        }
+    }
+
+    const latestCompactionTimestamp = compactions.reduce(
+        (latest, item) => Math.max(latest, item.timestamp),
+        -Infinity,
+    );
+
+    for (const compaction of compactions.sort((a, b) => a.timestamp - b.timestamp)) {
+        const msg = {
+            ...compaction.msg,
+            _latestCompaction: compaction.timestamp === latestCompactionTimestamp,
+        };
+        let insertAt = items.length;
+        for (let i = 0; i < items.length; i++) {
+            const ts = items[i].msg?.timestamp;
+            if (typeof ts === 'number' && ts > compaction.timestamp) {
+                insertAt = i;
+                break;
+            }
+        }
+        items.splice(insertAt, 0, { msg, sourceIndex: compaction.sourceIndex });
+    }
+
+    return items;
 }
 
 function updateTabs(): void {
@@ -675,9 +749,11 @@ function formatAge(seconds: number): string {
 function updateInputArea(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (input) {
-        input.placeholder = state.isStreaming
-            ? 'Type to queue a message, Ctrl+Enter to steer, Esc to stop...'
-            : 'Ask Pi anything...';
+        input.placeholder = state.isCompacting
+            ? 'Compacting context...'
+            : state.isStreaming
+                ? 'Type to queue a message, Ctrl+Enter to steer, Esc to stop...'
+                : 'Ask Pi anything...';
     }
 
     const footer = document.querySelector('.input-footer');
@@ -692,7 +768,9 @@ function updateInputArea(): void {
         const windowK = formatTokenCount(cu.contextWindow);
         const pct = cu.percent != null ? Math.round(cu.percent) : null;
         if (tokensK !== null && pct !== null) {
-            contextHtml = `<span class="footer-context" title="Context: ${tokensK} / ${windowK} tokens (${pct}%)">${tokensK} / ${windowK} &middot; ${pct}%</span>`;
+            const estimatePrefix = cu.estimated ? 'Approximate context' : 'Context';
+            const estimateMark = cu.estimated ? '~' : '';
+            contextHtml = `<span class="footer-context" title="${estimatePrefix}: ${tokensK} / ${windowK} tokens (${pct}%)">${estimateMark}${tokensK} / ${windowK} &middot; ${pct}%</span>`;
         } else {
             contextHtml = `<span class="footer-context" title="Context window: ${windowK} tokens">${windowK}</span>`;
         }
@@ -1298,6 +1376,10 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
         return buildToolResultCard(msg, state.messages, index);
     }
 
+    if (role === 'compactionSummary') {
+        return buildCompactionSummaryCard(msg);
+    }
+
     if (role === 'user') {
         const group = el('div', `message-group-user${isStickyPrompt ? ' message-group-current-user' : ''}`);
 
@@ -1367,6 +1449,68 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
     }
 
     return group;
+}
+
+function buildCompactionSummaryCard(msg: any): HTMLElement {
+    const group = el('div', 'message-group-compaction');
+    const wrapper = el('div', 'message-compaction-summary');
+
+    const details = document.createElement('details');
+    details.className = 'compaction-details';
+
+    const summary = document.createElement('summary');
+    summary.textContent = getCompactionTitle(msg);
+    details.appendChild(summary);
+
+    const content = el('div', 'message-content compaction-content');
+    const meta = getCompactionMetaText(msg);
+    if (meta) {
+        const metaEl = el('div', 'compaction-meta');
+        metaEl.textContent = meta;
+        content.appendChild(metaEl);
+    }
+    const summaryEl = el('div', 'compaction-summary-text');
+    summaryEl.innerHTML = renderMarkdown(msg.summary ?? '');
+    content.appendChild(summaryEl);
+    details.appendChild(content);
+
+    wrapper.appendChild(details);
+    group.appendChild(wrapper);
+    return group;
+}
+
+function getCompactionTitle(msg: any): string {
+    const before = typeof msg.tokensBefore === 'number' ? msg.tokensBefore : undefined;
+    const after = getCompactionCurrentTokens(msg);
+    if (before !== undefined && after !== undefined) {
+        const removed = Math.max(0, before - after);
+        const removedText = removed > 0 ? `, ${formatTokenCount(removed)} removed` : '';
+        const estimateMark = msg._latestCompaction && state.contextUsage?.estimated ? '~' : '';
+        return `Context compacted: ${formatTokenCount(before)} → ${estimateMark}${formatTokenCount(after)} tokens${removedText}`;
+    }
+    if (before !== undefined) {
+        return `Context compacted from ${formatTokenCount(before)} tokens`;
+    }
+    return 'Context compacted';
+}
+
+function getCompactionMetaText(msg: any): string {
+    const before = typeof msg.tokensBefore === 'number' ? msg.tokensBefore : undefined;
+    const after = getCompactionCurrentTokens(msg);
+    if (before === undefined || after === undefined) return '';
+    const removed = Math.max(0, before - after);
+    const pct = before > 0 ? Math.round((removed / before) * 100) : 0;
+    return removed > 0
+        ? `Compaction reduced the visible context by about ${formatTokenCount(removed)} tokens (${pct}%).`
+        : `Current context is about ${formatTokenCount(after)} tokens after compaction.`;
+}
+
+function getCompactionCurrentTokens(msg: any): number | undefined {
+    if (typeof msg.tokensAfter === 'number') return msg.tokensAfter;
+    if (msg._latestCompaction && typeof state.contextUsage?.tokens === 'number') {
+        return state.contextUsage.tokens;
+    }
+    return undefined;
 }
 
 function extractToolCalls(msg: any): any[] {
@@ -1485,16 +1629,21 @@ function removePreparingPlaceholder(): void {
     document.getElementById('preparing-placeholder')?.remove();
 }
 
-function showPreparingPlaceholder(): void {
+function showPreparingPlaceholder(labelText = 'Preparing next moves...'): void {
     const container = document.getElementById('streaming-message');
     if (!container) return;
-    if (document.getElementById('preparing-placeholder')) return;
+    const existing = document.getElementById('preparing-placeholder');
+    if (existing) {
+        const label = existing.querySelector('.preparing-label');
+        if (label) label.textContent = labelText;
+        return;
+    }
     const ph = el('div', 'preparing-placeholder');
     ph.id = 'preparing-placeholder';
     const spinner = el('span', 'preparing-spinner');
     spinner.setAttribute('aria-hidden', 'true');
     const label = el('span', 'preparing-label');
-    label.textContent = 'Preparing next moves...';
+    label.textContent = labelText;
     ph.appendChild(spinner);
     ph.appendChild(label);
     container.appendChild(ph);
@@ -1506,7 +1655,7 @@ function ensurePreparingPlaceholder(): void {
     if (!container) return;
     const hasRunningTool = container.querySelector('.tool-status.running');
     if (!hasRunningTool) {
-        showPreparingPlaceholder();
+        showPreparingPlaceholder(state.isCompacting ? 'Compacting...' : 'Preparing next moves...');
     }
 }
 
@@ -1642,6 +1791,7 @@ function formatToolArgs(args: any): string {
 const COMMAND_LIKE_TOOLS = new Set(['bash', 'sh', 'shell', 'zsh', 'fish', 'cmd', 'powershell', 'pwsh', 'python', 'node']);
 const COMMAND_INPUT_KEYS = ['command', 'cmd', 'script', 'code'];
 const TOOL_IO_PREVIEW_LINE_LIMIT = 4;
+const liveToolOutputs = new Map<string, string>();
 
 function buildStatusHtml(status: string): string {
     if (status === 'done') return '';
@@ -1712,6 +1862,20 @@ function appendToolIoRows(container: HTMLElement, input: string, output: string,
     appendToolIoRow(container, 'OUT', values.output);
 }
 
+function refreshToolIoCard(details: HTMLDetailsElement, input: string, output: string): void {
+    const preview = details.querySelector('.tool-io-preview') as HTMLElement | null;
+    if (preview) {
+        preview.replaceChildren();
+        appendToolIoRows(preview, input, output, true);
+    }
+
+    const body = details.querySelector('.tool-io-full') as HTMLElement | null;
+    if (body) {
+        body.replaceChildren();
+        appendToolIoRows(body, input, output, false);
+    }
+}
+
 function buildToolIoCard(headerHtml: string, input: string, output: string, className = 'tool-card tool-expandable'): HTMLDetailsElement {
     const details = document.createElement('details');
     details.className = `${className} tool-io-card`;
@@ -1725,13 +1889,12 @@ function buildToolIoCard(headerHtml: string, input: string, output: string, clas
     summary.appendChild(header);
 
     const preview = el('div', 'tool-io-preview');
-    appendToolIoRows(preview, input, output, true);
     summary.appendChild(preview);
     details.appendChild(summary);
 
     const body = el('div', 'tool-body tool-io-full');
-    appendToolIoRows(body, input, output, false);
     details.appendChild(body);
+    refreshToolIoCard(details, input, output);
 
     return details;
 }
@@ -1903,12 +2066,29 @@ function renderToolStart(event: any): void {
     const nameLower = (event.toolName ?? '').toLowerCase();
     const isRead = nameLower === 'read';
     const filePath = parsedArgs?.path ?? parsedArgs?.file_path ?? '';
+    const isCommandLike = isCommandLikeTool(event.toolName, parsedArgs);
+
+    if (isCommandLike) {
+        const input = getCommandInputText(parsedArgs);
+        const headerHtml = `
+            <span class="tool-icon">${getToolIcon(event.toolName)}</span>
+            <span class="tool-name">${escHtml(getToolLabel(event.toolName, parsedArgs))}</span>
+            <span class="tool-status running">running</span>
+        `;
+        const details = buildToolIoCard(headerHtml, input, '');
+        details.id = `tool-${event.toolCallId}`;
+        details.dataset.toolName = event.toolName;
+        details.dataset.commandLike = 'true';
+        details.dataset.toolInput = input;
+        container.appendChild(details);
+        scrollToBottom();
+        return;
+    }
 
     const card = el('div', `tool-card${isRead ? ' tool-clickable' : ''}`);
     card.id = `tool-${event.toolCallId}`;
     card.dataset.toolName = event.toolName;
     if (isRead && filePath) card.dataset.filepath = filePath;
-    if (isCommandLikeTool(event.toolName, parsedArgs)) card.dataset.toolInput = getCommandInputText(parsedArgs);
 
     card.innerHTML = `
         <div class="tool-header">
@@ -1924,11 +2104,21 @@ function renderToolStart(event: any): void {
 }
 
 function renderToolUpdate(event: any): void {
-    const card = document.getElementById(`tool-${event.toolCallId}`);
+    const card = document.getElementById(`tool-${event.toolCallId}`) as HTMLElement | null;
     if (!card) return;
     if (card.classList.contains('diff-card')) return;
     const text = extractToolResultText(event.partialResult);
     if (!text) return;
+
+    if (card.dataset.commandLike === 'true' || card.classList.contains('tool-io-card')) {
+        liveToolOutputs.set(event.toolCallId, text);
+        if (card instanceof HTMLDetailsElement) {
+            refreshToolIoCard(card, card.dataset.toolInput ?? '', text);
+        }
+        scrollToBottom();
+        return;
+    }
+
     let resultEl = card.querySelector('.tool-result') as HTMLElement | null;
     if (!resultEl) {
         resultEl = el('pre', 'tool-result');
@@ -1952,8 +2142,9 @@ function renderToolEnd(event: any): void {
     }
 
     const toolName = (card as HTMLElement).dataset.toolName ?? '';
-    const text = extractToolResultText(event.result);
-    const isCommandLike = isCommandLikeTool(toolName, undefined);
+    const text = extractToolResultText(event.result) || liveToolOutputs.get(event.toolCallId) || '';
+    liveToolOutputs.delete(event.toolCallId);
+    const isCommandLike = (card as HTMLElement).dataset.commandLike === 'true' || isCommandLikeTool(toolName, undefined);
     const hasBody = !!(text || isCommandLike);
 
     if (hasBody) {
@@ -1968,6 +2159,12 @@ function renderToolEnd(event: any): void {
             }
         }
         const nameHtml = headerEl?.innerHTML ?? '';
+
+        if (isCommandLike && card instanceof HTMLDetailsElement && card.classList.contains('tool-io-card')) {
+            refreshToolIoCard(card, (card as HTMLElement).dataset.toolInput ?? '', text);
+            bindToolClickable();
+            return;
+        }
 
         let details: HTMLDetailsElement;
         if (isCommandLike) {
@@ -2627,11 +2824,22 @@ function bindStableEvents(): void {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (state.isStreaming) {
+                const text = input.value.trim();
+                if (isCompactSlashCommand(text)) {
+                    if (currentImageAttachments.length > 0) {
+                        showError('Slash commands cannot include image attachments. Remove attachments before running /compact.');
+                        return;
+                    }
+                    vscode.postMessage({ type: 'prompt', text });
+                    input.value = '';
+                    input.style.height = 'auto';
+                    updateInputHighlights(input);
+                    return;
+                }
                 if (currentImageAttachments.length > 0) {
                     showError('Image attachments cannot be queued while the agent is streaming yet. Send them after the current response finishes.');
                     return;
                 }
-                const text = input.value.trim();
                 if (text) {
                     if (e.ctrlKey || e.metaKey) {
                         vscode.postMessage({ type: 'steer', text });
@@ -2812,6 +3020,10 @@ function sendMessage(): void {
     const typedText = input.value.trim();
     const images = currentImageAttachments.length > 0 ? [...currentImageAttachments] : undefined;
     if (!typedText && !images?.length) return;
+    if (isCompactSlashCommand(typedText) && images?.length) {
+        showError('Slash commands cannot include image attachments. Remove attachments before running /compact.');
+        return;
+    }
     if (images?.length && !currentModelSupportsImages()) {
         showError('The current model does not support images. Select an image-capable model before sending attachments.');
         return;
@@ -3029,7 +3241,7 @@ function getActiveFileMentionToken(input: HTMLTextAreaElement): { matchStart: nu
 // ── Slash command menu ──
 
 let slashMenuIndex = 0;
-let slashMenuItems: SkillInfo[] = [];
+let slashMenuItems: SlashMenuItem[] = [];
 
 function updateSlashMenu(input: HTMLTextAreaElement): void {
     const menu = document.getElementById('slash-menu');
@@ -3041,15 +3253,23 @@ function updateSlashMenu(input: HTMLTextAreaElement): void {
     const beforeCursor = text.slice(0, cursorPos);
     const slashMatch = beforeCursor.match(/(?:^|\s)(\/\S*)$/);
 
-    if (!slashMatch || state.skills.length === 0) {
+    if (!slashMatch) {
         hideSlashMenu();
         return;
     }
 
     const query = slashMatch[1].slice(1).toLowerCase();
-    slashMenuItems = state.skills.filter(s =>
-        s.name.toLowerCase().includes(query) ||
-        s.description.toLowerCase().includes(query)
+    const skillCommands: SlashMenuItem[] = state.skills.map((skill) => ({
+        kind: 'skill',
+        name: skill.name,
+        displayName: `/skill:${skill.name}`,
+        description: skill.description,
+        insertText: `/skill:${skill.name} `,
+    }));
+    slashMenuItems = [...BUILTIN_SLASH_COMMANDS, ...skillCommands].filter(item =>
+        item.name.toLowerCase().includes(query) ||
+        item.displayName.toLowerCase().includes(query) ||
+        item.description.toLowerCase().includes(query)
     );
 
     if (slashMenuItems.length === 0) {
@@ -3063,13 +3283,13 @@ function updateSlashMenu(input: HTMLTextAreaElement): void {
 }
 
 function renderSlashMenu(menu: HTMLElement): void {
-    menu.innerHTML = slashMenuItems.map((skill, i) => {
+    menu.innerHTML = slashMenuItems.map((item, i) => {
         const active = i === slashMenuIndex ? ' slash-item-active' : '';
-        const desc = skill.description
-            ? `<span class="slash-item-desc">${escHtml(skill.description)}</span>`
+        const desc = item.description
+            ? `<span class="slash-item-desc">${escHtml(item.description)}</span>`
             : '';
         return `<div class="slash-item${active}" data-index="${i}">
-            <span class="slash-item-name">/skill:${escHtml(skill.name)}</span>
+            <span class="slash-item-name">${escHtml(item.displayName)}</span>
             ${desc}
         </div>`;
     }).join('');
@@ -3087,8 +3307,8 @@ function selectSlashItem(index: number): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (!input) return;
 
-    const skill = slashMenuItems[index];
-    if (!skill) return;
+    const item = slashMenuItems[index];
+    if (!item) return;
 
     const text = input.value;
     const cursorPos = input.selectionStart;
@@ -3097,7 +3317,7 @@ function selectSlashItem(index: number): void {
 
     if (slashMatch) {
         const matchStart = beforeCursor.length - slashMatch[1].length;
-        const replacement = `/skill:${skill.name} `;
+        const replacement = item.insertText;
         input.value = text.slice(0, matchStart) + replacement + text.slice(cursorPos);
         const newPos = matchStart + replacement.length;
         input.setSelectionRange(newPos, newPos);
@@ -3139,6 +3359,11 @@ function escHtml(s: string): string {
 
 function escAttr(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function isCompactSlashCommand(text: string): boolean {
+    const trimmed = text.trim();
+    return trimmed === '/compact' || trimmed.startsWith('/compact ');
 }
 
 function getThinkingPreview(text: string): string {

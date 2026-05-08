@@ -386,6 +386,40 @@ body[data-mode="panel"] .tab-strip,
     margin: 0 0 8px 0;
 }
 
+.message-group-compaction {
+    margin: 8px;
+}
+
+.message-compaction-summary {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--input-bg);
+    color: var(--fg);
+    overflow: hidden;
+}
+
+.compaction-details > summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 10px 14px;
+    user-select: none;
+}
+
+.compaction-details[open] > summary {
+    border-bottom: 1px solid var(--border);
+}
+
+.compaction-content {
+    padding: 10px 14px 14px;
+}
+
+.compaction-meta {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
 .message + .message {
     margin-top: 2px;
 }

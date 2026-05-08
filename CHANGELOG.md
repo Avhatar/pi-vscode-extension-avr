@@ -7,9 +7,34 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-05-08
+
+### Changed
+- Compaction summary cards now stay collapsed by default so users can expand details only when needed.
+
+## [0.9.2] - 2026-05-08
+
+### Fixed
+- Manual compaction now shows a live `Compacting...` status and keeps the context footer updated with an approximate post-compaction size.
+
+## [0.9.1] - 2026-05-08
+
+### Fixed
+- Manual compaction now shows an expanded summary card at the point where compaction happened, including before/after context token counts.
+
+## [0.9.0] - 2026-05-08
+
+### Added
+- Chat slash commands now include `/compact`, allowing users to manually summarize older conversation context from the command menu.
+
+## [0.8.13] - 2026-05-08
+
 ### Changed
 - "Preparing next moves..." placeholder now shows a spinning ring next to the label so it's obvious the agent is still thinking.
 - The sidebar now focuses on chat history only: open chats are no longer duplicated there, and history starts collapsed while remembering its expanded state.
+
+### Fixed
+- Command output cards no longer briefly flash as full raw output before settling into the compact IN/OUT preview layout.
 
 ## [0.8.12] - 2026-05-08
 

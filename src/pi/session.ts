@@ -182,6 +182,11 @@ export class PiSessionManager {
         await this._session.followUp(text, images?.length ? images : undefined);
     }
 
+    async compact(customInstructions?: string): Promise<void> {
+        if (!this._session) { throw new Error('Session not initialized'); }
+        await this._session.compact(customInstructions);
+    }
+
     async abort(): Promise<void> {
         if (!this._session) { return; }
         await this._session.abort();
@@ -463,10 +468,26 @@ export class PiSessionManager {
     private _getContextUsage(): ContextUsageInfo | undefined {
         const usage = this._session?.getContextUsage?.();
         if (!usage) { return undefined; }
+        let tokens = usage.tokens;
+        let percent = usage.percent;
+        let estimated = false;
+
+        // The SDK intentionally reports an unknown token count immediately after
+        // compaction until a later assistant response provides fresh provider
+        // usage. For the VS Code footer and compaction summary card we still
+        // want a useful live value, so fall back to the same chars/4 style
+        // estimate the SDK uses for messages.
+        if (tokens == null && this._session?.messages?.length) {
+            tokens = estimateVisibleContextTokens(this._session.messages);
+            percent = usage.contextWindow > 0 ? (tokens / usage.contextWindow) * 100 : null;
+            estimated = true;
+        }
+
         return {
-            tokens: usage.tokens,
+            tokens,
             contextWindow: usage.contextWindow,
-            percent: usage.percent,
+            percent,
+            estimated,
         };
     }
 
@@ -512,4 +533,53 @@ function safeSerialize(obj: any): any {
     } catch {
         return { _serializationFailed: true, type: obj?.type };
     }
+}
+
+function estimateVisibleContextTokens(messages: any[]): number {
+    return messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
+}
+
+function estimateMessageTokens(message: any): number {
+    if (!message || typeof message !== 'object') return 0;
+    let chars = 0;
+    switch (message.role) {
+        case 'user':
+            return estimateContentTokens(message.content);
+        case 'assistant':
+            if (Array.isArray(message.content)) {
+                for (const block of message.content) {
+                    if (block?.type === 'text') chars += String(block.text ?? '').length;
+                    else if (block?.type === 'thinking') chars += String(block.thinking ?? '').length;
+                    else if (block?.type === 'toolCall') {
+                        chars += String(block.name ?? '').length + JSON.stringify(block.arguments ?? {}).length;
+                    }
+                }
+            } else {
+                chars = String(message.content ?? '').length;
+            }
+            return Math.ceil(chars / 4);
+        case 'custom':
+        case 'toolResult':
+            return estimateContentTokens(message.content);
+        case 'bashExecution':
+            chars = String(message.command ?? '').length + String(message.output ?? '').length;
+            return Math.ceil(chars / 4);
+        case 'branchSummary':
+        case 'compactionSummary':
+            chars = String(message.summary ?? '').length;
+            return Math.ceil(chars / 4);
+        default:
+            return estimateContentTokens(message.content);
+    }
+}
+
+function estimateContentTokens(content: any): number {
+    if (typeof content === 'string') return Math.ceil(content.length / 4);
+    if (!Array.isArray(content)) return 0;
+    let chars = 0;
+    for (const block of content) {
+        if (block?.type === 'text') chars += String(block.text ?? '').length;
+        else if (block?.type === 'image') chars += 4800;
+    }
+    return Math.ceil(chars / 4);
 }

@@ -2,6 +2,7 @@ export interface ContextUsageInfo {
     tokens: number | null;
     contextWindow: number;
     percent: number | null;
+    estimated?: boolean;
 }
 
 export interface CodexUsageWindow {
@@ -110,6 +111,7 @@ export interface SerializedAgentState {
     model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
     thinkingLevel?: string;
     isStreaming: boolean;
+    isCompacting?: boolean;
     streamingMessage?: any;
     errorMessage?: string;
     tools: string[];
