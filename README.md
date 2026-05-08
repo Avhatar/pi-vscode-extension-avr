@@ -17,6 +17,9 @@ In addition to those two structural changes, the fork has accumulated a number o
 - OAuth subscription login in the settings panel for Anthropic Claude Pro/Max, ChatGPT Plus/Pro/Codex, GitHub Copilot, Google Gemini CLI, and Google Antigravity — so subscription-only models (e.g. GPT-5.x Codex) work without an API key.
 - Codex subscription usage indicator: a percent-used readout for the 5-hour and weekly windows in the chat footer, plus a per-turn delta on each assistant message.
 - Image attachments via paste, drag-and-drop, or a paperclip button — sent to image-capable models with previews preserved in chat history.
+- Workspace `@` file mentions in the chat input, with cached suggestions, configurable excludes, and inline highlighting of mentioned paths.
+- Auto-loaded `CLAUDE.md` / `AGENTS.md` instructions from the workspace, including per-folder rules surfaced when the agent touches that subtree.
+- Bundled MCP adapter that picks up servers from `.mcp.json` / `.pi/mcp.json` automatically, with no `pi install` step.
 - The launcher persists a session history on disk and lets you delete entries individually; opening an old entry reopens it as a fresh editor panel.
 
 The fork tracks the upstream `@mariozechner/pi-coding-agent` SDK as a regular npm dependency and stays in sync with its API.
@@ -48,7 +51,13 @@ Pick from any model available through the Pi coding agent's model registry via a
 A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API connection, default model and thinking level, tool execution behavior, and session management. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
 
 ### Bundled Pi Extensions
-Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Uses Exa MCP by default with no API keys required; optionally reads `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys to switch to a different backend. No `pi install` step required.
+Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Uses Exa MCP by default with no API keys required; optionally reads `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys to switch to a different backend. The bundled `pi-mcp-adapter` package wires up MCP servers declared in `.mcp.json` or `.pi/mcp.json` so their tools appear automatically in the agent's tool list. No `pi install` step required.
+
+### Workspace File Mentions
+Type `@` in the chat input to open a suggestion menu that fuzzy-matches files from the opened workspace. Selected mentions are highlighted in blue inside the input and sent to the agent as path references it can choose to inspect — this is **not** an attachment mechanism, file contents are not inlined or uploaded. Indexing respects VS Code's standard search excludes plus a built-in pattern set (skip `node_modules`, build artefacts, lockfiles), and can be further tuned via the `pi-code.fileMentions.*` settings or a workspace-local `.pi/file-mentions.json`.
+
+### Auto-Loaded Workspace Instructions
+At the start of each turn the agent automatically reads `CLAUDE.md` (and any files it `@`-imports up to a depth of 5) so project-level rules apply without you having to point at them. Per-folder `CLAUDE.md` files are surfaced on the fly whenever the agent touches paths in that subtree, so directory-scoped instructions are honoured without manual reads.
 
 ### Image Attachments
 Paste images directly into the chat input, drop them onto the chat panel, or pick a file via the paperclip button next to the model picker. Attached images appear as previews before sending and remain in the chat history. Large images are resized automatically; image-capable models receive them inline with the prompt.
@@ -202,6 +211,11 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.autoSaveSessions` | `boolean` | `true` | Automatically persist sessions |
 | `pi-code.sessionStoragePath` | `string` | `""` | Custom session storage path. Empty = workspace `.pi/` directory. |
 | `pi-code.contextUsageWarningThreshold` | `number` | `80` | Warn when context usage exceeds this percentage |
+| `pi-code.fileMentions.enabled` | `boolean` | `true` | Enable `@` file mentions in chat input for files in the opened workspace |
+| `pi-code.fileMentions.useDefaultExcludes` | `boolean` | `true` | Use built-in exclude patterns when indexing workspace files for `@` mentions |
+| `pi-code.fileMentions.exclude` | `string[]` | `[]` | Additional glob patterns to exclude from `@` file mention suggestions |
+| `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum number of `@` file mention suggestions to show |
+| `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative JSON config file for `@` file mention indexing |
 
 API keys are managed through the settings page and stored via VS Code's SecretStorage (never in `settings.json`).
 
@@ -257,6 +271,7 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 - **DiffManager** ([src/providers/diff.ts](src/providers/diff.ts)) tracks file changes from `edit`/`write` tool calls and provides unified diffs via a `pi-diff:` virtual document scheme.
 - **CheckpointManager** ([src/providers/checkpoint.ts](src/providers/checkpoint.ts)) snapshots file state per turn for rollback and redo.
 - **Codex usage plumbing** ([src/pi/codex-monitor.ts](src/pi/codex-monitor.ts) + [src/pi/codex-usage-store.ts](src/pi/codex-usage-store.ts)) captures subscription windows from Codex response headers and exposes them to the chat footer.
+- **CLAUDE.md injector** ([src/pi/claude-md-injector.ts](src/pi/claude-md-injector.ts)) hooks into the agent lifecycle to inline workspace-level and per-folder `CLAUDE.md` instructions into the system prompt.
 
 ## Project Structure
 
@@ -273,6 +288,7 @@ src/
 │   ├── auth.ts                       # Auth storage singleton + OAuth bridge
 │   ├── events.ts                     # Event router for agent events
 │   ├── bundled-packages.ts           # Pi extensions shipped inside the VSIX
+│   ├── claude-md-injector.ts         # Auto-injects CLAUDE.md / AGENTS.md into prompts
 │   ├── codex-monitor.ts              # Codex subscription header capture
 │   └── codex-usage-store.ts          # Per-window usage state (5h / weekly)
 ├── providers/
@@ -287,9 +303,11 @@ src/
 │   └── diff.ts                       # Myers diff algorithm, unified diff
 ├── webview/
 │   ├── main.ts                       # Chat UI application
+│   ├── launcher.ts                   # Launcher sidebar UI
 │   ├── settings.ts                   # Settings page UI
 │   └── styles/
 │       ├── main.css                  # Chat webview styles
+│       ├── launcher.css              # Launcher sidebar styles
 │       └── settings.css              # Settings page styles
 └── test/
     ├── unit/                         # Vitest unit tests
