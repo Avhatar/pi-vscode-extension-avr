@@ -54,6 +54,7 @@ const SUPPORTED_TEXT_EXTENSIONS = new Set([
 ]);
 const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512 KB max for text files
 const MAX_FILE_ATTACHMENTS = 5;
+const diffStripeAlignmentObservers = new WeakMap<HTMLElement, ResizeObserver>();
 
 type SlashMenuItem = {
     kind: 'builtin' | 'skill';
@@ -816,9 +817,10 @@ function updateInputArea(): void {
         if (tokensK !== null && pct !== null) {
             const estimatePrefix = cu.estimated ? 'Approximate context' : 'Context';
             const estimateMark = cu.estimated ? '~' : '';
-            contextHtml = `<span class="footer-context" title="${estimatePrefix}: ${tokensK} / ${windowK} tokens (${pct}%)">${estimateMark}${tokensK} / ${windowK} &middot; ${pct}%</span>`;
+            const title = `${estimatePrefix}: ${tokensK} / ${windowK} tokens (${pct}%). Click for context actions.`;
+            contextHtml = `<span class="footer-context footer-context-usage" title="${escAttr(title)}" role="button" tabindex="0">${estimateMark}${tokensK} / ${windowK} &middot; ${pct}%</span>`;
         } else {
-            contextHtml = `<span class="footer-context" title="Context window: ${windowK} tokens">${windowK}</span>`;
+            contextHtml = `<span class="footer-context footer-context-usage" title="Context window: ${escAttr(windowK)} tokens. Click for context actions." role="button" tabindex="0">${windowK}</span>`;
         }
     }
 
@@ -866,12 +868,31 @@ function updateInputArea(): void {
 
     document.querySelector('.footer-model')?.addEventListener('click', (e) => {
         e.stopPropagation();
+        closeContextActionPicker();
         toggleModelPicker();
     });
 
     document.querySelector('.footer-cache')?.addEventListener('click', (e) => {
         e.stopPropagation();
+        closeContextActionPicker();
         toggleCacheModePicker();
+    });
+
+    const contextChip = document.querySelector('.footer-context-usage') as HTMLElement | null;
+    contextChip?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeCacheModePicker();
+        closeModelPicker();
+        toggleContextActionPicker(contextChip);
+    });
+    contextChip?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeCacheModePicker();
+            closeModelPicker();
+            toggleContextActionPicker(contextChip);
+        }
     });
 
     updateQueuedMessageBanner();
@@ -918,6 +939,7 @@ function cacheChipTooltip(mode: 'short' | 'long' | 'auto', eff: 'short' | 'long'
 }
 
 function toggleCacheModePicker(): void {
+    closeContextActionPicker();
     const existing = document.getElementById('cache-mode-picker');
     if (existing) {
         existing.remove();
@@ -1005,6 +1027,64 @@ function onClickOutsideCachePicker(e: MouseEvent): void {
 function closeCacheModePicker(): void {
     document.getElementById('cache-mode-picker')?.remove();
     document.removeEventListener('click', onClickOutsideCachePicker);
+}
+
+function toggleContextActionPicker(anchor: HTMLElement): void {
+    closeCacheModePicker();
+    closeModelPicker();
+    const existing = document.getElementById('context-action-picker');
+    if (existing) {
+        closeContextActionPicker();
+        return;
+    }
+    const container = document.querySelector('.input-container') as HTMLElement | null;
+    if (!container) return;
+
+    const picker = el('div', 'context-action-picker');
+    picker.id = 'context-action-picker';
+
+    const item = el('button', 'context-action-item') as HTMLButtonElement;
+    item.type = 'button';
+    item.textContent = 'Compact';
+    item.title = 'Summarize older conversation context while keeping recent work available.';
+    if (state.isCompacting) {
+        item.disabled = true;
+    }
+    picker.appendChild(item);
+    container.appendChild(picker);
+    positionContextActionPicker(picker, anchor, container);
+
+    item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.isCompacting) return;
+        closeContextActionPicker();
+        vscode.postMessage({ type: 'prompt', text: '/compact' });
+    });
+
+    setTimeout(() => {
+        document.addEventListener('click', onClickOutsideContextActionPicker);
+    }, 0);
+}
+
+function positionContextActionPicker(picker: HTMLElement, anchor: HTMLElement, container: HTMLElement): void {
+    const containerRect = container.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const margin = 6;
+    const maxLeft = Math.max(margin, containerRect.width - picker.offsetWidth - margin);
+    const anchorLeft = anchorRect.left - containerRect.left;
+    picker.style.left = `${Math.min(Math.max(anchorLeft, margin), maxLeft)}px`;
+}
+
+function onClickOutsideContextActionPicker(e: MouseEvent): void {
+    const picker = document.getElementById('context-action-picker');
+    if (picker && !picker.contains(e.target as Node)) {
+        closeContextActionPicker();
+    }
+}
+
+function closeContextActionPicker(): void {
+    document.getElementById('context-action-picker')?.remove();
+    document.removeEventListener('click', onClickOutsideContextActionPicker);
 }
 
 let queuedEditingIndex = -1;
@@ -1402,6 +1482,7 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
         }
         diffView.innerHTML = renderedDiff.html;
         card.appendChild(diffView);
+        observeDiffStripeAlignment(diffView);
     }
 
     wrapper.appendChild(card);
@@ -1414,6 +1495,24 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
     }
 
     return wrapper;
+}
+
+function observeDiffStripeAlignment(diffView: HTMLElement): void {
+    const align = () => {
+        diffView.querySelectorAll<HTMLElement>('.diff-cell-empty, .diff-gap').forEach((cell) => {
+            const row = cell.closest<HTMLTableRowElement>('tr');
+            if (!row) return;
+            cell.style.setProperty('--diff-stripe-offset-y', `${-row.offsetTop}px`);
+        });
+    };
+
+    requestAnimationFrame(align);
+
+    if (typeof ResizeObserver !== 'undefined' && !diffStripeAlignmentObservers.has(diffView)) {
+        const observer = new ResizeObserver(() => requestAnimationFrame(align));
+        observer.observe(diffView);
+        diffStripeAlignmentObservers.set(diffView, observer);
+    }
 }
 
 function renderDiffLines(diff: string): { html: string; rowCount: number } {

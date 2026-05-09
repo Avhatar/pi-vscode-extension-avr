@@ -1277,6 +1277,18 @@ body[data-mode="panel"] .tab-strip,
     color: var(--badge-fg);
     border-radius: 10px;
 }
+.footer-context-usage {
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+    font-variant-numeric: tabular-nums;
+}
+.footer-context-usage:hover,
+.footer-context-usage:focus-visible {
+    background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+    color: var(--fg);
+    outline: none;
+}
 
 .footer-cache {
     font-size: 12px;
@@ -1360,6 +1372,42 @@ body[data-mode="panel"] .tab-strip,
     font-size: 11px;
     color: var(--muted);
     line-height: 1.4;
+}
+
+.context-action-picker {
+    position: absolute;
+    bottom: 100%;
+    margin-bottom: 6px;
+    background: var(--vscode-editorWidget-background, var(--bg));
+    border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.1));
+    border-radius: 6px;
+    padding: 4px;
+    min-width: 140px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    z-index: 50;
+}
+.context-action-item {
+    width: 100%;
+    display: block;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+.context-action-item:hover:not(:disabled),
+.context-action-item:focus-visible:not(:disabled) {
+    background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
+    outline: none;
+}
+.context-action-item:disabled {
+    color: var(--muted);
+    cursor: default;
+    opacity: 0.7;
 }
 
 .footer-codex {
@@ -1668,6 +1716,7 @@ body[data-mode="panel"] .tab-strip,
         var(--vscode-diffEditor-diagonalFill, rgba(204, 204, 204, 0.16)) 4px,
         var(--vscode-diffEditor-diagonalFill, rgba(204, 204, 204, 0.16)) 5px
     );
+    background-position: 0 var(--diff-stripe-offset-y, 0);
 }
 
 .diff-gap {

@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-09
+
+### Added
+- The context usage chip now opens a small menu with a Compact action, so you can compact the chat without typing `/compact`.
+
+### Fixed
+- Diff placeholder hatching now stays visually aligned across consecutive empty rows.
+
 ## [0.13.1] - 2026-05-09
 
 ### Fixed
