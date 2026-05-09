@@ -59,6 +59,17 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
             this._controller.onTabRenamed((e) => {
                 if (e.tabId === this._tabId) this._panel.title = formatPanelTitle(e.name);
             }),
+            // Track focus across existing panels so the launcher's
+            // "active tab" view is always in sync with what the user
+            // is actually looking at. Without this hook, `_activeTabId`
+            // only updates on panel creation, so per-tab features
+            // (e.g. the ToDo toggle in the sidebar) leak between
+            // tabs as the user switches focus.
+            this._panel.onDidChangeViewState((e) => {
+                if (e.webviewPanel.active) {
+                    this._controller.markActiveTab(this._tabId);
+                }
+            }),
             this._panel.onDidDispose(() => this.dispose()),
         );
 

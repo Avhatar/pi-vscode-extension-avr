@@ -1,6 +1,6 @@
 import type {
     LauncherClientMessage, LauncherServerMessage, LauncherState,
-    LauncherSessionInfo,
+    LauncherSessionInfo, TaskInfo, TaskStatus, TodoSnapshot,
 } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
@@ -62,6 +62,8 @@ function render(): void {
     root.innerHTML = '';
 
     root.appendChild(renderToolbar());
+    const todos = renderTodos();
+    if (todos) root.appendChild(todos);
     root.appendChild(renderRecentSessions());
 }
 
@@ -91,6 +93,131 @@ function setHistoryCollapsed(collapsed: boolean): void {
     currentState = { ...currentState, historyCollapsed: collapsed };
     render();
     vscode.postMessage({ type: 'setHistoryCollapsed', collapsed });
+}
+
+// ── ToDo section ──
+//
+// Visible above History when the active tab has the ToDo feature in
+// scope (driven by `LauncherState.todos` from the controller). The
+// section auto-hides when no active panel exists. Toggle (PR4) will
+// further gate visibility per-tab.
+
+const STATUS_GLYPH: Record<TaskStatus, string> = {
+    pending: '○',
+    in_progress: '◐',
+    completed: '✓',
+    deleted: '⊘',
+};
+
+function renderTodos(): HTMLElement | undefined {
+    const todos: TodoSnapshot | undefined = currentState.todos;
+    // No active tab/panel → no section at all (per spec D9).
+    if (!todos) return undefined;
+
+    const enabled = currentState.todoEnabled === true;
+    const toggleDisabled = currentState.todoToggleDisabled === true;
+
+    const visible = todos.tasks.filter((t) => t.status !== 'deleted');
+    const counts = countByStatus(visible);
+
+    const section = el('div', 'section todo-section');
+
+    const heading = el('div', 'section-heading todo-heading');
+    heading.appendChild(el('span', 'section-title', 'ToDo'));
+    if (enabled && visible.length > 0) {
+        heading.appendChild(
+            el('span', 'section-count', `${counts.completed}/${visible.length}`),
+        );
+    }
+    heading.appendChild(renderTodoToggle(enabled, toggleDisabled));
+    section.appendChild(heading);
+
+    // List + counts only show when the feature is ON for this tab.
+    // OFF preserves accumulated state in the branch (per spec D8) but
+    // the user sees nothing here — toggling back ON restores the list
+    // immediately because `todos` is still pushed in the launcher state.
+    if (!enabled) return section;
+
+    if (visible.length === 0) {
+        section.appendChild(el('div', 'empty', 'No tasks yet.'));
+        return section;
+    }
+
+    const list = el('div', 'todo-list');
+    // Display order: in_progress first (active work), then pending,
+    // then completed. Within a group, original creation order (id asc).
+    const ordered = [
+        ...visible.filter((t) => t.status === 'in_progress'),
+        ...visible.filter((t) => t.status === 'pending'),
+        ...visible.filter((t) => t.status === 'completed'),
+    ];
+    for (const task of ordered) {
+        list.appendChild(renderTodoRow(task));
+    }
+    section.appendChild(list);
+    return section;
+}
+
+function renderTodoToggle(enabled: boolean, disabled: boolean): HTMLElement {
+    const wrap = el('label', `todo-toggle${disabled ? ' todo-toggle-disabled' : ''}`);
+    wrap.title = disabled
+        ? 'Wait for the agent to finish before toggling ToDo'
+        : enabled
+            ? 'Disable ToDo for this chat (history is preserved)'
+            : 'Enable ToDo for this chat — the agent gets a persistent task list';
+
+    const input = el('input', 'todo-toggle-input') as HTMLInputElement;
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.disabled = disabled;
+    input.addEventListener('change', () => {
+        if (disabled) return;
+        const next = input.checked;
+        // Optimistic local update — host will push fresh state shortly,
+        // but flipping the visual immediately keeps the click responsive.
+        currentState = { ...currentState, todoEnabled: next };
+        render();
+        vscode.postMessage({ type: 'setTodoEnabled', enabled: next });
+    });
+    wrap.appendChild(input);
+
+    const track = el('span', 'todo-toggle-track');
+    const thumb = el('span', 'todo-toggle-thumb');
+    track.appendChild(thumb);
+    wrap.appendChild(track);
+
+    return wrap;
+}
+
+function countByStatus(tasks: TaskInfo[]): Record<TaskStatus, number> {
+    const out: Record<TaskStatus, number> = {
+        pending: 0,
+        in_progress: 0,
+        completed: 0,
+        deleted: 0,
+    };
+    for (const t of tasks) out[t.status]++;
+    return out;
+}
+
+function renderTodoRow(task: TaskInfo): HTMLElement {
+    const row = el('div', `todo-row todo-row-${task.status}`);
+    row.title = task.description ? task.description : task.subject;
+
+    const glyph = el('span', 'todo-glyph', STATUS_GLYPH[task.status]);
+    row.appendChild(glyph);
+
+    const labelText =
+        task.status === 'in_progress' && task.activeForm ? task.activeForm : task.subject;
+    const label = el('span', 'todo-label', labelText);
+    row.appendChild(label);
+
+    if (task.blockedBy?.length) {
+        const blocked = el('span', 'todo-blocked', `⛓ ${task.blockedBy.map((id) => `#${id}`).join(',')}`);
+        row.appendChild(blocked);
+    }
+
+    return row;
 }
 
 function renderRecentSessions(): HTMLElement {

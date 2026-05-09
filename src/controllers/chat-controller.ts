@@ -4,7 +4,7 @@ import { PiSessionManager } from '../pi/session';
 import type {
     ClientMessage, ServerMessage, TabInfo,
     LauncherState, LauncherTabInfo, LauncherSessionInfo,
-    CacheMode, CacheEffective,
+    CacheMode, CacheEffective, TodoSnapshot,
 } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 import { DiffManager } from '../providers/diff';
@@ -209,6 +209,13 @@ export class ChatController implements vscode.Disposable {
     /** Tracks which `tabId`s currently have a visible editor panel. */
     private _openPanels = new Map<string, { reveal(viewColumn?: vscode.ViewColumn): void }>();
 
+    /** Persistence for per-tab ToDo toggle. Keyed by the session-file
+     *  path (the same key used for tab persistence) so the toggle
+     *  state survives reload and the tab is matched correctly on
+     *  restore. Default for missing entries: `false` — the model
+     *  knows nothing about ToDo until the user explicitly opts in. */
+    private static readonly TODO_ENABLED_KEY_PREFIX = 'pi-code.todoEnabled.';
+
     /** Wired by the host (extension.ts) to construct a `ChatPanel` for a tab. */
     private _panelOpener?: (tabId: string) => void;
 
@@ -270,6 +277,20 @@ export class ChatController implements vscode.Disposable {
         this._openPanels.set(tabId, panel);
         this._activeTabId = tabId;
         this._persistTabs();
+        this._onLauncherStateChanged.fire();
+    }
+
+    /**
+     * Called by `ChatPanel` whenever its underlying `WebviewPanel`
+     * becomes the active editor (focus changes between existing
+     * panels do NOT go through `registerPanel`). This is the only
+     * authoritative source of "user is currently looking at tab X"
+     * once panels have been created.
+     */
+    markActiveTab(tabId: string): void {
+        if (!this._tabs.has(tabId)) return;
+        if (this._activeTabId === tabId) return;
+        this._activeTabId = tabId;
         this._onLauncherStateChanged.fire();
     }
 
@@ -369,7 +390,21 @@ export class ChatController implements vscode.Disposable {
             }
         }
 
-        return { tabs, recentSessions };
+        // Surface the active tab's todo state to the launcher only when
+        // its panel is visible — bare tabs without an editor panel are
+        // launcher placeholders, not user-perceived chats.
+        let todos: TodoSnapshot | undefined;
+        let todoEnabled: boolean | undefined;
+        let todoToggleDisabled: boolean | undefined;
+        const activeTab = this._tabs.get(this._activeTabId);
+        if (activeTab && this._openPanels.has(activeTab.id)) {
+            const state = activeTab.session.todoStore.getState();
+            todos = { tasks: state.tasks, nextId: state.nextId };
+            todoEnabled = this._isTodoEnabledFor(activeTab);
+            todoToggleDisabled = this._isTabBusy(activeTab);
+        }
+
+        return { tabs, recentSessions, todos, todoEnabled, todoToggleDisabled };
     }
 
     /** Expose the active tab's session for global commands (palette, keybindings). */
@@ -571,11 +606,73 @@ export class ChatController implements vscode.Disposable {
             }),
         );
 
+        // ToDo store changes drive the launcher panel. Other tabs' stores
+        // also call this fire(), but `computeLauncherState` only surfaces
+        // the active tab's snapshot so unrelated updates re-render the
+        // launcher with an unchanged shape (cheap).
+        unsubs.push(
+            tab.session.todoStore.subscribe(() => {
+                if (tab.id === this._activeTabId) {
+                    this._onLauncherStateChanged.fire();
+                }
+            }),
+        );
+
+        // Apply persisted ToDo toggle for this tab. The session is
+        // already initialised at this point, so setTodoVisibility()
+        // takes effect immediately — replay (which fired on
+        // session_start during initialize) has populated the store
+        // with whatever todos survived in the branch.
+        const persistedEnabled = this._isTodoEnabledFor(tab);
+        if (persistedEnabled) {
+            tab.session.setTodoVisibility(true);
+        }
+
         tab.session.setToolApprovalHandler(async (toolCallId, toolName, args) => {
             return this._requestToolApproval(tab, toolCallId, toolName, args);
         });
 
         this._tabSubscriptions.set(tab.id, unsubs);
+    }
+
+    private _todoEnabledKey(sessionPath: string | undefined): string | undefined {
+        if (!sessionPath) return undefined;
+        return `${ChatController.TODO_ENABLED_KEY_PREFIX}${sessionPath}`;
+    }
+
+    private _isTodoEnabledFor(tab: TabState): boolean {
+        const key = this._todoEnabledKey(tab.session.sessionPath);
+        if (!key) return false;
+        return this._context.workspaceState.get<boolean>(key, false);
+    }
+
+    private async _setTodoEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
+        const key = this._todoEnabledKey(tab.session.sessionPath);
+        if (!key) {
+            // No session path yet (rare — only for a brand-new tab
+            // before Pi created its session file). Skip persistence
+            // but still apply visibility so the user sees an effect.
+            tab.session.setTodoVisibility(enabled);
+            this._onLauncherStateChanged.fire();
+            return;
+        }
+        await this._context.workspaceState.update(key, enabled);
+        tab.session.setTodoVisibility(enabled);
+        this._onLauncherStateChanged.fire();
+    }
+
+    /** Public entry for the launcher's toggle click. Routes to the
+     *  active tab. Ignored if the active tab is busy — the launcher
+     *  webview also greys out the toggle, this is belt-and-braces. */
+    async setActiveTabTodoEnabled(enabled: boolean): Promise<void> {
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return;
+        if (this._isTabBusy(tab)) return;
+        await this._setTodoEnabledFor(tab, enabled);
+    }
+
+    private _isTabBusy(tab: TabState): boolean {
+        return tab.isStreamingLocal || tab.isCompacting;
     }
 
     private _unsubscribeTab(tabId: string): void {

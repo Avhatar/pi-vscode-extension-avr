@@ -9,6 +9,8 @@ import { createCodexMonitorExtension } from './codex-monitor';
 import { getCodexUsageStore } from './codex-usage-store';
 import { getBundledPiPackagePaths } from './bundled-packages';
 import { createClaudeMdInjectorExtension } from './claude-md-injector';
+import { createTodoExtension } from './todo/extension';
+import { TodoStore } from './todo/store';
 
 export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
 
@@ -21,6 +23,7 @@ export class PiSessionManager {
     private _toolApprovalHandler: ToolApprovalHandler | undefined;
     private _secrets: vscode.SecretStorage | undefined;
     readonly events = new EventRouter();
+    readonly todoStore = new TodoStore();
 
     constructor(outputChannel: vscode.OutputChannel, secrets?: vscode.SecretStorage) {
         this._outputChannel = outputChannel;
@@ -84,10 +87,40 @@ export class PiSessionManager {
         await this._applyDefaultSettings(session);
         this._installToolApprovalHook(session);
 
+        // Default todo visibility = OFF. The tool is registered (so its
+        // state survives across toggles via branch replay) but excluded
+        // from the active set, so the model never sees the tool's
+        // schema or its promptGuidelines. PR4 will wire the per-tab
+        // toggle to flip this via `setTodoVisibility(true)`.
+        this.setTodoVisibility(false);
+
         const model = session.model;
         this._outputChannel.appendLine(
             `Pi session initialized. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
         );
+    }
+
+    /**
+     * Show or hide the `todo` tool from the LLM. When hidden, the
+     * model sees no schema and no promptGuidelines for it — the system
+     * prompt is rebuilt without any todo-related copy
+     * (pi-coding-agent/agent-session.js:631 _rebuildSystemPrompt).
+     * The tool stays registered either way, so its accumulated state
+     * in the conversation branch survives toggles and is restored by
+     * the next replay.
+     *
+     * Idempotent — passing the current visibility is a no-op.
+     */
+    setTodoVisibility(visible: boolean): void {
+        const session = this._session;
+        if (!session) return;
+        const active = session.getActiveToolNames();
+        const present = active.includes('todo');
+        if (visible === present) return;
+        const next = visible
+            ? [...active, 'todo']
+            : active.filter((name) => name !== 'todo');
+        session.setActiveToolsByName(next);
     }
 
     private async _buildResourceLoader(cwd: string): Promise<ResourceLoader> {
@@ -102,6 +135,7 @@ export class PiSessionManager {
                 },
             }),
             createClaudeMdInjectorExtension(),
+            createTodoExtension(this.todoStore),
         ];
         const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const loader = new DefaultResourceLoader({

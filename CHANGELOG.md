@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-05-09
+
+### Fixed
+- Sidebar's "active tab" tracking now updates when you switch focus between already-open chat panels. Previously the sidebar (including the per-tab ToDo toggle) only refreshed when a panel was first created, so toggling ToDo ON in one chat made the same toggle appear ON in every other chat until the panel was reopened.
+
+## [0.13.0] - 2026-05-09
+
+### Added
+- Per-chat persistent ToDo: a per-tab toggle in the sidebar (above History) opts the chat into a task list the agent can keep across `/compact` and across VS Code restarts. State lives in the conversation branch — no external storage. When the toggle is OFF the agent has zero knowledge of the feature; flipping ON instantly exposes the tool plus its task list. The toggle greys out while the agent is streaming or compacting. Adopted prompt guidelines and persistence approach from [@juicesharp/rpiv-todo](https://github.com/juicesharp/rpiv-mono/tree/main/packages/rpiv-todo) (MIT). See `PERSISTENT_TODO.md` for design details.
+
 ## [0.12.1] - 2026-05-09
 
 ### Fixed

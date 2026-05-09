@@ -87,6 +87,9 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                     await this._globalState.update(LauncherView.HISTORY_COLLAPSED_KEY, msg.collapsed);
                     await this._sendState();
                     break;
+                case 'setTodoEnabled':
+                    await this._controller.setActiveTabTodoEnabled(msg.enabled);
+                    break;
                 case 'openSettings':
                     vscode.commands.executeCommand('pi-code.openSettings');
                     break;

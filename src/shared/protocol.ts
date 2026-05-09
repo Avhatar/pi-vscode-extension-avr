@@ -245,10 +245,43 @@ export interface LauncherSessionInfo {
     isOpen: boolean;
 }
 
+// ── ToDo (per-tab persistent task list) ──
+//
+// Cross-boundary types for the persistent ToDo feature. `TaskInfo` mirrors
+// the in-memory `Task` shape on the host side; `src/pi/todo/types.ts`
+// re-exports it so reducer code never has to round-trip through this file.
+
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted';
+
+export interface TaskInfo {
+    id: number;
+    subject: string;
+    description?: string;
+    activeForm?: string;
+    status: TaskStatus;
+    blockedBy?: number[];
+}
+
+export interface TodoSnapshot {
+    tasks: TaskInfo[];
+    nextId: number;
+}
+
 export interface LauncherState {
     tabs: LauncherTabInfo[];
     recentSessions: LauncherSessionInfo[];
     historyCollapsed: boolean;
+    /** Active tab's todo snapshot. Absent when there is no active tab. */
+    todos?: TodoSnapshot;
+    /** Per-tab toggle state for the active tab. Absent when there is
+     *  no active tab. The tool's visibility to the model is gated on
+     *  this — when false, the model has zero knowledge of the ToDo
+     *  feature (no schema, no promptGuidelines). */
+    todoEnabled?: boolean;
+    /** True when the active tab is streaming or compacting and the
+     *  toggle should be greyed out. The launcher webview ignores
+     *  click events while this is true. */
+    todoToggleDisabled?: boolean;
 }
 
 export type LauncherClientMessage =
@@ -259,6 +292,7 @@ export type LauncherClientMessage =
     | { type: 'openSession'; sessionPath: string }
     | { type: 'deleteSession'; sessionPath: string }
     | { type: 'setHistoryCollapsed'; collapsed: boolean }
+    | { type: 'setTodoEnabled'; enabled: boolean }
     | { type: 'openSettings' };
 
 export type LauncherServerMessage =
