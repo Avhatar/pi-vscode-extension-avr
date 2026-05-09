@@ -2797,6 +2797,7 @@ function bindStableEvents(): void {
         if (isSlashMenuVisible()) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
+                e.stopPropagation();
                 slashMenuIndex = Math.min(slashMenuIndex + 1, slashMenuItems.length - 1);
                 const menu = document.getElementById('slash-menu');
                 if (menu) renderSlashMenu(menu);
@@ -2804,6 +2805,7 @@ function bindStableEvents(): void {
             }
             if (e.key === 'ArrowUp') {
                 e.preventDefault();
+                e.stopPropagation();
                 slashMenuIndex = Math.max(slashMenuIndex - 1, 0);
                 const menu = document.getElementById('slash-menu');
                 if (menu) renderSlashMenu(menu);
@@ -2811,11 +2813,13 @@ function bindStableEvents(): void {
             }
             if (e.key === 'Enter' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 selectSlashItem(slashMenuIndex);
                 return;
             }
             if (e.key === 'Escape') {
                 e.preventDefault();
+                e.stopPropagation();
                 hideSlashMenu();
                 return;
             }
@@ -3301,6 +3305,14 @@ function renderSlashMenu(menu: HTMLElement): void {
             selectSlashItem(idx);
         });
     });
+
+    scrollActiveSlashItemIntoView(menu);
+}
+
+function scrollActiveSlashItemIntoView(menu: HTMLElement): void {
+    const active = menu.querySelector('.slash-item-active') as HTMLElement | null;
+    if (!active) return;
+    active.scrollIntoView({ block: 'nearest' });
 }
 
 function selectSlashItem(index: number): void {
