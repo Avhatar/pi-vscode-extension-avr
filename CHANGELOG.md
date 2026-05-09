@@ -7,8 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-05-09
+
 ### Fixed
 - Error messages no longer get stuck and slide under new messages; they now stay in place as part of the conversation flow.
+- Diff blocks no longer overflow horizontally off-screen; lines now wrap correctly within the available width.
 
 ## [0.10.0] - 2026-05-09
 

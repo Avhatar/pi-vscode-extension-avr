@@ -1518,17 +1518,17 @@ body[data-mode="panel"] .tab-strip,
 
 .diff-side-by-side {
     width: 100%;
-    min-width: 640px;
     border-collapse: collapse;
-    table-layout: auto;
+    table-layout: fixed;
 }
 
 .diff-cell {
     width: 50%;
     padding: 0 10px;
-    height: 1.5em;
     vertical-align: top;
-    white-space: pre;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
     color: var(--vscode-editor-foreground, var(--fg));
 }
 
