@@ -198,7 +198,13 @@ function handleMessage(msg: ServerMessage): void {
             updateInputArea();
             break;
         case 'error':
-            showError(msg.message);
+            state.messages.push({
+                role: 'error',
+                content: msg.message,
+                timestamp: Date.now(),
+            });
+            updateMessages();
+            scrollToBottom();
             break;
     }
 }
@@ -515,6 +521,11 @@ function updateMessages(): void {
     while (container.firstChild && container.firstChild !== streamingEl) {
         container.removeChild(container.firstChild);
     }
+
+    // Remove orphaned error banners from previous transient showError() calls
+    // that live between #streaming-message and .messages-spacer.
+    const orphanErrors = container.querySelectorAll('#streaming-message ~ .error-message');
+    orphanErrors.forEach(el => el.remove());
 
     codeBlockId = 0;
 
@@ -1494,6 +1505,10 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
             }
         }
         return buildToolResultCard(msg, state.messages, index);
+    }
+
+    if (role === 'error') {
+        return renderErrorMessage(msg);
     }
 
     if (role === 'compactionSummary') {
@@ -2613,6 +2628,25 @@ function renderSessionList(sessions: any[], currentId?: string): void {
             }
         });
     });
+}
+
+function renderErrorMessage(msg: any): HTMLElement {
+    const text = extractText(msg);
+    const group = el('div', 'message-group-system');
+    const errEl = el('div', 'error-message');
+    errEl.textContent = text;
+
+    if (looksLikeAuthError(text)) {
+        const action = el('button', 'error-action');
+        action.textContent = 'Open Settings';
+        action.addEventListener('click', () => {
+            vscode.postMessage({ type: 'openSettings' });
+        });
+        errEl.appendChild(action);
+    }
+
+    group.appendChild(errEl);
+    return group;
 }
 
 function showError(message: string): void {

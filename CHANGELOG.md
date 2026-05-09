@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Error messages no longer get stuck and slide under new messages; they now stay in place as part of the conversation flow.
+
 ## [0.10.0] - 2026-05-09
 
 ### Added

@@ -390,6 +390,10 @@ body[data-mode="panel"] .tab-strip,
     margin: 8px;
 }
 
+.message-group-system {
+    margin: 8px;
+}
+
 .message-compaction-summary {
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -1746,6 +1750,7 @@ body[data-mode="panel"] .tab-strip,
 .message.dimmed,
 .message-group-user.dimmed,
 .message-group-assistant.dimmed,
+.message-group-system.dimmed,
 .tool-card.dimmed,
 .diff-card.dimmed {
     opacity: 0.35;
