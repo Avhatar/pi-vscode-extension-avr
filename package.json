@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -178,6 +178,11 @@
           "type": "string",
           "default": ".pi/file-mentions.json",
           "description": "Workspace-relative JSON config file for @ file mention indexing settings."
+        },
+        "pi-code.todo.defaultEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the per-chat persistent ToDo for new chats by default. Each chat keeps its own toggle state once you flip it; this setting only affects chats you have not customized yet."
         }
       }
     }

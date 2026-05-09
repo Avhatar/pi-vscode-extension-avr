@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-05-09
+
+### Added
+- Per-chat ToDo is now ON by default for new chats. A new `pi-code.todo.defaultEnabled` setting controls this default; existing chats keep whatever toggle state you set.
+- The ToDo section in the sidebar is now collapsible (click the heading to fold it), mirroring how History works.
+
+### Changed
+- ToDo list now sorts newest-first — the most recently created task is at the top. The visible area caps at 10 rows; the rest of the list scrolls.
+
 ## [0.14.0] - 2026-05-09
 
 ### Added

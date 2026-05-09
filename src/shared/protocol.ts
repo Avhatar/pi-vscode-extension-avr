@@ -282,6 +282,10 @@ export interface LauncherState {
      *  toggle should be greyed out. The launcher webview ignores
      *  click events while this is true. */
     todoToggleDisabled?: boolean;
+    /** Whether the user has collapsed the ToDo section in the sidebar
+     *  (purely a UI preference, global like `historyCollapsed`).
+     *  Persisted via globalState. */
+    todoCollapsed: boolean;
 }
 
 export type LauncherClientMessage =
@@ -293,6 +297,7 @@ export type LauncherClientMessage =
     | { type: 'deleteSession'; sessionPath: string }
     | { type: 'setHistoryCollapsed'; collapsed: boolean }
     | { type: 'setTodoEnabled'; enabled: boolean }
+    | { type: 'setTodoCollapsed'; collapsed: boolean }
     | { type: 'openSettings' };
 
 export type LauncherServerMessage =

@@ -9,6 +9,7 @@ import { ChatController } from '../controllers/chat-controller';
  */
 export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposable {
     private static readonly HISTORY_COLLAPSED_KEY = 'pi-code.launcher.historyCollapsed';
+    private static readonly TODO_COLLAPSED_KEY = 'pi-code.launcher.todoCollapsed';
 
     private _view?: vscode.WebviewView;
     private _extensionUri: vscode.Uri;
@@ -87,6 +88,10 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                     await this._globalState.update(LauncherView.HISTORY_COLLAPSED_KEY, msg.collapsed);
                     await this._sendState();
                     break;
+                case 'setTodoCollapsed':
+                    await this._globalState.update(LauncherView.TODO_COLLAPSED_KEY, msg.collapsed);
+                    await this._sendState();
+                    break;
                 case 'setTodoEnabled':
                     await this._controller.setActiveTabTodoEnabled(msg.enabled);
                     break;
@@ -108,6 +113,7 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
             state: {
                 ...state,
                 historyCollapsed: this._globalState.get<boolean>(LauncherView.HISTORY_COLLAPSED_KEY, true),
+                todoCollapsed: this._globalState.get<boolean>(LauncherView.TODO_COLLAPSED_KEY, false),
             },
         });
     }

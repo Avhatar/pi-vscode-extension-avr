@@ -123,6 +123,11 @@ body {
 /* ── ToDo section ── */
 
 .todo-section {
+    /* Per-row size + max visible rows are exposed as variables so the
+       CSS-side cap stays in sync with the spec ("max 10 visible
+       items, scroll for the rest"). */
+    --todo-row-height: 24px;
+    --todo-max-rows: 10;
     /* Visually distinct from History: mild inset border so the user knows
        it is a separate, per-tab panel. */
     border: 1px solid var(--vscode-widget-border, transparent);
@@ -132,16 +137,17 @@ body {
 }
 
 .todo-heading {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 4px 4px;
+    /* Inherits .section-heading-button from the History pattern; only
+       extra spacing concerns are local. */
     margin-top: 0;
 }
 
-/* Pull the toggle to the right edge of the heading. */
-.todo-heading .todo-toggle {
+/* The toggle host sits at the right edge of the heading row; the
+   heading itself becomes a flex container via .section-heading-button. */
+.todo-toggle-host {
     margin-left: auto;
+    display: inline-flex;
+    align-items: center;
 }
 
 /* ── ToDo toggle switch ── */
@@ -201,10 +207,10 @@ body {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    /* Cap height so the section never crowds out History. The model can
-       create up to a few dozen tasks; beyond ~10 visible rows the user
-       scrolls. */
-    max-height: 240px;
+    /* Cap visible rows at exactly --todo-max-rows. Beyond that the
+       list scrolls — newest stays at the top (sort: id DESC), the
+       oldest is at the bottom inside the scrollable area. */
+    max-height: calc(var(--todo-row-height) * var(--todo-max-rows));
     overflow-y: auto;
 }
 
@@ -216,6 +222,10 @@ body {
     border-radius: var(--row-radius);
     line-height: 1.3;
     min-width: 0;
+    /* Pinned to --todo-row-height so the 10-row max-height calc on
+       .todo-list lines up with the actual rendered count. */
+    height: var(--todo-row-height);
+    box-sizing: border-box;
 }
 .todo-row:hover {
     background: var(--vscode-list-hoverBackground);

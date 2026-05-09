@@ -350,7 +350,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     /** Build a snapshot of launcher state (panel tabs + recent sessions). */
-    async computeLauncherState(): Promise<Omit<LauncherState, 'historyCollapsed'>> {
+    async computeLauncherState(): Promise<Omit<LauncherState, 'historyCollapsed' | 'todoCollapsed'>> {
         // Track only tabs with a visible editor panel. A bare TabState without
         // a panel is an internal placeholder (e.g. the initial empty tab), not
         // something the user thinks of as open.
@@ -640,10 +640,23 @@ export class ChatController implements vscode.Disposable {
         return `${ChatController.TODO_ENABLED_KEY_PREFIX}${sessionPath}`;
     }
 
+    private _todoDefaultEnabled(): boolean {
+        // The setting defaults to ON, so a vanilla install of the
+        // extension surfaces the ToDo panel for every new chat. Power
+        // users who do not want that flip it off in settings.
+        return vscode.workspace
+            .getConfiguration('pi-code')
+            .get<boolean>('todo.defaultEnabled', true);
+    }
+
     private _isTodoEnabledFor(tab: TabState): boolean {
         const key = this._todoEnabledKey(tab.session.sessionPath);
-        if (!key) return false;
-        return this._context.workspaceState.get<boolean>(key, false);
+        const fallback = this._todoDefaultEnabled();
+        if (!key) return fallback;
+        // Explicitly stored values (`true` / `false`) win over the
+        // config default — so once the user toggled OFF for a chat,
+        // it stays OFF even if `defaultEnabled` is `true`.
+        return this._context.workspaceState.get<boolean>(key, fallback);
     }
 
     private async _setTodoEnabledFor(tab: TabState, enabled: boolean): Promise<void> {

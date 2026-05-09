@@ -11,7 +11,12 @@ declare function acquireVsCodeApi(): {
 
 const vscode = acquireVsCodeApi();
 
-let currentState: LauncherState = { tabs: [], recentSessions: [], historyCollapsed: true };
+let currentState: LauncherState = {
+    tabs: [],
+    recentSessions: [],
+    historyCollapsed: true,
+    todoCollapsed: false,
+};
 
 window.addEventListener('message', (event) => {
     const msg = event.data as LauncherServerMessage;
@@ -109,6 +114,12 @@ const STATUS_GLYPH: Record<TaskStatus, string> = {
     deleted: '⊘',
 };
 
+function setTodoCollapsed(collapsed: boolean): void {
+    currentState = { ...currentState, todoCollapsed: collapsed };
+    render();
+    vscode.postMessage({ type: 'setTodoCollapsed', collapsed });
+}
+
 function renderTodos(): HTMLElement | undefined {
     const todos: TodoSnapshot | undefined = currentState.todos;
     // No active tab/panel → no section at all (per spec D9).
@@ -116,26 +127,45 @@ function renderTodos(): HTMLElement | undefined {
 
     const enabled = currentState.todoEnabled === true;
     const toggleDisabled = currentState.todoToggleDisabled === true;
+    const collapsed = currentState.todoCollapsed === true;
 
     const visible = todos.tasks.filter((t) => t.status !== 'deleted');
     const counts = countByStatus(visible);
 
     const section = el('div', 'section todo-section');
 
-    const heading = el('div', 'section-heading todo-heading');
+    // Heading mirrors the History section: clickable chevron + title +
+    // count badge. Collapse is purely a UI preference, persisted in
+    // globalState alongside `historyCollapsed`.
+    const heading = el('button', 'section-heading section-heading-button todo-heading');
+    heading.type = 'button';
+    heading.setAttribute('aria-expanded', String(!collapsed));
+    heading.title = collapsed ? 'Expand ToDo' : 'Collapse ToDo';
+
+    const chevron = el('span', 'section-chevron', collapsed ? '▶' : '▼');
+    heading.appendChild(chevron);
     heading.appendChild(el('span', 'section-title', 'ToDo'));
     if (enabled && visible.length > 0) {
         heading.appendChild(
             el('span', 'section-count', `${counts.completed}/${visible.length}`),
         );
     }
-    heading.appendChild(renderTodoToggle(enabled, toggleDisabled));
+    // Toggle is part of the heading row (right-aligned via CSS) but
+    // sits in its own <span> so the heading-wide click-to-collapse
+    // does not trigger when clicking the toggle.
+    const toggleHost = el('span', 'todo-toggle-host');
+    toggleHost.addEventListener('click', (e) => e.stopPropagation());
+    toggleHost.appendChild(renderTodoToggle(enabled, toggleDisabled));
+    heading.appendChild(toggleHost);
+    heading.addEventListener('click', () => {
+        setTodoCollapsed(!collapsed);
+    });
     section.appendChild(heading);
 
-    // List + counts only show when the feature is ON for this tab.
-    // OFF preserves accumulated state in the branch (per spec D8) but
-    // the user sees nothing here — toggling back ON restores the list
-    // immediately because `todos` is still pushed in the launcher state.
+    // Body hidden when collapsed OR when the feature is OFF for this
+    // tab (toggle OFF preserves state in the branch — toggling back
+    // ON restores it from `todos` which is still pushed by the host).
+    if (collapsed) return section;
     if (!enabled) return section;
 
     if (visible.length === 0) {
@@ -144,13 +174,11 @@ function renderTodos(): HTMLElement | undefined {
     }
 
     const list = el('div', 'todo-list');
-    // Display order: in_progress first (active work), then pending,
-    // then completed. Within a group, original creation order (id asc).
-    const ordered = [
-        ...visible.filter((t) => t.status === 'in_progress'),
-        ...visible.filter((t) => t.status === 'pending'),
-        ...visible.filter((t) => t.status === 'completed'),
-    ];
+    // Display order: newest first (highest id at the top), oldest at
+    // the bottom. Status differences are conveyed by glyphs and
+    // styling, not ordering. CSS caps visible rows to ~10 and the
+    // overflow scrolls.
+    const ordered = [...visible].sort((a, b) => b.id - a.id);
     for (const task of ordered) {
         list.appendChild(renderTodoRow(task));
     }
