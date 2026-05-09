@@ -5,6 +5,8 @@ description: >-
   Always build and install on request, even when there are no local changes.
   Includes versioning: bump version only when there are changes since the previous build;
   otherwise rebuild and install the current version without changing it.
+  A standalone '-' in the request means a test deploy: build and install only, with no
+  version bump, changelog handling, or release bookkeeping.
   Use when: user asks to build, compile, deploy, package, install, update the extension,
   create a VSIX, apply code changes, bump version, or release.
   Triggers: build, deploy, package, install, vsix, compile, ship, release, update extension,
@@ -21,6 +23,20 @@ The project uses [Semantic Versioning](https://semver.org/) and maintains
 ### Workflow for the agent
 
 When the user asks to build, package, deploy, install, update the extension, or get a fresh VSIX:
+
+### Test deploy shortcut
+
+If the build/deploy request includes a standalone `-` sign (for example `build-deploy -`,
+`deploy -`, or `build -`), treat it as an explicit test-build request:
+
+- Run plain `npm run deploy` only.
+- Do not check whether a version bump is needed.
+- Do not edit, validate, or require `CHANGELOG.md`.
+- Do not run `npm run deploy:patch`, `npm run deploy:minor`, or `npm run deploy:major`.
+- Ignore unreleased local changes for versioning purposes; the user wants to package and
+  install the current `package.json` version exactly as-is for manual testing.
+
+For all other build/deploy requests:
 
 1. **Always build and install. Do not refuse or ask whether to proceed just because there
    are no local changes.** The requested outcome is a current VSIX installed into VS Code.

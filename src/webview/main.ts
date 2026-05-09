@@ -1,5 +1,6 @@
 import { marked } from 'marked';
 import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
+import { getCacheCapability } from '../shared/cache-info';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -78,6 +79,8 @@ const state: {
     skills: SkillInfo[];
     queuedMessages: string[];
     codexUsage: CodexUsageSnapshot | null;
+    cacheMode: 'short' | 'long' | 'auto';
+    cacheEffective: 'short' | 'long';
 } = {
     messages: [],
     isStreaming: false,
@@ -98,6 +101,8 @@ const state: {
     skills: [],
     queuedMessages: [],
     codexUsage: null,
+    cacheMode: 'auto',
+    cacheEffective: 'short',
 };
 
 // ── Marked config ──
@@ -244,6 +249,12 @@ function applyStateSync(s: SerializedAgentState): void {
     state.thinkingStartTime = s.thinkingStartTime ?? 0;
     state.streamingThinkingDuration = s.streamingThinkingDuration ?? 0;
     state.queuedMessages = s.queuedMessages ?? [];
+    if (s.cacheMode === 'short' || s.cacheMode === 'long' || s.cacheMode === 'auto') {
+        state.cacheMode = s.cacheMode;
+    }
+    if (s.cacheEffective === 'short' || s.cacheEffective === 'long') {
+        state.cacheEffective = s.cacheEffective;
+    }
     const tabSwitched = prevTab !== state.activeTabId;
 
     // In panel mode, persist a tiny pointer (tabId + sessionPath) so VS Code
@@ -752,7 +763,7 @@ function updateInputArea(): void {
         input.placeholder = state.isCompacting
             ? 'Compacting context...'
             : state.isStreaming
-                ? 'Type to queue a message, Ctrl+Enter to steer, Esc to stop...'
+                ? 'Type; Enter queues, Ctrl+Enter steers, Esc stops...'
                 : 'Ask Pi anything...';
     }
 
@@ -781,58 +792,32 @@ function updateInputArea(): void {
         ? `<span class="footer-context" title="${currentImageAttachments.length} image attachment${currentImageAttachments.length === 1 ? '' : 's'}">${currentImageAttachments.length} image${currentImageAttachments.length === 1 ? '' : 's'}</span>`
         : '';
 
-    const steerBtnHtml = state.isStreaming
-        ? `<button id="btn-steer" class="steer-btn" title="Steer (Ctrl+Enter)"><img class="steer-icon-img" src="${iconsBaseUri}/chevrons.png" alt="steer"></button>`
-        : '';
+    const actionIcon = state.isStreaming ? 'stop.png' : 'chevrons.png';
+    const actionTitle = state.isStreaming ? 'Stop generation (Esc)' : 'Send';
+    const actionAlt = state.isStreaming ? 'Stop' : 'Send';
+
+    const cacheChipHtml = renderCacheChip();
 
     footer.innerHTML = `
         <button id="btn-attach-image" class="attach-btn" title="Attach image"><img class="attach-icon-img" src="${iconsBaseUri}/folder.png" alt="Attach image"></button>
         <span class="footer-model">${escHtml(modelName)}</span>
+        ${cacheChipHtml}
         <span class="footer-spacer"></span>
         ${attachmentHtml}
         ${codexUsageHtml}
         ${contextHtml}
-        ${state.isStreaming ? '<button id="btn-abort" class="abort-btn" title="Stop generation (Esc)">&#9632; Stop</button>' : ''}
-        ${steerBtnHtml}
-        <button id="btn-send" class="send-btn" title="${state.isStreaming ? 'Queue' : 'Send'}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3L8 13M8 3L3 8M8 3L13 8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button id="btn-send" class="send-btn${state.isStreaming ? ' send-btn--stop' : ''}" title="${actionTitle}"><img class="send-icon-img" src="${iconsBaseUri}/${actionIcon}" alt="${actionAlt}"></button>
     `;
 
     // Rebind the dynamic footer elements
     const sendBtn = document.getElementById('btn-send');
     sendBtn?.addEventListener('click', () => {
         if (state.isStreaming) {
-            if (currentImageAttachments.length > 0) {
-                showError('Image attachments cannot be queued while the agent is streaming yet. Send them after the current response finishes.');
-                return;
-            }
-            const text = input?.value.trim();
-            if (text) {
-                vscode.postMessage({ type: 'queueMessage', text });
-                if (input) { input.value = ''; input.style.height = 'auto'; updateInputHighlights(input); }
-            } else {
-                vscode.postMessage({ type: 'abort' });
-            }
+            vscode.postMessage({ type: 'abort' });
         } else {
             sendMessage();
         }
     });
-
-    const steerBtn = document.getElementById('btn-steer');
-    steerBtn?.addEventListener('click', () => {
-        if (currentImageAttachments.length > 0) {
-            showError('Image attachments cannot be sent as steering messages yet. Send them after the current response finishes.');
-            return;
-        }
-        const text = input?.value.trim();
-        if (text) {
-            vscode.postMessage({ type: 'steer', text });
-            if (input) { input.value = ''; input.style.height = 'auto'; updateInputHighlights(input); }
-            showSteerToast(text);
-        }
-    });
-
-    const abortBtn = document.getElementById('btn-abort');
-    abortBtn?.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
 
     const attachBtn = document.getElementById('btn-attach-image');
     attachBtn?.addEventListener('click', () => {
@@ -845,7 +830,142 @@ function updateInputArea(): void {
         toggleModelPicker();
     });
 
+    document.querySelector('.footer-cache')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleCacheModePicker();
+    });
+
     updateQueuedMessageBanner();
+}
+
+function renderCacheChip(): string {
+    const mode = state.cacheMode;
+    const eff = state.cacheEffective;
+    const cap = getCacheCapability(state.model?.provider, state.model?.id);
+    let label: string;
+    let cls = 'footer-cache';
+    if (mode === 'auto') {
+        label = `cache: auto&middot;${eff}`;
+        cls += ` footer-cache--auto footer-cache--${eff}`;
+    } else {
+        label = `cache: ${mode}`;
+        cls += ` footer-cache--${mode}`;
+    }
+    if (!cap.chipActive) cls += ' footer-cache--inert';
+    const tooltip = cacheChipTooltip(mode, eff);
+    return `<span class="${cls}" title="${escHtml(tooltip)}">${label}</span>`;
+}
+
+function cacheChipTooltip(mode: 'short' | 'long' | 'auto', eff: 'short' | 'long'): string {
+    const cap = getCacheCapability(state.model?.provider, state.model?.id);
+    const lines: string[] = [];
+    lines.push(`Prompt cache retention: ${mode}${mode === 'auto' ? ` (currently ${eff})` : ''}`);
+    lines.push(`Provider: ${state.model?.provider ?? '-'} — short: ${cap.shortLabel}, long: ${cap.longLabel}`);
+    lines.push(cap.note);
+    if (mode === 'auto') {
+        if (cap.family === 'openai' || cap.family === 'auto') {
+            lines.push('Auto picks long here because cache writes are free on this provider.');
+        } else if (cap.family === 'anthropic') {
+            lines.push('Auto picks long when this session has shown a >2 min idle gap or the cached prefix is >20k tokens.');
+        } else {
+            lines.push('Auto picks long after a >2 min idle gap or a >20k-token prefix.');
+        }
+    }
+    if (!cap.chipActive) {
+        lines.push('Note: this provider does not act on the chip; setting is informational.');
+    }
+    lines.push('Click to change.');
+    return lines.join('\n');
+}
+
+function toggleCacheModePicker(): void {
+    const existing = document.getElementById('cache-mode-picker');
+    if (existing) {
+        existing.remove();
+        document.removeEventListener('click', onClickOutsideCachePicker);
+        return;
+    }
+    const container = document.querySelector('.input-container');
+    if (!container) return;
+
+    const picker = el('div', 'cache-mode-picker');
+    picker.id = 'cache-mode-picker';
+    const cap = getCacheCapability(state.model?.provider, state.model?.id);
+
+    const autoDesc =
+        cap.family === 'openai' || cap.family === 'auto'
+            ? `Always picks long for this provider (free cache writes)`
+            : cap.family === 'anthropic'
+                ? `Picks long after a >2 min idle gap or a >20k-token prefix`
+                : cap.family === 'unsupported'
+                    ? `Heuristic runs, but ${state.model?.provider ?? 'this provider'} ignores the setting`
+                    : `Picks based on idle gaps & context size`;
+
+    const shortDesc =
+        cap.family === 'openai'
+            ? `5 min TTL — provider auto-caches, writes are free either way`
+            : cap.family === 'auto'
+                ? `Provider auto-caches by prefix; setting has little effect`
+                : cap.family === 'unsupported'
+                    ? `No caching wired for this provider`
+                    : `5 min TTL — cheap writes, lost on long pauses`;
+
+    const longDesc =
+        cap.family === 'openai'
+            ? `24 h TTL — writes free, survives long breaks`
+            : cap.family === 'auto'
+                ? `Provider auto-caches by prefix; setting has little effect`
+                : cap.family === 'unsupported'
+                    ? `No caching wired for this provider`
+                    : `1 h TTL — pricier writes (~2× input), survives breaks`;
+
+    const options: Array<{ value: 'short' | 'long' | 'auto'; title: string; desc: string }> = [
+        { value: 'auto', title: 'Auto', desc: autoDesc },
+        { value: 'short', title: `Short${cap.family !== 'unsupported' && cap.family !== 'auto' ? ` (${cap.shortLabel})` : ''}`, desc: shortDesc },
+        { value: 'long', title: `Long${cap.family !== 'unsupported' && cap.family !== 'auto' ? ` (${cap.longLabel})` : ''}`, desc: longDesc },
+    ];
+    for (const opt of options) {
+        const isActive = state.cacheMode === opt.value;
+        const item = el('div', `cache-mode-item${isActive ? ' active' : ''}`);
+        item.dataset.mode = opt.value;
+        const effHint = opt.value === 'auto' ? ` <span class="cache-mode-eff">(now ${state.cacheEffective})</span>` : '';
+        item.innerHTML = `
+            <span class="cache-mode-check">${isActive ? '&#10003;' : ''}</span>
+            <span class="cache-mode-text">
+                <span class="cache-mode-title">${escHtml(opt.title)}${effHint}</span>
+                <span class="cache-mode-desc">${escHtml(opt.desc)}</span>
+            </span>
+        `;
+        picker.appendChild(item);
+    }
+    container.appendChild(picker);
+
+    picker.addEventListener('click', (e) => {
+        const item = (e.target as HTMLElement).closest('.cache-mode-item') as HTMLElement | null;
+        if (!item) return;
+        const mode = item.dataset.mode as 'short' | 'long' | 'auto' | undefined;
+        if (!mode) return;
+        state.cacheMode = mode;
+        vscode.postMessage({ type: 'setCacheMode', mode });
+        closeCacheModePicker();
+        updateInputArea();
+    });
+
+    setTimeout(() => {
+        document.addEventListener('click', onClickOutsideCachePicker);
+    }, 0);
+}
+
+function onClickOutsideCachePicker(e: MouseEvent): void {
+    const picker = document.getElementById('cache-mode-picker');
+    if (picker && !picker.contains(e.target as Node)) {
+        closeCacheModePicker();
+    }
+}
+
+function closeCacheModePicker(): void {
+    document.getElementById('cache-mode-picker')?.remove();
+    document.removeEventListener('click', onClickOutsideCachePicker);
 }
 
 let queuedEditingIndex = -1;
@@ -1671,7 +1791,7 @@ function renderStreamingContent(): void {
             <div class="message message-assistant">
                 <details class="thinking-block active" id="streaming-thinking" style="display:none">
                     <summary class="thinking-summary">
-                        <span class="thinking-indicator"></span>
+                        <span class="thinking-indicator" aria-hidden="true"><img class="thinking-indicator-icon" src="${iconsBaseUri}/thinking.png" alt=""></span>
                         <span class="thinking-label">Thinking...</span>
                         <span class="thinking-preview"></span>
                         <span class="thinking-chevron">&#9656;</span>
@@ -2276,7 +2396,7 @@ function buildThinkingBlock(text: string, active: boolean, durationSec?: number)
     }
     details.innerHTML = `
         <summary class="thinking-summary">
-            <span class="thinking-indicator"></span>
+            <span class="thinking-indicator" aria-hidden="true"><img class="thinking-indicator-icon" src="${iconsBaseUri}/thinking.png" alt=""></span>
             <span class="thinking-label">${label}</span>
             <span class="thinking-preview">${escHtml(getThinkingPreview(text))}</span>
             <span class="thinking-chevron">&#9656;</span>

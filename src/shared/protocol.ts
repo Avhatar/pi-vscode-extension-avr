@@ -106,6 +106,9 @@ export interface TabInfo {
     hasNotification: boolean;
 }
 
+export type CacheMode = 'short' | 'long' | 'auto';
+export type CacheEffective = 'short' | 'long';
+
 export interface SerializedAgentState {
     messages: any[];
     model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
@@ -130,6 +133,10 @@ export interface SerializedAgentState {
     thinkingStartTime?: number;
     streamingThinkingDuration?: number;
     queuedMessages?: string[];
+    /** User preference for prompt cache retention. Global, persisted in extension state. */
+    cacheMode?: CacheMode;
+    /** Effective retention applied to the next request for this tab (computed in `auto`). */
+    cacheEffective?: CacheEffective;
 }
 
 export interface ModelInfo {
@@ -201,7 +208,8 @@ export type ClientMessage =
     | { type: 'queueMessage'; text: string }
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
-    | { type: 'cancelQueue' };
+    | { type: 'cancelQueue' }
+    | { type: 'setCacheMode'; mode: CacheMode };
 
 // ── Launcher (sidebar) ──
 //

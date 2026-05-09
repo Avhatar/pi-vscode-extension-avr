@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-09
+
+### Added
+- Prompt cache retention can now be controlled per chat from the input footer. A new `cache: …` chip next to the model picker switches between `short`, `long`, and `auto`. In `auto` the chip shows which retention is currently active; the heuristic is provider-aware — backends with free cache writes (OpenAI, DeepSeek, Z.AI, Cerebras, OpenAI-codex, …) always use `long`, while Anthropic / Bedrock-Claude / Kimi-coding pick `long` only after a noticeable idle gap or large cached prefix. The chip is shown faded for providers where Pi cannot act on the setting (Mistral, Google/Gemini, Groq, non-Claude Bedrock).
+
+### Changed
+- Build/deploy instructions now support a `-` test-build shortcut that packages and installs the current version without changelog or version-bump steps.
+- The README now reflects the current launcher, OAuth login, message queueing, and cache-retention behavior.
+- Thinking indicators in chat now use the bundled thinking icon instead of a blinking dot.
+- The chat input now uses a single action button that switches between Send and Stop, with queued prompts available only from the keyboard while a response is streaming.
+
+### Fixed
+- Thinking indicators now match the size of other command and action icons in chat.
+
 ## [0.9.4] - 2026-05-09
 
 ### Fixed

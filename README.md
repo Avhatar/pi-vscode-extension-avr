@@ -8,14 +8,15 @@ A VS Code extension that provides a chat UI for [Mario Zechner's Pi coding agent
 
 Two motivations drove the split from upstream:
 
-**1. Claude Code-style editor-tab panels instead of a sidebar chat.** Upstream renders the entire chat UI inside the activity-bar sidebar — one chat at a time, fixed to one side of the window. This fork moves each chat into an editor-area `WebviewPanel`, so chats behave exactly like editor tabs: split horizontally or vertically, drag into another editor group, move into a separate window, restore across `Reload Window`. The activity-bar sidebar is repurposed as a thin **launcher** that lists currently open chats, shows session history, and exposes one-click *New chat* / *Settings* buttons. Every chat panel also has its own toolbar with *New chat* and *History* so you don't need to keep flipping back to the sidebar.
+**1. Claude Code-style editor-tab panels instead of a sidebar chat.** Upstream renders the entire chat UI inside the activity-bar sidebar — one chat at a time, fixed to one side of the window. This fork moves each chat into an editor-area `WebviewPanel`, so chats behave exactly like editor tabs: split horizontally or vertically, drag into another editor group, move into a separate window, restore across `Reload Window`. The activity-bar sidebar is repurposed as a thin **launcher** with one-click *New chat* / *Settings* buttons and collapsible session history; active chats stay in the editor tab strip instead of being duplicated in the sidebar. Every chat panel also has its own toolbar with *New chat* and *History* so you don't need to keep flipping back to the sidebar.
 
-**2. Bundled Pi extensions instead of `pi install`.** Upstream relies on the user running `pi install npm:<package>` and managing `~/.pi/` themselves to enable Pi ecosystem tools (web search, content fetching, etc.). This fork ships selected Pi extensions (currently `pi-web-access`) **inside the VSIX** as ordinary npm dependencies and wires them into Pi's resource loader via `additionalExtensionPaths`. The extension never writes to `~/.pi/`, never invokes `pi install` at activation, and works fully offline after install. The tradeoff is that bundled extension versions are pinned per Pi Code release — see [AGENTS.md](AGENTS.md#bundled-pi-extensions) for the rationale and the procedure for adding a new bundled extension.
+**2. Bundled Pi extensions instead of `pi install`.** Upstream relies on the user running `pi install npm:<package>` and managing `~/.pi/` themselves to enable Pi ecosystem tools (web search, content fetching, etc.). This fork ships selected Pi extensions (currently `pi-web-access` and `pi-mcp-adapter`) **inside the VSIX** as ordinary npm dependencies and wires them into Pi's resource loader via `additionalExtensionPaths`. The extension never writes to `~/.pi/`, never invokes `pi install` at activation, and works fully offline after install. The tradeoff is that bundled extension versions are pinned per Pi Code release — see [AGENTS.md](AGENTS.md#bundled-pi-extensions) for the rationale and the procedure for adding a new bundled extension.
 
 In addition to those two structural changes, the fork has accumulated a number of features not present upstream at the time of forking:
 
 - OAuth subscription login in the settings panel for Anthropic Claude Pro/Max, ChatGPT Plus/Pro/Codex, GitHub Copilot, Google Gemini CLI, and Google Antigravity — so subscription-only models (e.g. GPT-5.x Codex) work without an API key.
 - Codex subscription usage indicator: a percent-used readout for the 5-hour and weekly windows in the chat footer, plus a per-turn delta on each assistant message.
+- Prompt cache retention controls in the chat footer, with `short`, `long`, and provider-aware `auto` modes.
 - Image attachments via paste, drag-and-drop, or a paperclip button — sent to image-capable models with previews preserved in chat history.
 - Workspace `@` file mentions in the chat input, with cached suggestions, configurable excludes, and inline highlighting of mentioned paths.
 - Auto-loaded `CLAUDE.md` / `AGENTS.md` instructions from the workspace, including per-folder rules surfaced when the agent touches that subtree.
@@ -27,7 +28,7 @@ The fork tracks the upstream `@mariozechner/pi-coding-agent` SDK as a regular np
 ## Features
 
 ### Editor-Tab Chat Panels with Launcher Sidebar
-Each chat opens as its own editor-area webview panel — splittable, draggable into another editor group, movable into a separate window, restored across `Reload Window`. The activity-bar sidebar acts as a **launcher**: it lists currently open chats with live indicators (streaming spinner, unread dot), shows a history of previous sessions, and exposes one-click *New chat* and *Settings* buttons. Every chat panel also carries its own *New chat* / *History* toolbar.
+Each chat opens as its own editor-area webview panel — splittable, draggable into another editor group, movable into a separate window, restored across `Reload Window`. The activity-bar sidebar acts as a **launcher**: it exposes one-click *New chat* and *Settings* buttons plus collapsible history for previous sessions that are not currently open. Active chats live in the normal editor tab strip. Every chat panel also carries its own *New chat* / *History* toolbar.
 
 ### Multi-Tab Sessions
 Run multiple independent agent sessions in parallel — each chat panel has its own conversation history, file change tracking, and checkpoint state. Nothing is shared between tabs.
@@ -73,6 +74,9 @@ While the agent is streaming, you can **queue** follow-up messages that will be 
 
 ### Slash Commands & Skills
 Type `/` in the input to trigger a slash-command menu that surfaces available Pi skills. Select a skill to insert it into your prompt. Skills are loaded from `~/.pi/agent/skills/` and `.pi/skills/` in your workspace.
+
+### Prompt Cache Retention
+A `cache: …` chip in the chat footer controls prompt cache retention for future requests. Choose `short`, `long`, or `auto`; in `auto`, Pi Code uses provider-aware heuristics. OpenAI-style providers and other free-write cache backends prefer `long`, while Anthropic-style providers switch to `long` only after a meaningful idle gap or a large cached prefix. Providers that do not expose cache controls show the chip faded as informational.
 
 ### Context Usage
 Token usage and context window utilization are displayed in both the chat footer and the status bar tooltip.
@@ -129,15 +133,7 @@ Other supported API-key providers include Azure OpenAI, Google Vertex, Amazon Be
 
 **Option C — Subscription login:**
 
-If you have an Anthropic Claude Pro/Max, OpenAI ChatGPT Plus/Pro, GitHub Copilot, Google Gemini CLI, or Google Antigravity subscription, you can authenticate via Pi's OAuth flow. Install Pi globally and run the login command once:
-
-```bash
-npm install -g @mariozechner/pi-coding-agent
-pi
-/login   # select your provider and complete the browser flow
-```
-
-The token is stored in `~/.pi/agent/` and the extension will pick it up automatically.
+If you have an Anthropic Claude Pro/Max, OpenAI ChatGPT Plus/Pro/Codex, GitHub Copilot, Google Gemini CLI, or Google Antigravity subscription, open the Pi Code settings page and use the OAuth sign-in button for your provider. The browser flow stores the token securely for the extension. If the local callback cannot be reached, the settings page also exposes a manual authorization-code paste field.
 
 ## Installation
 
@@ -163,15 +159,16 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 ## Usage
 
 1. Click the **Pi Code** icon in the activity bar to open the launcher sidebar.
-2. Click **New chat** (or press `Ctrl+Shift+N`) to open a fresh chat as an editor tab. Existing chats can be reopened from the *Open chats* / *History* lists in the launcher.
+2. Click **New chat** (or press `Ctrl+Shift+N`) to open a fresh chat as an editor tab. Previous closed chats can be reopened from the launcher's *History* section.
 3. Drag the chat tab to split the editor, drop it into another editor group, or move it into a separate window — it's a regular editor tab.
 4. Select a model using the model picker at the bottom of the chat or via the command palette (`Pi Code: Select Model`).
-5. Type a prompt and press Enter (Shift+Enter for newlines). Paste, drop, or pick images via the paperclip button to attach them.
-6. Watch the agent stream its response, invoke tools, and make file changes.
-7. While streaming, press Enter to **queue** a follow-up or Ctrl+Enter to **steer** the current generation.
-8. Review diffs inline or click **Review** to open VS Code's diff editor.
-9. Use checkpoint buttons on your messages to roll back if needed.
-10. Type `/` to search and insert skills via the slash-command menu.
+5. Optionally click the `cache: …` chip next to the model picker to choose prompt cache retention.
+6. Type a prompt and press Enter (Shift+Enter for newlines). Paste, drop, or pick images via the paperclip button to attach them.
+7. Watch the agent stream its response, invoke tools, and make file changes.
+8. While streaming, the action button becomes **Stop**; press Enter to **queue** a follow-up or Ctrl+Enter to **steer** the current generation from the keyboard.
+9. Review diffs inline or click **Review** to open VS Code's diff editor.
+10. Use checkpoint buttons on your messages to roll back if needed.
+11. Type `/` to search and insert skills via the slash-command menu.
 
 ## Keyboard Shortcuts
 
@@ -229,9 +226,9 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 │  ┌────────────────────┐   ┌────────────────────────────────┐   │
 │  │   LauncherView     │   │  ChatPanel  ChatPanel  ...     │   │
 │  │ (WebviewView)      │   │ (WebviewPanel per chat)        │   │
-│  │ - open chats       │   │ - chat UI (main.ts + CSS)       │   │
+│  │ - new / settings   │   │ - chat UI (main.ts + CSS)       │   │
 │  │ - history          │   │ - tool approval cards           │   │
-│  │ - new / settings   │   │ - diffs, checkpoints, queue     │   │
+│  │                    │   │ - diffs, checkpoints, queue     │   │
 │  └─────────┬──────────┘   └──────────────┬──────────────────┘   │
 │            │                              │                      │
 │            └──────────────┬───────────────┘                      │
@@ -263,7 +260,7 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 
 - **Extension host** ([src/extension.ts](src/extension.ts)) registers providers, commands, and the `WebviewPanelSerializer` on activation.
 - **ChatController** ([src/controllers/chat-controller.ts](src/controllers/chat-controller.ts)) owns tab lifecycle (create/close/active), keeps the per-tab `PiSessionManager`, and routes typed messages between any view (launcher or chat panel) and the agent. It is the single source of truth for tab state — both the launcher and the editor panels are thin views on top of it.
-- **LauncherView** ([src/providers/launcher-view.ts](src/providers/launcher-view.ts)) is the `WebviewViewProvider` mounted in the activity bar. It renders the list of open chats and previous sessions and asks the controller to open or focus a panel.
+- **LauncherView** ([src/providers/launcher-view.ts](src/providers/launcher-view.ts)) is the `WebviewViewProvider` mounted in the activity bar. It renders quick actions and closed-session history, then asks the controller to open or focus a panel.
 - **ChatPanel** ([src/providers/chat-panel.ts](src/providers/chat-panel.ts)) is one editor-area `WebviewPanel` per chat, hosting the actual chat UI. **ChatPanelSerializer** ([src/providers/chat-panel-serializer.ts](src/providers/chat-panel-serializer.ts)) restores these panels across `Reload Window` by replaying the bound tab id.
 - **SettingsPanel** ([src/providers/settings-panel.ts](src/providers/settings-panel.ts)) opens a `WebviewPanel` in the editor area for the settings page, backed by VS Code's configuration API and `SecretStorage`. Hosts API-key entry and the OAuth subscription-login flow.
 - **Webview** ([src/webview/main.ts](src/webview/main.ts)) renders the chat UI, inline tool approval cards, slash-command menu, and image attachment previews, and communicates with the extension host via typed messages defined in [src/shared/protocol.ts](src/shared/protocol.ts).
@@ -279,7 +276,8 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 src/
 ├── extension.ts                      # Entry point, activation, command wiring
 ├── shared/
-│   └── protocol.ts                   # Typed message protocol (Client ↔ Server)
+│   ├── protocol.ts                   # Typed message protocol (Client ↔ Server)
+│   └── cache-info.ts                 # Provider cache-retention capability labels
 ├── controllers/
 │   └── chat-controller.ts            # Tab lifecycle, message routing (shared)
 ├── pi/

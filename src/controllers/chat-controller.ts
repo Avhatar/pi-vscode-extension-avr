@@ -4,7 +4,9 @@ import { PiSessionManager } from '../pi/session';
 import type {
     ClientMessage, ServerMessage, TabInfo,
     LauncherState, LauncherTabInfo, LauncherSessionInfo,
+    CacheMode, CacheEffective,
 } from '../shared/protocol';
+import { getCacheCapability } from '../shared/cache-info';
 import { DiffManager } from '../providers/diff';
 import { CheckpointManager } from '../providers/checkpoint';
 import { onAuthChanged } from '../pi/auth';
@@ -48,6 +50,12 @@ interface TabState {
     codexTurnBaseline?: CodexUsageSnapshot | null;
     /** Set when a provider error has already been surfaced to the UI for the current run, so the agent_end fallback doesn't duplicate it. */
     errorReportedThisRun: boolean;
+    /** Timestamp (ms) of the last `agent_end`. Used by `auto` cache heuristic. 0 means no turn finished yet. */
+    lastTurnEndAt: number;
+    /** Largest idle gap (ms) ever observed between successive turns in this tab's session. */
+    maxIdleGapMs: number;
+    /** Cache retention applied to the most recent request from this tab. */
+    cacheEffective: CacheEffective;
 }
 
 interface PersistedTabsState {
@@ -101,8 +109,25 @@ function makeTabState(
         isStreamingLocal: false,
         isCompacting: false,
         errorReportedThisRun: false,
+        lastTurnEndAt: 0,
+        maxIdleGapMs: 0,
+        cacheEffective: 'short',
     };
 }
+
+// Auto-mode heuristic thresholds for prompt cache retention.
+//
+// The Anthropic 5-min ephemeral cache (default, "short") survives back-to-back
+// turns indefinitely as long as each next request lands within ~5 min of the
+// previous one. The 1-hour "long" cache costs ~2× the input price on writes
+// (vs ~1.25× for short) but lets the prefix survive idle gaps up to an hour.
+//
+// We pick "long" speculatively when we expect the next idle gap to exceed
+// short's TTL — either because we've already seen a long pause in this
+// session, or because the cached prefix is large enough that losing it would
+// be expensive even on a single re-write.
+const AUTO_IDLE_GAP_THRESHOLD_MS = 2 * 60 * 1000;
+const AUTO_LARGE_CONTEXT_TOKENS = 20_000;
 
 function safeSerialize(obj: any): any {
     try {
@@ -162,6 +187,8 @@ export class ChatController implements vscode.Disposable {
     private _outputChannel: vscode.OutputChannel;
     private _context: vscode.ExtensionContext;
 
+    private _cacheMode: CacheMode = 'auto';
+
     private _tabs = new Map<string, TabState>();
     private _activeTabId = '';
     private _tabSubscriptions = new Map<string, (() => void)[]>();
@@ -194,6 +221,10 @@ export class ChatController implements vscode.Disposable {
     ) {
         this._context = context;
         this._outputChannel = outputChannel;
+        const storedMode = context.globalState.get<CacheMode>('pi-code.cacheMode');
+        if (storedMode === 'short' || storedMode === 'long' || storedMode === 'auto') {
+            this._cacheMode = storedMode;
+        }
         this._fileMentions = new WorkspaceFileMentions(outputChannel);
         this._fileMentions.warmup();
 
@@ -464,6 +495,67 @@ export class ChatController implements vscode.Disposable {
         this._postForTab(this._activeTabId, { type: 'models', models, current, thinkingLevel });
     }
 
+    // ── Prompt cache retention ──
+    //
+    // Pi resolves cache retention via `process.env.PI_CACHE_RETENTION` on every
+    // provider call (`pi-ai/dist/providers/anthropic.js: resolveCacheRetention`),
+    // so we set the env var right before any LLM-triggering operation. This is
+    // the only injection point exposed by the SDK without forking it.
+
+    /**
+     * Pure read of the cache mode that would apply right now.
+     *
+     * In `auto`, the decision is provider-aware:
+     *
+     * - For backends where cache writes are free (OpenAI, DeepSeek, Z.AI, …),
+     *   `long` strictly dominates `short` cost-wise, so we always pick `long`.
+     * - For backends with a real write surcharge (Anthropic / Bedrock-Claude /
+     *   kimi-coding), we only pay the higher write cost when the session has
+     *   either shown a real idle pause or accumulated a large cached prefix
+     *   that would be expensive to re-write after a 5-min expiry.
+     *
+     * The idle gap considered includes the time accumulating since the last
+     * turn ended (so the chip flips to "long" while the user is still
+     * composing the next prompt after a break, not only after they send it).
+     */
+    private _computeEffectiveCache(tab: TabState): CacheEffective {
+        if (this._cacheMode === 'short' || this._cacheMode === 'long') {
+            return this._cacheMode;
+        }
+        const model = tab.session.getCurrentModel();
+        const cap = getCacheCapability(model?.provider, model?.id);
+        if (cap.writeFree) {
+            return 'long';
+        }
+        const pendingIdleGap = tab.lastTurnEndAt > 0 ? Date.now() - tab.lastTurnEndAt : 0;
+        const observedMaxGap = Math.max(tab.maxIdleGapMs, pendingIdleGap);
+        const tokens = tab.session.serializeState().contextUsage?.tokens ?? 0;
+        if (observedMaxGap >= AUTO_IDLE_GAP_THRESHOLD_MS) return 'long';
+        if (tokens >= AUTO_LARGE_CONTEXT_TOKENS) return 'long';
+        return 'short';
+    }
+
+    private _prepareCacheForRequest(tab: TabState): void {
+        // Commit the pending idle gap into the persistent max only at the
+        // moment a request actually goes out — that's when the gap stops
+        // being "still idle, might keep growing" and becomes a realized
+        // observation we want to remember for future decisions.
+        if (tab.lastTurnEndAt > 0) {
+            const idleGap = Date.now() - tab.lastTurnEndAt;
+            if (idleGap > tab.maxIdleGapMs) tab.maxIdleGapMs = idleGap;
+        }
+        const effective = this._computeEffectiveCache(tab);
+        tab.cacheEffective = effective;
+        if (effective === 'long') {
+            process.env.PI_CACHE_RETENTION = 'long';
+        } else {
+            // Pi's resolver only flips to "long" on exact match; anything else
+            // (including unset) means "short". Setting an empty string keeps
+            // intent visible vs. delete and avoids subtle race with reads.
+            process.env.PI_CACHE_RETENTION = '';
+        }
+    }
+
     private _subscribeTab(tab: TabState): void {
         const unsubs: (() => void)[] = [];
 
@@ -591,6 +683,7 @@ export class ChatController implements vscode.Disposable {
             tab.streamingThinkingDuration = 0;
             tab.agentStartTime = 0;
             tab.isStreamingLocal = false;
+            tab.lastTurnEndAt = Date.now();
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
             } else {
@@ -603,6 +696,7 @@ export class ChatController implements vscode.Disposable {
                 const text = tab.queuedMessages.shift()!;
                 const compactInstructions = parseCompactCommand(text);
                 if (compactInstructions !== null) {
+                    this._prepareCacheForRequest(tab);
                     try {
                         await tab.session.compact(compactInstructions);
                     } catch {
@@ -619,6 +713,7 @@ export class ChatController implements vscode.Disposable {
                     const turnIdx = tab.turnCounter;
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
+                    this._prepareCacheForRequest(tab);
                     tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(text));
                 }
             }
@@ -737,6 +832,11 @@ export class ChatController implements vscode.Disposable {
         if (tab.queuedMessages.length > 0) {
             state.queuedMessages = tab.queuedMessages;
         }
+        state.cacheMode = this._cacheMode;
+        // Recompute on every sync so `auto` reflects the latest idle gap and
+        // context size without waiting for the next prompt to update the chip.
+        state.cacheEffective = this._computeEffectiveCache(tab);
+        tab.cacheEffective = state.cacheEffective;
         let assistantOrdinal = 0;
         for (let i = 0; i < state.messages.length; i++) {
             if (state.messages[i].role === 'assistant') {
@@ -779,6 +879,7 @@ export class ChatController implements vscode.Disposable {
                 case 'prompt': {
                     const compactInstructions = parseCompactCommand(msg.text);
                     if (compactInstructions !== null) {
+                        this._prepareCacheForRequest(tab);
                         try {
                             await tab.session.compact(compactInstructions);
                         } catch {
@@ -796,10 +897,12 @@ export class ChatController implements vscode.Disposable {
                     const turnIdx = tab.turnCounter;
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
+                    this._prepareCacheForRequest(tab);
                     await tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
                     break;
                 }
                 case 'steer':
+                    this._prepareCacheForRequest(tab);
                     await tab.session.steer(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
                     break;
                 case 'queueMessage':
@@ -823,8 +926,24 @@ export class ChatController implements vscode.Disposable {
                     this.sendStateSync(tab.id);
                     break;
                 case 'followUp':
+                    this._prepareCacheForRequest(tab);
                     await tab.session.followUp(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
                     break;
+                case 'setCacheMode': {
+                    const next = msg.mode;
+                    if (next !== 'short' && next !== 'long' && next !== 'auto') break;
+                    this._cacheMode = next;
+                    await this._context.globalState.update('pi-code.cacheMode', next);
+                    // Re-evaluate effective for every tab so the UI reflects the
+                    // change immediately, not only after the next prompt.
+                    for (const t of this._tabs.values()) {
+                        t.cacheEffective = this._computeEffectiveCache(t);
+                    }
+                    for (const id of this._tabs.keys()) {
+                        this.sendStateSync(id);
+                    }
+                    break;
+                }
                 case 'abort':
                     await tab.session.abort();
                     break;
@@ -860,6 +979,8 @@ export class ChatController implements vscode.Disposable {
                     tab.isCompacting = false;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
+                    tab.lastTurnEndAt = 0;
+                    tab.maxIdleGapMs = 0;
                     this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
                     this.sendStateSync(tab.id);
                     break;
@@ -879,6 +1000,8 @@ export class ChatController implements vscode.Disposable {
                     tab.isCompacting = false;
                     tab.messageMeta.clear();
                     tab.queuedMessages = [];
+                    tab.lastTurnEndAt = 0;
+                    tab.maxIdleGapMs = 0;
                     tab.name = 'New Agent'; // reset so _updateTabName re-derives from first message
                     this._updateTabName(tab);
                     this._persistTabs();
