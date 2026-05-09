@@ -156,6 +156,15 @@ export interface ImageAttachment {
     height?: number;
 }
 
+export interface FileAttachment {
+    type: 'file';
+    data: string;
+    mimeType: string;
+    name: string;
+    size: number;
+    binary?: boolean;
+}
+
 export interface SkillInfo {
     name: string;
     description: string;
@@ -180,9 +189,9 @@ export interface SessionInfo {
 
 // Webview -> Extension messages
 export type ClientMessage =
-    | { type: 'prompt'; text: string; images?: ImageAttachment[] }
-    | { type: 'steer'; text: string; images?: ImageAttachment[] }
-    | { type: 'followUp'; text: string; images?: ImageAttachment[] }
+    | { type: 'prompt'; text: string; images?: ImageAttachment[]; files?: FileAttachment[] }
+    | { type: 'steer'; text: string; images?: ImageAttachment[]; files?: FileAttachment[] }
+    | { type: 'followUp'; text: string; images?: ImageAttachment[]; files?: FileAttachment[] }
     | { type: 'abort' }
     | { type: 'getModels' }
     | { type: 'setModel'; provider: string; modelId: string }

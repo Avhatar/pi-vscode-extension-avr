@@ -6,3 +6,6 @@ node_modules/
 # Local junction/symlink to .pi/skills — recreated per-machine
 .claude/skills
 
+# Windows NUL device artifact from build pipeline
+nul
+

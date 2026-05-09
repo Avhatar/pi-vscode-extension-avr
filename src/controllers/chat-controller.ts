@@ -898,12 +898,12 @@ export class ChatController implements vscode.Disposable {
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
                     this._prepareCacheForRequest(tab);
-                    await tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
+                    await tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
                     break;
                 }
                 case 'steer':
                     this._prepareCacheForRequest(tab);
-                    await tab.session.steer(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
+                    await tab.session.steer(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
                     break;
                 case 'queueMessage':
                     tab.queuedMessages.push(msg.text);
@@ -927,7 +927,7 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'followUp':
                     this._prepareCacheForRequest(tab);
-                    await tab.session.followUp(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images);
+                    await tab.session.followUp(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
                     break;
                 case 'setCacheMode': {
                     const next = msg.mode;

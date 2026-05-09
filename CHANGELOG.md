@@ -7,6 +7,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-05-09
+
+### Fixed
+- Binary file entries in chat messages now display correctly with the `filebinary.png` icon instead of showing raw `[File: …] (binary file) [/File]` markup.
+
+## [0.12.0] - 2026-05-09
+
+### Changed
+- Attachment icons now use `media/` resources: `file.png` for text files, `filebinary.png` for binary files, `picture.png` for images. Binary files (PDF, ZIP, executables, etc.) are detected by extension and shown with a distinct icon.
+- Images in chat messages are no longer shown inline by default. Each image is now a clickable chip with `picture.png` and the filename; click to expand/collapse the inline preview.
+
+## [0.11.1] - 2026-05-09
+
+### Fixed
+- Attached text files no longer leak their raw content into the user message bubble. File blocks (`[File: name] … [/File]`) are now stripped from the displayed message and replaced with a compact file-name chip (📄 icon). The LLM still receives the full file content in context.
+
+## [0.11.0] - 2026-05-09
+
+### Added
+- The attach button now supports arbitrary text files in addition to images. You can attach source code, config files, logs, CSVs, and other text-based files (up to 512 KB each, max 5 files per message) via the same button or by drag-and-drop / paste. File contents are automatically included in the prompt as fenced code blocks.
+
 ## [0.10.1] - 2026-05-09
 
 ### Fixed

@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 
 declare function acquireVsCodeApi(): {
@@ -29,12 +29,31 @@ const panelTabId: string | undefined = appEl?.dataset.tabId || undefined;
 // Per-tab draft text and attachments (unsent input preserved across tab switches)
 const draftTexts = new Map<string, string>();
 const draftImages = new Map<string, ImageAttachment[]>();
+const draftFiles = new Map<string, FileAttachment[]>();
 let currentImageAttachments: ImageAttachment[] = [];
+let currentFileAttachments: FileAttachment[] = [];
 
 const SUPPORTED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const MAX_IMAGES_PER_MESSAGE = 5;
 const MAX_IMAGE_DIMENSION = 2000;
 const JPEG_RESIZE_QUALITY = 0.88;
+
+const SUPPORTED_TEXT_MIME_TYPES = new Set([
+    'text/plain', 'text/html', 'text/css', 'text/javascript', 'text/xml', 'text/markdown',
+    'text/csv', 'text/yaml', 'application/json', 'application/xml', 'application/javascript',
+    'application/typescript', 'application/x-yaml', 'application/x-sh',
+]);
+const SUPPORTED_TEXT_EXTENSIONS = new Set([
+    '.txt', '.md', '.markdown', '.json', '.xml', '.html', '.htm', '.css', '.js', '.jsx',
+    '.ts', '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp',
+    '.cs', '.swift', '.kt', '.kts', '.scala', '.sh', '.bash', '.zsh', '.fish',
+    '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env', '.csv', '.log',
+    '.sql', '.r', '.m', '.mm', '.pl', '.pm', '.php', '.vue', '.svelte', '.astro',
+    '.graphql', '.gql', '.proto', '.tf', '.tfvars', '.dockerfile', '.makefile',
+    '.cmake', '.gradle', '.properties', '.editorconfig', '.gitignore',
+]);
+const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512 KB max for text files
+const MAX_FILE_ATTACHMENTS = 5;
 
 type SlashMenuItem = {
     kind: 'builtin' | 'skill';
@@ -234,6 +253,7 @@ function applyStateSync(s: SerializedAgentState): void {
             draftTexts.set(prevTab, inputEl.value);
         }
         draftImages.set(prevTab, [...currentImageAttachments]);
+        draftFiles.set(prevTab, [...currentFileAttachments]);
     }
 
     state.messages = s.messages ?? [];
@@ -277,11 +297,15 @@ function applyStateSync(s: SerializedAgentState): void {
     for (const id of draftImages.keys()) {
         if (!liveTabIds.has(id)) draftImages.delete(id);
     }
+    for (const id of draftFiles.keys()) {
+        if (!liveTabIds.has(id)) draftFiles.delete(id);
+    }
 
     if (tabSwitched || !skeletonBuilt) {
         render();
         // Restore saved draft for the newly active tab
         currentImageAttachments = [...(draftImages.get(state.activeTabId) ?? [])];
+        currentFileAttachments = [...(draftFiles.get(state.activeTabId) ?? [])];
         const inputEl = document.getElementById('input') as HTMLTextAreaElement | null;
         if (inputEl) {
             const draft = draftTexts.get(state.activeTabId) ?? '';
@@ -485,7 +509,7 @@ function render(): void {
     fileMentionMenu.style.display = 'none';
     inputContainer.appendChild(fileMentionMenu);
     const area = el('div', 'input-area');
-    area.innerHTML = `<div id="attachment-preview" class="attachment-preview" style="display: none;"></div><div class="input-text-wrap"><div id="input-highlight" class="input-highlight" aria-hidden="true"></div><textarea id="input" placeholder="Ask Pi anything..." rows="1"></textarea></div><input id="image-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>`;
+    area.innerHTML = `<div id="attachment-preview" class="attachment-preview" style="display: none;"></div><div class="input-text-wrap"><div id="input-highlight" class="input-highlight" aria-hidden="true"></div><textarea id="input" placeholder="Ask Pi anything..." rows="1"></textarea></div><input id="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.json,.xml,.html,.htm,.css,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.hpp,.cs,.swift,.kt,.kts,.scala,.sh,.bash,.zsh,.fish,.yaml,.yml,.toml,.ini,.cfg,.conf,.env,.csv,.log,.sql,.r,.m,.mm,.pl,.pm,.php,.vue,.svelte,.astro,.graphql,.gql,.proto,.tf,.tfvars,.dockerfile,.makefile,.cmake,.gradle,.properties,.gitignore" multiple hidden>`;
     inputContainer.appendChild(area);
     const footer = el('div', 'input-footer');
     inputContainer.appendChild(footer);
@@ -799,8 +823,12 @@ function updateInputArea(): void {
     }
 
     const codexUsageHtml = renderCodexUsage();
-    const attachmentHtml = currentImageAttachments.length > 0
-        ? `<span class="footer-context" title="${currentImageAttachments.length} image attachment${currentImageAttachments.length === 1 ? '' : 's'}">${currentImageAttachments.length} image${currentImageAttachments.length === 1 ? '' : 's'}</span>`
+    const attachmentCount = currentImageAttachments.length + currentFileAttachments.length;
+    const attachmentLabels: string[] = [];
+    if (currentImageAttachments.length > 0) attachmentLabels.push(`${currentImageAttachments.length} image${currentImageAttachments.length === 1 ? '' : 's'}`);
+    if (currentFileAttachments.length > 0) attachmentLabels.push(`${currentFileAttachments.length} file${currentFileAttachments.length === 1 ? '' : 's'}`);
+    const attachmentHtml = attachmentCount > 0
+        ? `<span class="footer-context" title="${attachmentLabels.join(', ')}">${attachmentLabels.join(', ')}</span>`
         : '';
 
     const actionIcon = state.isStreaming ? 'stop.png' : 'chevrons.png';
@@ -810,7 +838,7 @@ function updateInputArea(): void {
     const cacheChipHtml = renderCacheChip();
 
     footer.innerHTML = `
-        <button id="btn-attach-image" class="attach-btn" title="Attach image"><img class="attach-icon-img" src="${iconsBaseUri}/folder.png" alt="Attach image"></button>
+        <button id="btn-attach-file" class="attach-btn" title="Attach file or image"><img class="attach-icon-img" src="${iconsBaseUri}/folder.png" alt="Attach file or image"></button>
         <span class="footer-model">${escHtml(modelName)}</span>
         ${cacheChipHtml}
         <span class="footer-spacer"></span>
@@ -830,9 +858,9 @@ function updateInputArea(): void {
         }
     });
 
-    const attachBtn = document.getElementById('btn-attach-image');
+    const attachBtn = document.getElementById('btn-attach-file');
     attachBtn?.addEventListener('click', () => {
-        const fileInput = document.getElementById('image-file-input') as HTMLInputElement | null;
+        const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
         fileInput?.click();
     });
 
@@ -1528,11 +1556,15 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
         }
         const rawText = extractText(msg);
         const images = extractImages(msg);
-        const { skillName, userText } = parseSkillFromUserMessage(rawText);
+        const { cleanText, fileNames } = stripFileBlocks(rawText);
+        const { skillName, userText } = parseSkillFromUserMessage(cleanText);
         if (skillName) {
             const badge = el('span', 'skill-badge');
             badge.textContent = `/skill:${skillName}`;
             wrapper.appendChild(badge);
+        }
+        if (fileNames.length > 0 || images.length > 0) {
+            wrapper.appendChild(buildMessageAttachmentChips(images, fileNames));
         }
         if (userText) {
             const content = el('div', 'message-content');
@@ -2699,7 +2731,7 @@ function updateStreamingUI(): void {
     container.innerHTML = '';
 }
 
-// ── Image attachments ──
+// ── File & image attachments ──
 
 function inferImageMimeType(file: File): string | null {
     if (SUPPORTED_IMAGE_MIME_TYPES.has(file.type)) return file.type;
@@ -2711,48 +2743,112 @@ function inferImageMimeType(file: File): string | null {
     return null;
 }
 
-function hasImageFiles(dataTransfer: DataTransfer | null): boolean {
-    if (!dataTransfer) return false;
-    return Array.from(dataTransfer.items ?? []).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
-        || Array.from(dataTransfer.files ?? []).some((file) => inferImageMimeType(file) !== null);
+function isImageFile(file: File): boolean {
+    return inferImageMimeType(file) !== null;
 }
 
-async function handleImagePaste(event: ClipboardEvent): Promise<void> {
+function isTextFile(file: File): boolean {
+    if (SUPPORTED_TEXT_MIME_TYPES.has(file.type)) return true;
+    const name = file.name.toLowerCase();
+    const ext = name.lastIndexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')) : '';
+    return SUPPORTED_TEXT_EXTENSIONS.has(ext);
+}
+
+const SUPPORTED_BINARY_EXTENSIONS = new Set([
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz',
+    '.exe', '.dll', '.so', '.dylib', '.bin', '.dat', '.db', '.sqlite',
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg',
+    '.mp3', '.mp4', '.avi', '.mov', '.mkv', '.wav', '.flac',
+    '.ttf', '.otf', '.woff', '.woff2', '.eot',
+    '.o', '.obj', '.class', '.pyc', '.wasm',
+]);
+
+function isBinaryByExtension(name: string): boolean {
+    const ext = name.lastIndexOf('.') >= 0 ? name.slice(name.lastIndexOf('.')).toLowerCase() : '';
+    return SUPPORTED_BINARY_EXTENSIONS.has(ext);
+}
+
+function classifyFile(file: File): 'image' | 'text' | 'binary' | 'unsupported' {
+    if (isImageFile(file)) return 'image';
+    if (isTextFile(file)) return 'text';
+    if (isBinaryByExtension(file.name)) return 'binary';
+    return 'unsupported';
+}
+
+function hasAttachableFiles(dataTransfer: DataTransfer | null): boolean {
+    if (!dataTransfer) return false;
+    return Array.from(dataTransfer.items ?? []).some((item) => item.kind === 'file')
+        || Array.from(dataTransfer.files ?? []).some((file) => classifyFile(file) !== 'unsupported');
+}
+
+async function handleAttachPaste(event: ClipboardEvent): Promise<void> {
     const items = Array.from(event.clipboardData?.items ?? []);
-    const imageFiles = items
-        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    const files = items
+        .filter((item) => item.kind === 'file')
         .map((item) => item.getAsFile())
         .filter((file): file is File => !!file);
-    if (imageFiles.length === 0) return;
-    event.preventDefault();
-    await addImageFiles(imageFiles);
-}
-
-async function handleImageDrop(event: DragEvent): Promise<void> {
-    const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => inferImageMimeType(file) !== null);
     if (files.length === 0) return;
     event.preventDefault();
-    await addImageFiles(files);
+    await addAttachedFiles(files);
 }
 
-async function addImageFiles(files: File[]): Promise<void> {
+async function handleAttachDrop(event: DragEvent): Promise<void> {
+    const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => classifyFile(file) !== 'unsupported');
+    if (files.length === 0) return;
+    event.preventDefault();
+    await addAttachedFiles(files);
+}
+
+async function addAttachedFiles(files: File[]): Promise<void> {
     for (const file of files) {
-        if (currentImageAttachments.length >= MAX_IMAGES_PER_MESSAGE) {
-            showError(`You can attach up to ${MAX_IMAGES_PER_MESSAGE} images per message.`);
-            break;
-        }
-        const mimeType = inferImageMimeType(file);
-        if (!mimeType) {
-            showError(`Unsupported image type: ${file.name || file.type || 'unknown file'}`);
+        const classification = classifyFile(file);
+        if (classification === 'unsupported') {
+            showError(`Unsupported file type: ${file.name || file.type || 'unknown file'}`);
             continue;
         }
-        try {
-            currentImageAttachments.push(await fileToImageAttachment(file, mimeType));
-        } catch (err: any) {
-            showError(`Could not attach image: ${err?.message ?? String(err)}`);
+        if (classification === 'binary') {
+            if (currentFileAttachments.length >= MAX_FILE_ATTACHMENTS) {
+                showError(`You can attach up to ${MAX_FILE_ATTACHMENTS} files per message.`);
+                break;
+            }
+            currentFileAttachments.push({
+                type: 'file' as const,
+                data: '',
+                mimeType: file.type || 'application/octet-stream',
+                name: file.name,
+                size: file.size,
+                binary: true,
+            });
+        } else if (classification === 'image') {
+            if (currentImageAttachments.length >= MAX_IMAGES_PER_MESSAGE) {
+                showError(`You can attach up to ${MAX_IMAGES_PER_MESSAGE} images per message.`);
+                break;
+            }
+            const mimeType = inferImageMimeType(file)!;
+            try {
+                currentImageAttachments.push(await fileToImageAttachment(file, mimeType));
+            } catch (err: any) {
+                showError(`Could not attach image: ${err?.message ?? String(err)}`);
+            }
+        } else {
+            if (currentFileAttachments.length >= MAX_FILE_ATTACHMENTS) {
+                showError(`You can attach up to ${MAX_FILE_ATTACHMENTS} files per message.`);
+                break;
+            }
+            if (file.size > MAX_FILE_SIZE_BYTES) {
+                showError(`File "${file.name}" is too large (${formatBytes(file.size)}). Maximum size is ${formatBytes(MAX_FILE_SIZE_BYTES)}.`);
+                continue;
+            }
+            try {
+                currentFileAttachments.push(await fileToFileAttachment(file));
+            } catch (err: any) {
+                showError(`Could not attach file: ${err?.message ?? String(err)}`);
+            }
         }
     }
     draftImages.set(state.activeTabId, [...currentImageAttachments]);
+    draftFiles.set(state.activeTabId, [...currentFileAttachments]);
     renderAttachmentPreview();
     updateInputArea();
 }
@@ -2769,6 +2865,19 @@ async function fileToImageAttachment(file: File, mimeType: string): Promise<Imag
         size: prepared.size,
         width: prepared.width,
         height: prepared.height,
+    };
+}
+
+async function fileToFileAttachment(file: File): Promise<FileAttachment> {
+    const dataUrl = await readFileAsDataUrl(file);
+    const comma = dataUrl.indexOf(',');
+    const data = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+    return {
+        type: 'file',
+        data,
+        mimeType: file.type || 'text/plain',
+        name: file.name,
+        size: file.size,
     };
 }
 
@@ -2847,38 +2956,67 @@ function getImageDimensions(src: string): Promise<{ width: number; height: numbe
 function renderAttachmentPreview(): void {
     const preview = document.getElementById('attachment-preview');
     if (!preview) return;
-    if (currentImageAttachments.length === 0) {
+    const totalAttachments = currentImageAttachments.length + currentFileAttachments.length;
+    if (totalAttachments === 0) {
         preview.innerHTML = '';
         preview.style.display = 'none';
         return;
     }
     preview.style.display = 'flex';
-    preview.innerHTML = currentImageAttachments.map((img, index) => {
+
+    // Image chips
+    const imageChips = currentImageAttachments.map((img, index) => {
         const label = img.name || `Image ${index + 1}`;
         const size = img.size ? ` · ${formatBytes(img.size)}` : '';
         const dims = img.width && img.height ? ` · ${img.width}×${img.height}` : '';
-        return `<div class="attachment-chip" title="${escAttr(label + size + dims)}">
+        return `<div class="attachment-chip attachment-chip--image" title="${escAttr(label + size + dims)}" data-kind="image" data-index="${index}">
             <img class="attachment-thumb" src="data:${escAttr(img.mimeType)};base64,${escAttr(img.data)}" alt="${escAttr(label)}">
             <span class="attachment-name">${escHtml(label)}</span>
-            <button class="attachment-remove" data-index="${index}" title="Remove image" aria-label="Remove image">×</button>
+            <button class="attachment-remove" title="Remove image" aria-label="Remove image">×</button>
         </div>`;
-    }).join('');
+    });
+
+    // File chips (text and binary files)
+    const fileChips = currentFileAttachments.map((file, index) => {
+        const label = file.name;
+        const size = ` · ${formatBytes(file.size)}`;
+        const isBinary = file.binary === true;
+        const iconSrc = isBinary ? `${iconsBaseUri}/filebinary.png` : `${iconsBaseUri}/file.png`;
+        const fileType = isBinary ? 'binary' : 'text';
+        return `<div class="attachment-chip attachment-chip--file" title="${escAttr(label + size)}" data-kind="file" data-index="${index}" data-filetype="${fileType}">
+            <img class="attachment-file-icon-img" src="${escAttr(iconSrc)}" alt="${fileType}">
+            <span class="attachment-name">${escHtml(label)}</span>
+            <button class="attachment-remove" title="Remove file" aria-label="Remove file">×</button>
+        </div>`;
+    });
+
+    preview.innerHTML = [...imageChips, ...fileChips].join('');
+
     preview.querySelectorAll('.attachment-remove').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const index = Number((btn as HTMLElement).dataset.index ?? '-1');
-            if (index >= 0 && index < currentImageAttachments.length) {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const chip = (btn as HTMLElement).closest('.attachment-chip') as HTMLElement | null;
+            if (!chip) return;
+            const kind = chip.dataset.kind;
+            const index = Number(chip.dataset.index ?? '-1');
+            if (kind === 'image' && index >= 0 && index < currentImageAttachments.length) {
                 currentImageAttachments.splice(index, 1);
                 draftImages.set(state.activeTabId, [...currentImageAttachments]);
-                renderAttachmentPreview();
-                updateInputArea();
+            } else if (kind === 'file' && index >= 0 && index < currentFileAttachments.length) {
+                currentFileAttachments.splice(index, 1);
+                draftFiles.set(state.activeTabId, [...currentFileAttachments]);
             }
+            renderAttachmentPreview();
+            updateInputArea();
         });
     });
 }
 
-function clearImageAttachments(): void {
+function clearAttachments(): void {
     currentImageAttachments = [];
+    currentFileAttachments = [];
     draftImages.delete(state.activeTabId);
+    draftFiles.delete(state.activeTabId);
     renderAttachmentPreview();
     updateInputArea();
 }
@@ -2984,8 +3122,8 @@ function bindStableEvents(): void {
             if (state.isStreaming) {
                 const text = input.value.trim();
                 if (isCompactSlashCommand(text)) {
-                    if (currentImageAttachments.length > 0) {
-                        showError('Slash commands cannot include image attachments. Remove attachments before running /compact.');
+                    if (currentImageAttachments.length > 0 || currentFileAttachments.length > 0) {
+                        showError('Slash commands cannot include attachments. Remove attachments before running /compact.');
                         return;
                     }
                     vscode.postMessage({ type: 'prompt', text });
@@ -2994,8 +3132,8 @@ function bindStableEvents(): void {
                     updateInputHighlights(input);
                     return;
                 }
-                if (currentImageAttachments.length > 0) {
-                    showError('Image attachments cannot be queued while the agent is streaming yet. Send them after the current response finishes.');
+                if (currentImageAttachments.length > 0 || currentFileAttachments.length > 0) {
+                    showError('Attachments cannot be queued while the agent is streaming. Send them after the current response finishes.');
                     return;
                 }
                 if (text) {
@@ -3034,19 +3172,19 @@ function bindStableEvents(): void {
     });
 
     input?.addEventListener('paste', (e) => {
-        void handleImagePaste(e);
+        void handleAttachPaste(e);
     });
 
-    const imageFileInput = document.getElementById('image-file-input') as HTMLInputElement | null;
-    imageFileInput?.addEventListener('change', () => {
-        const files = Array.from(imageFileInput.files ?? []);
-        imageFileInput.value = '';
-        void addImageFiles(files);
+    const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
+    fileInput?.addEventListener('change', () => {
+        const files = Array.from(fileInput.files ?? []);
+        fileInput.value = '';
+        void addAttachedFiles(files);
     });
 
     const inputContainer = document.querySelector('.input-container') as HTMLElement | null;
     inputContainer?.addEventListener('dragover', (e) => {
-        if (hasImageFiles(e.dataTransfer)) {
+        if (hasAttachableFiles(e.dataTransfer)) {
             e.preventDefault();
             inputContainer.classList.add('drag-over');
         }
@@ -3056,7 +3194,7 @@ function bindStableEvents(): void {
     });
     inputContainer?.addEventListener('drop', (e) => {
         inputContainer.classList.remove('drag-over');
-        void handleImageDrop(e);
+        void handleAttachDrop(e);
     });
 }
 
@@ -3177,24 +3315,38 @@ function sendMessage(): void {
     if (!input) return;
     const typedText = input.value.trim();
     const images = currentImageAttachments.length > 0 ? [...currentImageAttachments] : undefined;
-    if (!typedText && !images?.length) return;
-    if (isCompactSlashCommand(typedText) && images?.length) {
-        showError('Slash commands cannot include image attachments. Remove attachments before running /compact.');
+    const files = currentFileAttachments.length > 0 ? [...currentFileAttachments] : undefined;
+    if (!typedText && !images?.length && !files?.length) return;
+    if (isCompactSlashCommand(typedText) && (images?.length || files?.length)) {
+        showError('Slash commands cannot include attachments. Remove attachments before running /compact.');
         return;
     }
     if (images?.length && !currentModelSupportsImages()) {
-        showError('The current model does not support images. Select an image-capable model before sending attachments.');
+        showError('The current model does not support images. Select an image-capable model before sending image attachments.');
         return;
     }
-    const text = typedText || (images && images.length > 1 ? 'Please inspect the attached images.' : 'Please inspect the attached image.');
+    let text: string;
+    if (typedText) {
+        text = typedText;
+    } else if (images?.length && files?.length) {
+        text = 'Please inspect the attached images and files.';
+    } else if (images && images.length > 1) {
+        text = 'Please inspect the attached images.';
+    } else if (images) {
+        text = 'Please inspect the attached image.';
+    } else if (files && files.length > 1) {
+        text = `Please inspect the attached files: ${files.map(f => f.name).join(', ')}.`;
+    } else {
+        text = `Please inspect the attached file: ${files![0].name}.`;
+    }
     input.value = '';
     input.style.height = 'auto';
     updateInputHighlights(input);
     draftTexts.delete(state.activeTabId);
-    clearImageAttachments();
+    clearAttachments();
     userHasScrolled = false;
     updateScrollButton();
-    vscode.postMessage({ type: 'prompt', text, images });
+    vscode.postMessage({ type: 'prompt', text, images, files });
 }
 
 function bindCopyButtons(): void {
@@ -3658,6 +3810,26 @@ function extractText(msg: any): string {
     return msg.text ?? '';
 }
 
+/** Pattern for file blocks inserted by _augmentTextWithFiles.
+ *  Binary files: [File: name] (binary file)\n[/File]\n
+ *  Text files:   [File: name]\ncontent\n[/File]\n */
+const FILE_BLOCK_RE = /\[File:\s*(.+?)\]\s*(?:\(binary file\))?[\s\S]*?\[\/File\]\s*\n?/g;
+
+interface StrippedFileInfo {
+    cleanText: string;
+    fileNames: string[];
+}
+
+/** Remove [File: name]...[/File] blocks from the text and extract file names. */
+function stripFileBlocks(text: string): StrippedFileInfo {
+    const fileNames: string[] = [];
+    const cleanText = text.replace(FILE_BLOCK_RE, (_, name: string) => {
+        fileNames.push(name.trim());
+        return '';
+    });
+    return { cleanText, fileNames };
+}
+
 function extractImages(msg: any): ImageAttachment[] {
     if (!Array.isArray(msg.content)) return [];
     return msg.content
@@ -3673,6 +3845,54 @@ function extractImages(msg: any): ImageAttachment[] {
         }));
 }
 
+function buildMessageAttachmentChips(images: ImageAttachment[], fileNames: string[]): HTMLElement {
+    const container = el('div', 'message-attachments');
+
+    // File chips
+    for (const name of fileNames) {
+        const isBinary = isBinaryByExtension(name);
+        const iconSrc = isBinary ? `${iconsBaseUri}/filebinary.png` : `${iconsBaseUri}/file.png`;
+        const label = isBinary ? 'Binary file' : 'Text file';
+        const chip = el('span', 'message-attachment-chip');
+        chip.innerHTML = `<img class="message-attachment-icon" src="${escAttr(iconSrc)}" alt="${label}"><span class="message-attachment-name">${escHtml(name)}</span>`;
+        chip.title = `${label}: ${name}`;
+        container.appendChild(chip);
+    }
+
+    // Image chips (clickable to toggle preview)
+    for (const img of images) {
+        const label = img.name || 'Image';
+        const src = `data:${img.mimeType};base64,${img.data}`;
+        const chip = el('span', 'message-attachment-chip message-attachment-chip--image');
+        chip.innerHTML = `<img class="message-attachment-icon" src="${iconsBaseUri}/picture.png" alt="Image"><span class="message-attachment-name">${escHtml(label)}</span>`;
+        chip.title = `Click to preview: ${label}`;
+
+        // Hidden preview
+        const preview = el('div', 'message-image-preview');
+        preview.style.display = 'none';
+        const imgEl = document.createElement('img');
+        imgEl.className = 'message-image';
+        imgEl.src = src;
+        imgEl.alt = label;
+        preview.appendChild(imgEl);
+
+        chip.addEventListener('click', () => {
+            if (preview.style.display === 'none') {
+                preview.style.display = 'block';
+                chip.classList.add('message-attachment-chip--expanded');
+            } else {
+                preview.style.display = 'none';
+                chip.classList.remove('message-attachment-chip--expanded');
+            }
+        });
+
+        container.appendChild(chip);
+        container.appendChild(preview);
+    }
+
+    return container;
+}
+
 function buildMessageImageGrid(images: ImageAttachment[]): HTMLElement {
     const grid = el('div', 'message-images');
     for (const img of images) {
@@ -3685,6 +3905,20 @@ function buildMessageImageGrid(images: ImageAttachment[]): HTMLElement {
         grid.appendChild(imageEl);
     }
     return grid;
+}
+
+function buildMessageFileChips(fileNames: string[]): HTMLElement {
+    const container = el('div', 'message-files');
+    for (const name of fileNames) {
+        const isBinary = isBinaryByExtension(name);
+        const iconSrc = isBinary ? `${iconsBaseUri}/filebinary.png` : `${iconsBaseUri}/file.png`;
+        const label = isBinary ? 'Binary file' : 'Text file';
+        const chip = el('span', 'message-file-chip');
+        chip.innerHTML = `<img class="message-file-icon" src="${escAttr(iconSrc)}" alt="${label}"><span class="message-file-name">${escHtml(name)}</span>`;
+        chip.title = `${label}: ${name}`;
+        container.appendChild(chip);
+    }
+    return container;
 }
 
 function formatTokenCount(n: number): string {

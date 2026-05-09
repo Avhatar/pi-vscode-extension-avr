@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as process from 'node:process';
 import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@mariozechner/pi-coding-agent';
-import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment } from '../shared/protocol';
+import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, disposeModelRegistry } from './models';
@@ -167,19 +167,37 @@ export class PiSessionManager {
         }
     }
 
-    async prompt(text: string, images?: ImageAttachment[]): Promise<void> {
+    async prompt(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
-        await this._session.prompt(text, images?.length ? { images } : undefined);
+        const augmentedText = this._augmentTextWithFiles(text, files);
+        await this._session.prompt(augmentedText, images?.length ? { images } : undefined);
     }
 
-    async steer(text: string, images?: ImageAttachment[]): Promise<void> {
+    async steer(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
-        await this._session.steer(text, images?.length ? images : undefined);
+        const augmentedText = this._augmentTextWithFiles(text, files);
+        await this._session.steer(augmentedText, images?.length ? images : undefined);
     }
 
-    async followUp(text: string, images?: ImageAttachment[]): Promise<void> {
+    async followUp(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
-        await this._session.followUp(text, images?.length ? images : undefined);
+        const augmentedText = this._augmentTextWithFiles(text, files);
+        await this._session.followUp(augmentedText, images?.length ? images : undefined);
+    }
+
+    /** Prefix the prompt text with file contents (decoded from base64). Binary files get a note instead. */
+    private _augmentTextWithFiles(text: string, files?: FileAttachment[]): string {
+        if (!files?.length) return text;
+        const parts: string[] = [];
+        for (const file of files) {
+            if (file.binary) {
+                parts.push(`[File: ${file.name}] (binary file)\n[/File]\n`);
+            } else {
+                const content = Buffer.from(file.data, 'base64').toString('utf-8');
+                parts.push(`[File: ${file.name}]\n${content}\n[/File]\n`);
+            }
+        }
+        return parts.join('') + text;
     }
 
     async compact(customInstructions?: string): Promise<void> {
