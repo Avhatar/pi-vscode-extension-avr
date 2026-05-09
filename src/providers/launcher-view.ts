@@ -134,6 +134,9 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
         const styleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'src', 'webview', 'styles', 'launcher.css')
         );
+        const iconsUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'icons')
+        );
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -147,7 +150,7 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
     <title>Pi Code</title>
 </head>
 <body>
-    <div id="launcher"></div>
+    <div id="launcher" data-icons-uri="${iconsUri}"></div>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

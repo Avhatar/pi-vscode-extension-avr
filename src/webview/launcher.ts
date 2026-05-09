@@ -10,6 +10,8 @@ declare function acquireVsCodeApi(): {
 };
 
 const vscode = acquireVsCodeApi();
+const appEl = document.getElementById('launcher');
+const iconsBaseUri = appEl?.dataset.iconsUri ?? '';
 
 let currentState: LauncherState = {
     tabs: [],
@@ -232,8 +234,7 @@ function renderTodoRow(task: TaskInfo): HTMLElement {
     const row = el('div', `todo-row todo-row-${task.status}`);
     row.title = task.description ? task.description : task.subject;
 
-    const glyph = el('span', 'todo-glyph', STATUS_GLYPH[task.status]);
-    row.appendChild(glyph);
+    row.appendChild(renderTodoIcon(task.status));
 
     const labelText =
         task.status === 'in_progress' && task.activeForm ? task.activeForm : task.subject;
@@ -246,6 +247,22 @@ function renderTodoRow(task: TaskInfo): HTMLElement {
     }
 
     return row;
+}
+
+function renderTodoIcon(status: TaskStatus): HTMLElement {
+    const glyph = el('span', 'todo-glyph');
+    glyph.title = status.replace('_', ' ');
+    if (!iconsBaseUri) {
+        glyph.textContent = STATUS_GLYPH[status];
+        return glyph;
+    }
+
+    const img = document.createElement('img');
+    img.className = 'todo-icon-img';
+    img.src = `${iconsBaseUri}/todo.png`;
+    img.alt = 'Todo';
+    glyph.appendChild(img);
+    return glyph;
 }
 
 function renderRecentSessions(): HTMLElement {

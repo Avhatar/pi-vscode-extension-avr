@@ -818,6 +818,76 @@ body[data-mode="panel"] .tab-strip,
     margin: 0 16px;
 }
 
+.todo-tool-result {
+    margin: 0 16px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.tool-body .todo-tool-result {
+    margin: 0 0 8px;
+}
+.todo-tool-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 6px 8px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    line-height: 1.35;
+}
+.todo-tool-row:first-child {
+    border-top: 0;
+}
+.todo-tool-icon {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.todo-tool-icon-img {
+    width: 16px;
+    height: 16px;
+    display: block;
+    filter: brightness(0) invert(0.8);
+    opacity: 0.85;
+}
+.todo-tool-id {
+    flex-shrink: 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+.todo-tool-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.todo-tool-row-in_progress .todo-tool-label {
+    font-style: italic;
+}
+.todo-tool-row-completed .todo-tool-label {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+.todo-tool-row-completed .todo-tool-icon-img {
+    opacity: 0.55;
+}
+.todo-tool-blocked {
+    flex-shrink: 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
 .tool-io-summary {
     list-style: none;
     cursor: pointer;

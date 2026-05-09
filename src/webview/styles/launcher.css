@@ -216,7 +216,7 @@ body {
 
 .todo-row {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 6px;
     padding: 3px 6px;
     border-radius: var(--row-radius);
@@ -233,14 +233,26 @@ body {
 
 .todo-glyph {
     flex-shrink: 0;
-    width: 1em;
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     text-align: center;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.95em;
 }
+.todo-icon-img {
+    width: 14px;
+    height: 14px;
+    display: block;
+    object-fit: contain;
+    opacity: 0.82;
+}
 .todo-row-pending     .todo-glyph { color: var(--vscode-descriptionForeground); }
 .todo-row-in_progress .todo-glyph { color: var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground)); }
 .todo-row-completed   .todo-glyph { color: var(--vscode-charts-green, var(--vscode-testing-iconPassed)); }
+.todo-row-completed   .todo-icon-img { opacity: 0.55; }
 
 .todo-label {
     flex: 1;

@@ -1996,6 +1996,11 @@ function getToolIcon(name: string): string {
         glob: 'magnifying-glass.png',
         grep: 'magnifying-glass.png',
         list: 'folder.png',
+        todo: 'todo.png',
+        web_search: 'web.png',
+        fetch_content: 'web.png',
+        get_search_content: 'web.png',
+        code_search: 'web.png',
     };
     const file = iconFiles[name.toLowerCase()] ?? 'bolt.png';
     return `<img class="tool-icon-img" src="${iconsBaseUri}/${file}" alt="${escHtml(name)}">`;
@@ -2016,6 +2021,16 @@ function getToolLabel(name: string, args: any): string {
             return args?.pattern ? `Glob ${truncate(args.pattern, 50)}` : 'Find files';
         case 'grep':
             return args?.pattern ? `Grep ${truncate(args.pattern, 50)}` : 'Search files';
+        case 'todo':
+            return 'Todo';
+        case 'web_search':
+            return args?.query ? `Search: ${truncate(args.query, 50)}` : 'Web search';
+        case 'fetch_content':
+            return args?.url ? `Fetch: ${truncate(args.url, 50)}` : 'Fetch content';
+        case 'get_search_content':
+            return 'Get search results';
+        case 'code_search':
+            return args?.query ? `Code search: ${truncate(args.query, 50)}` : 'Code search';
         default:
             return name;
     }
@@ -2165,6 +2180,106 @@ function buildToolIoCard(headerHtml: string, input: string, output: string, clas
     return details;
 }
 
+interface TodoToolRow {
+    id?: number;
+    status?: string;
+    subject: string;
+    blockedBy?: number[];
+    activeForm?: string;
+}
+
+function normalizeTodoStatus(status: unknown): string | undefined {
+    return typeof status === 'string' && /^(pending|in_progress|completed|deleted)$/.test(status)
+        ? status
+        : undefined;
+}
+
+function getTodoRowsFromDetails(source: any): TodoToolRow[] {
+    const details = source?.details;
+    if (!details || !Array.isArray(details.tasks)) return [];
+
+    const params = details.params ?? {};
+    let tasks: any[] = [];
+    if (details.action === 'list') {
+        tasks = [...details.tasks];
+        if (!params.includeDeleted) tasks = tasks.filter((t) => t.status !== 'deleted');
+        if (typeof params.status === 'string') tasks = tasks.filter((t) => t.status === params.status);
+    } else if (details.action === 'get' && typeof params.id === 'number') {
+        const task = details.tasks.find((t: any) => t.id === params.id);
+        if (task) tasks = [task];
+    }
+
+    return tasks.map((t) => ({
+        id: typeof t.id === 'number' ? t.id : undefined,
+        status: normalizeTodoStatus(t.status),
+        subject: String(t.subject ?? ''),
+        activeForm: typeof t.activeForm === 'string' ? t.activeForm : undefined,
+        blockedBy: Array.isArray(t.blockedBy) ? t.blockedBy.filter((id: any) => typeof id === 'number') : undefined,
+    })).filter((row) => row.subject.length > 0);
+}
+
+function parseTodoRowsFromText(text: string): TodoToolRow[] {
+    const rows: TodoToolRow[] = [];
+    for (const line of splitToolIoLines(text)) {
+        let match = line.match(/^\[(pending|in_progress|completed|deleted)\]\s+#(\d+)\s+(.+)$/);
+        if (match) {
+            rows.push(parseTodoRowTail(match[3], match[1], Number(match[2])));
+            continue;
+        }
+        match = line.match(/^#(\d+)\s+\[(pending|in_progress|completed|deleted)\]\s+(.+)$/);
+        if (match) {
+            rows.push(parseTodoRowTail(match[3], match[2], Number(match[1])));
+        }
+    }
+    return rows;
+}
+
+function parseTodoRowTail(tail: string, status: string, id: number): TodoToolRow {
+    const [subjectPart, blockedPart] = tail.split(' ⛓ ', 2);
+    const blockedBy = blockedPart
+        ? blockedPart.split(',').map((part) => Number(part.trim().replace(/^#/, ''))).filter(Number.isFinite)
+        : undefined;
+    return { id, status, subject: subjectPart.trim(), blockedBy };
+}
+
+function buildTodoToolResultElement(source: any, text: string): HTMLElement | null {
+    const rows = getTodoRowsFromDetails(source);
+    const fallbackRows = rows.length > 0 ? rows : parseTodoRowsFromText(text);
+    if (fallbackRows.length === 0) return null;
+
+    const list = el('div', 'todo-tool-result');
+    for (const row of fallbackRows) {
+        const statusClass = row.status ? ` todo-tool-row-${row.status}` : '';
+        const item = el('div', `todo-tool-row${statusClass}`);
+        const icon = el('span', 'todo-tool-icon');
+        icon.innerHTML = `<img class="todo-tool-icon-img" src="${iconsBaseUri}/todo.png" alt="Todo">`;
+        item.appendChild(icon);
+        if (row.id !== undefined) item.appendChild(el('span', 'todo-tool-id', `#${row.id}`));
+        const label = el('span', 'todo-tool-label', row.status === 'in_progress' && row.activeForm ? row.activeForm : row.subject);
+        item.appendChild(label);
+        if (row.blockedBy?.length) {
+            item.appendChild(el('span', 'todo-tool-blocked', `⛓ ${row.blockedBy.map((id) => `#${id}`).join(',')}`));
+        }
+        list.appendChild(item);
+    }
+    return list;
+}
+
+function appendToolResultContent(container: HTMLElement, toolName: string, source: any, text: string): void {
+    const todoResult = toolName.toLowerCase() === 'todo'
+        ? buildTodoToolResultElement(source, text)
+        : null;
+    if (todoResult) {
+        container.appendChild(todoResult);
+        return;
+    }
+
+    const result = el('pre', 'tool-result');
+    result.textContent = text || '(no output)';
+    if (!text) result.classList.add('empty');
+    container.appendChild(result);
+}
+
 function buildToolCard(tc: any): HTMLElement {
     const card = el('div', 'tool-card');
     const name = tc.name ?? tc.toolName ?? tc.function?.name ?? 'unknown';
@@ -2183,9 +2298,7 @@ function buildToolCard(tc: any): HTMLElement {
     if (tc._result !== undefined) {
         const text = extractToolResultText(tc._result);
         if (text) {
-            const result = el('pre', 'tool-result');
-            result.textContent = text;
-            card.appendChild(result);
+            appendToolResultContent(card, name, tc._result, text);
         }
     }
 
@@ -2263,10 +2376,7 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
             `;
 
             const body = el('div', 'tool-body');
-            const result = el('pre', 'tool-result');
-            result.textContent = resultContent || '(no output)';
-            if (!resultContent) result.classList.add('empty');
-            body.appendChild(result);
+            appendToolResultContent(body, toolName, msg, resultContent);
             details.appendChild(body);
             wrapper.appendChild(details);
         }
@@ -2445,10 +2555,7 @@ function renderToolEnd(event: any): void {
             details.querySelector('summary')?.appendChild(arrow);
 
             const body = el('div', 'tool-body');
-            const resultEl = el('pre', 'tool-result');
-            resultEl.textContent = text || '(no output)';
-            if (!text) resultEl.classList.add('empty');
-            body.appendChild(resultEl);
+            appendToolResultContent(body, toolName, event.result, text);
             details.appendChild(body);
         }
 

@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-05-09
+
+### Added
+- Web tools (`web_search`, `fetch_content`, `get_search_content`, `code_search`) now display the `web.png` icon and descriptive labels in chat.
+
+### Changed
+- ToDo entries in the sidebar and ToDo tool cards in chat now use the dedicated `todo.png` icon.
+
 ## [0.15.0] - 2026-05-09
 
 ### Added
