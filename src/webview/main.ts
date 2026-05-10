@@ -3988,6 +3988,15 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
             }
         }
 
+        const turnDurationMs = durationNumber(msg._turnDurationMs);
+        const totalTurnDurationMs = durationNumber(msg._totalTurnDurationMs);
+        if (turnDurationMs > 0) {
+            parts.push(`turn ${formatDuration(turnDurationMs)}`);
+        }
+        if (totalTurnDurationMs > 0) {
+            parts.push(`turns total ${formatDuration(totalTurnDurationMs)}`);
+        }
+
         const usage = msg.usage;
         if (usage) {
             parts.push(...formatFullUsageParts(usage));
@@ -4024,6 +4033,23 @@ function formatFullUsageParts(usage: any): string[] {
 
 function usageNumber(value: any, fallback = 0): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function durationNumber(value: any): number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function formatDuration(ms: number): string {
+    if (ms < 1000) return '<1s';
+    const totalSeconds = Math.max(1, Math.round(ms / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const parts: string[] = [];
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0 || hours > 0) parts.push(`${minutes}m`);
+    if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+    return parts.join(' ');
 }
 
 function formatCodexTurnParts(turn: any): string[] {

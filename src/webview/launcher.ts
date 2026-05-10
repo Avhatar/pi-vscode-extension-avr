@@ -10,8 +10,6 @@ declare function acquireVsCodeApi(): {
 };
 
 const vscode = acquireVsCodeApi();
-const appEl = document.getElementById('launcher');
-const iconsBaseUri = appEl?.dataset.iconsUri ?? '';
 
 let currentState: LauncherState = {
     tabs: [],
@@ -110,10 +108,10 @@ function setHistoryCollapsed(collapsed: boolean): void {
 // further gate visibility per-tab.
 
 const STATUS_GLYPH: Record<TaskStatus, string> = {
-    pending: '○',
-    in_progress: '◐',
+    pending: '•',
+    in_progress: '•',
     completed: '✓',
-    deleted: '⊘',
+    deleted: '•',
 };
 
 function setTodoCollapsed(collapsed: boolean): void {
@@ -250,18 +248,8 @@ function renderTodoRow(task: TaskInfo): HTMLElement {
 }
 
 function renderTodoIcon(status: TaskStatus): HTMLElement {
-    const glyph = el('span', 'todo-glyph');
+    const glyph = el('span', 'todo-glyph', STATUS_GLYPH[status]);
     glyph.title = status.replace('_', ' ');
-    if (!iconsBaseUri) {
-        glyph.textContent = STATUS_GLYPH[status];
-        return glyph;
-    }
-
-    const img = document.createElement('img');
-    img.className = 'todo-icon-img';
-    img.src = `${iconsBaseUri}/todo.png`;
-    img.alt = 'Todo';
-    glyph.appendChild(img);
     return glyph;
 }
 

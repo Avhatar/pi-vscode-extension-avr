@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Assistant message footers now show each turn's elapsed time and the cumulative active turn time for the chat alongside token usage, excluding idle gaps between turns.
+
+### Changed
+- ToDo items in the left sidebar now show incomplete tasks as dots and completed tasks as checkmarks.
+
 ## [0.17.6] - 2026-05-10
 
 ### Removed

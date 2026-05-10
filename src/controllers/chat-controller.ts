@@ -18,6 +18,8 @@ interface MessageMeta {
     thinkingDurationSec: number;
     messageEndTime: number;
     codexTurn?: CodexTurnUsage;
+    turnDurationMs?: number;
+    totalTurnDurationMs?: number;
 }
 
 interface PendingApproval {
@@ -38,6 +40,8 @@ interface TabState {
     thinkingStartTime: number;
     streamingThinkingDuration: number;
     agentStartTime: number;
+    /** Sum of completed agent turn durations in this tab, excluding idle gaps between turns. */
+    totalTurnDurationMs: number;
     messageMeta: Map<number, MessageMeta>;
     hasNotification: boolean;
     pendingApprovals: Map<string, PendingApproval>;
@@ -102,6 +106,7 @@ function makeTabState(
         thinkingStartTime: 0,
         streamingThinkingDuration: 0,
         agentStartTime: 0,
+        totalTurnDurationMs: 0,
         messageMeta: new Map(),
         hasNotification: false,
         pendingApprovals: new Map(),
@@ -812,10 +817,10 @@ export class ChatController implements vscode.Disposable {
                 }
             }
             if (lastOrdinal >= 0) {
-                tab.messageMeta.set(lastOrdinal, {
-                    thinkingDurationSec: tab.streamingThinkingDuration,
-                    messageEndTime: Date.now(),
-                });
+                const meta = tab.messageMeta.get(lastOrdinal) ?? { thinkingDurationSec: 0, messageEndTime: 0 };
+                meta.thinkingDurationSec = tab.streamingThinkingDuration;
+                meta.messageEndTime = Date.now();
+                tab.messageMeta.set(lastOrdinal, meta);
             }
             tab.streamingThinkingDuration = 0;
         }
@@ -839,17 +844,29 @@ export class ChatController implements vscode.Disposable {
                     }
                 }
             }
+            const turnEndAt = Date.now();
+            const turnDurationMs = tab.agentStartTime > 0
+                ? Math.max(0, turnEndAt - tab.agentStartTime)
+                : 0;
+            if (turnDurationMs > 0) {
+                tab.totalTurnDurationMs += turnDurationMs;
+            }
+
             const baseline = tab.codexTurnBaseline;
             tab.codexTurnBaseline = undefined;
             const after = getCodexUsageStore().getCurrent();
             const turn = computeCodexTurnUsage(baseline ?? null, after);
-            if (turn) {
-                const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
-                if (lastOrdinal >= 0) {
-                    const meta = tab.messageMeta.get(lastOrdinal) ?? { thinkingDurationSec: 0, messageEndTime: 0 };
+            const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
+            if (lastOrdinal >= 0 && (turn || turnDurationMs > 0)) {
+                const meta = tab.messageMeta.get(lastOrdinal) ?? { thinkingDurationSec: 0, messageEndTime: 0 };
+                if (turn) {
                     meta.codexTurn = turn;
-                    tab.messageMeta.set(lastOrdinal, meta);
                 }
+                if (turnDurationMs > 0) {
+                    meta.turnDurationMs = turnDurationMs;
+                    meta.totalTurnDurationMs = tab.totalTurnDurationMs;
+                }
+                tab.messageMeta.set(lastOrdinal, meta);
             }
             tab.streamingText = '';
             tab.streamingThinking = '';
@@ -858,7 +875,7 @@ export class ChatController implements vscode.Disposable {
             tab.streamingThinkingDuration = 0;
             tab.agentStartTime = 0;
             tab.isStreamingLocal = false;
-            tab.lastTurnEndAt = Date.now();
+            tab.lastTurnEndAt = turnEndAt;
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
             } else {
@@ -1019,6 +1036,12 @@ export class ChatController implements vscode.Disposable {
                 if (meta) {
                     state.messages[i]._thinkingDurationSec = meta.thinkingDurationSec;
                     state.messages[i]._messageEndTime = meta.messageEndTime;
+                    if (meta.turnDurationMs !== undefined) {
+                        state.messages[i]._turnDurationMs = meta.turnDurationMs;
+                    }
+                    if (meta.totalTurnDurationMs !== undefined) {
+                        state.messages[i]._totalTurnDurationMs = meta.totalTurnDurationMs;
+                    }
                     if (meta.codexTurn) {
                         state.messages[i]._codexTurnUsage = meta.codexTurn;
                     }
@@ -1171,6 +1194,7 @@ export class ChatController implements vscode.Disposable {
                     tab.thinkingStartTime = 0;
                     tab.streamingThinkingDuration = 0;
                     tab.agentStartTime = 0;
+                    tab.totalTurnDurationMs = 0;
                     tab.isStreamingLocal = false;
                     tab.isCompacting = false;
                     tab.messageMeta.clear();
@@ -1193,6 +1217,7 @@ export class ChatController implements vscode.Disposable {
                     tab.thinkingStartTime = 0;
                     tab.streamingThinkingDuration = 0;
                     tab.agentStartTime = 0;
+                    tab.totalTurnDurationMs = 0;
                     tab.isStreamingLocal = false;
                     tab.isCompacting = false;
                     tab.messageMeta.clear();
