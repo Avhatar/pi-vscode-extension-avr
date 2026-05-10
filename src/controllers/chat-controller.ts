@@ -188,6 +188,8 @@ export class ChatController implements vscode.Disposable {
     private _context: vscode.ExtensionContext;
 
     private _cacheMode: CacheMode = 'auto';
+    private _favoriteModels: Set<string> = new Set();
+    private static readonly FAVORITES_KEY = 'pi-code.favoriteModels';
 
     private _tabs = new Map<string, TabState>();
     private _activeTabId = '';
@@ -231,6 +233,12 @@ export class ChatController implements vscode.Disposable {
         const storedMode = context.globalState.get<CacheMode>('pi-code.cacheMode');
         if (storedMode === 'short' || storedMode === 'long' || storedMode === 'auto') {
             this._cacheMode = storedMode;
+        }
+        const storedFavorites = context.globalState.get<string[]>(
+            ChatController.FAVORITES_KEY,
+        );
+        if (Array.isArray(storedFavorites)) {
+            this._favoriteModels = new Set(storedFavorites);
         }
         this._fileMentions = new WorkspaceFileMentions(outputChannel);
         this._fileMentions.warmup();
@@ -527,7 +535,13 @@ export class ChatController implements vscode.Disposable {
         const models = tab.session.getModels();
         const current = tab.session.getCurrentModel();
         const thinkingLevel = tab.session.getThinkingLevel();
-        this._postForTab(this._activeTabId, { type: 'models', models, current, thinkingLevel });
+        this._postBroadcast({
+            type: 'models',
+            models,
+            current,
+            thinkingLevel,
+            favorites: [...this._favoriteModels],
+        });
     }
 
     // ── Prompt cache retention ──
@@ -1061,13 +1075,33 @@ export class ChatController implements vscode.Disposable {
                     const models = tab.session.getModels();
                     const current = tab.session.getCurrentModel();
                     const thinkingLevel = tab.session.getThinkingLevel();
-                    this._postForTab(tab.id, { type: 'models', models, current, thinkingLevel });
+                    this._postForTab(tab.id, {
+                        type: 'models',
+                        models,
+                        current,
+                        thinkingLevel,
+                        favorites: [...this._favoriteModels],
+                    });
                     break;
                 }
                 case 'setModel':
                     await tab.session.setModel(msg.provider, msg.modelId);
                     this.sendStateSync(tab.id);
                     break;
+                case 'toggleFavorite': {
+                    const key = `${msg.provider}:${msg.modelId}`;
+                    if (this._favoriteModels.has(key)) {
+                        this._favoriteModels.delete(key);
+                    } else {
+                        this._favoriteModels.add(key);
+                    }
+                    await this._context.globalState.update(
+                        ChatController.FAVORITES_KEY,
+                        [...this._favoriteModels],
+                    );
+                    this._broadcastModels();
+                    break;
+                }
                 case 'setThinkingLevel':
                     tab.session.setThinkingLevel(msg.level);
                     this.sendStateSync(tab.id);

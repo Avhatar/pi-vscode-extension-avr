@@ -195,6 +195,7 @@ export type ClientMessage =
     | { type: 'abort' }
     | { type: 'getModels' }
     | { type: 'setModel'; provider: string; modelId: string }
+    | { type: 'toggleFavorite'; provider: string; modelId: string }
     | { type: 'setThinkingLevel'; level: string }
     | { type: 'newSession' }
     | { type: 'loadSession'; sessionPath: string }
@@ -320,7 +321,7 @@ export type ServerMessage =
     | { type: 'ready' }
     | { type: 'stateSync'; state: SerializedAgentState }
     | { type: 'agentEvent'; event: any }
-    | { type: 'models'; models: ModelInfo[]; current?: ModelInfo; thinkingLevel?: string }
+    | { type: 'models'; models: ModelInfo[]; current?: ModelInfo; thinkingLevel?: string; favorites?: string[] }
     | { type: 'modelChanged'; model: ModelInfo; thinkingLevel?: string }
     | { type: 'sessions'; sessions: SessionInfo[]; currentSessionId?: string }
     | { type: 'sessionChanged'; sessionId: string }

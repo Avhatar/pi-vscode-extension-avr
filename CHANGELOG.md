@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-05-10
+
+### Added
+- Favourite models: star icon next to each model in the model picker. Click to pin a model to the top "Favorites" section; click again to unpin. Favorites persist across VS Code restarts and are sorted alphabetically. The "Recent" section now shows only the last-used model and never duplicates a favorite.
+
 ## [0.15.1] - 2026-05-09
 
 ### Added

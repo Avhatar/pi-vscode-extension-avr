@@ -94,6 +94,7 @@ const state: {
     availableModels: any[];
     modelsLoaded: boolean;
     recentModels: { provider: string; id: string; name?: string; supportsImages?: boolean }[];
+    favoriteModels: Set<string>;
     tabs: TabInfo[];
     activeTabId: string;
     skills: SkillInfo[];
@@ -114,6 +115,7 @@ const state: {
     availableModels: [],
     modelsLoaded: false,
     recentModels: [],
+    favoriteModels: new Set(),
     fileChanges: [],
     rollbackPoint: null,
     tabs: [],
@@ -176,6 +178,7 @@ function handleMessage(msg: ServerMessage): void {
         case 'models':
             state.availableModels = msg.models ?? [];
             state.modelsLoaded = true;
+            state.favoriteModels = new Set(msg.favorites ?? []);
             if (msg.current) {
                 state.model = msg.current;
                 addToRecentModels(msg.current.provider, msg.current.id, msg.current.name, msg.current.supportsImages);
@@ -2685,8 +2688,8 @@ function addToRecentModels(provider: string, id: string, name?: string, supports
         m => !(m.id === id && m.provider === provider)
     );
     state.recentModels.unshift({ provider, id, name, supportsImages });
-    if (state.recentModels.length > 5) {
-        state.recentModels = state.recentModels.slice(0, 5);
+    if (state.recentModels.length > 1) {
+        state.recentModels = state.recentModels.slice(0, 1);
     }
 }
 
@@ -2697,9 +2700,13 @@ function buildModelItem(m: any): HTMLElement {
     item.dataset.provider = m.provider;
     item.dataset.modelId = m.id;
     item.dataset.name = (m.name ?? m.id).toLowerCase();
+    const favKey = `${m.provider}:${m.modelId ?? m.id}`;
+    const isFav = state.favoriteModels.has(favKey);
+    const starIcon = isFav ? 'starfill.png' : 'starline.png';
     item.innerHTML = `
         <span class="model-item-check">${isActive ? '&#10003;' : ''}</span>
         <span class="model-item-name">${escHtml(m.name ?? m.id)}</span>
+        <img class="model-item-star" src="${iconsBaseUri}/${starIcon}" alt="" data-fav-key="${escAttr(favKey)}">
     `;
     return item;
 }
@@ -2722,25 +2729,40 @@ function showModelPicker(): void {
 
     const list = el('div', 'model-list');
 
-    if (state.recentModels.length > 0) {
-        const recentHeader = el('div', 'model-section-header');
-        recentHeader.textContent = 'Recent';
-        list.appendChild(recentHeader);
+    // Favorites — alphabetically sorted, always at the top
+    const favModels = state.availableModels
+        .filter(m => state.favoriteModels.has(`${m.provider}:${m.id}`))
+        .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id));
+    if (favModels.length > 0) {
+        const favHeader = el('div', 'model-section-header');
+        favHeader.textContent = 'Favorites';
+        list.appendChild(favHeader);
+        for (const m of favModels) {
+            list.appendChild(buildModelItem(m));
+        }
+    }
 
-        for (const r of state.recentModels) {
+    // Recent — only 1 model, skip if already in favorites
+    if (state.recentModels.length > 0) {
+        const recentItem = state.recentModels[0];
+        const favKey = `${recentItem.provider}:${recentItem.id}`;
+        if (!state.favoriteModels.has(favKey)) {
             const full = state.availableModels.find(
-                m => m.id === r.id && m.provider === r.provider
+                m => m.id === recentItem.id && m.provider === recentItem.provider
             );
             if (full) {
+                const recentHeader = el('div', 'model-section-header');
+                recentHeader.textContent = 'Recent';
+                list.appendChild(recentHeader);
                 list.appendChild(buildModelItem(full));
             }
         }
-
-        const allHeader = el('div', 'model-section-header');
-        allHeader.textContent = 'All Models';
-        list.appendChild(allHeader);
     }
 
+    // All Models — always full list
+    const allHeader = el('div', 'model-section-header');
+    allHeader.textContent = 'All Models';
+    list.appendChild(allHeader);
     for (const m of state.availableModels) {
         list.appendChild(buildModelItem(m));
     }
@@ -2775,6 +2797,24 @@ function showModelPicker(): void {
     });
 
     list.addEventListener('click', (e) => {
+        // Star click — toggle favorite, don't select model
+        const star = (e.target as HTMLElement).closest('.model-item-star') as HTMLElement | null;
+        if (star) {
+            e.stopPropagation();
+            const favKey = star.dataset.favKey!;
+            const [provider, ...rest] = favKey.split(':');
+            const modelId = rest.join(':');
+            const isFav = state.favoriteModels.has(favKey);
+            if (isFav) {
+                state.favoriteModels.delete(favKey);
+            } else {
+                state.favoriteModels.add(favKey);
+            }
+            star.src = isFav ? `${iconsBaseUri}/starline.png` : `${iconsBaseUri}/starfill.png`;
+            vscode.postMessage({ type: 'toggleFavorite', provider, modelId });
+            return;
+        }
+
         const item = (e.target as HTMLElement).closest('.model-item') as HTMLElement | null;
         if (!item) return;
         const provider = item.dataset.provider!;
