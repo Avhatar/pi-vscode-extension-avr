@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.17.3",
+  "version": "0.17.6",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -208,7 +208,7 @@
   "scripts": {
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
-    "package": "npx @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links",
+    "package": "npx @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links --readme-path MARKETPLACE.md",
     "test": "vitest",
     "test:unit": "vitest run",
     "compile:integration-tests": "tsc -p tsconfig.integration.json",

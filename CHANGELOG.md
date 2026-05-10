@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.6] - 2026-05-10
+
+### Removed
+- VSIX no longer ships internal design docs (`MIGRATION_PANELS.md`, `PERSISTENT_TODO.md`, `WORKSPACE_FILE_MENTIONS.md`) or a stray `nul` artefact left over from a misdirected shell redirect. The docs remain in the GitHub repository for contributors but are excluded from the published package via `.vscodeignore`. Reduces VSIX clutter without changing any runtime behaviour.
+
+## [0.17.5] - 2026-05-10
+
+### Changed
+- License badge in both READMEs is now green (was yellow) for visual consistency with success/permissive-license conventions.
+- Marketplace README now uses an absolute GitHub raw URL for the in-action screenshot. The VS Code Marketplace page and the extension details view inside VS Code render the README without resolving extension-relative paths, so the previous `media/screenshots/screenshot1.png` link rendered as a broken image; the absolute URL fixes that.
+
+## [0.17.4] - 2026-05-10
+
+### Changed
+- README updated with missing features (Per-Chat ToDo, User Message Glow), complete settings table, expanded provider list, and corrected architecture diagram and project structure.
+- README polished for VS Code Marketplace publication: added MIT and VS Code badges, a one-line tagline describing Pi Code as a visual wrapper around the Pi coding agent for non-engineers and Claude Code converts, and an in-action screenshot at the top of the page.
+- Split documentation into two READMEs. `README.md` stays as the GitHub-facing source-of-truth (fork rationale, architecture diagram, project structure, development setup, full prerequisites). A new `MARKETPLACE.md` is the product-focused page used on the VS Code Marketplace — features, getting started, supported providers, keyboard shortcuts, commands, settings, privacy. The `package` npm script now passes `--readme-path ./MARKETPLACE.md` to `vsce` so the marketplace listing and VSIX both pick up the trimmed product README instead of the GitHub one.
+
 ## [0.17.3] - 2026-05-10
 
 ### Fixed

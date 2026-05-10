@@ -1,6 +1,13 @@
 # Pi Code for VS Code
 
-A VS Code extension that provides a chat UI for [Mario Zechner's Pi coding agent](https://github.com/badlogic/pi-mono) — an AI agent that can read, write, edit files, run commands, search your codebase, and more, all from within the editor.
+[![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
+[![VS Code](https://img.shields.io/badge/VS%20Code-1.100%2B-007ACC.svg?logo=visualstudiocode)](https://code.visualstudio.com/)
+
+A visual VS Code wrapper around the [Pi coding agent](https://pi.dev/) — built as a friendly UI for non-engineers and as a smooth landing pad for anyone moving over from Claude Code who wants the same familiar ergonomics, extra quality-of-life features, and the freedom to use any AI model behind the scenes.
+
+![Pi Code in action — chat panel as an editor tab, with launcher sidebar, ToDo list, inline tool calls and diffs](media/screenshots/screenshot1.png)
+
+Under the hood Pi Code embeds [Mario Zechner's Pi coding agent](https://github.com/badlogic/pi-mono) — an AI agent that can read, write, and edit files, run shell commands, search your codebase, browse the web, and more, all from inside the editor.
 
 > This is a downstream fork of the upstream `pi-vscode-extension`. The fork takes the UX in a Claude Code direction — chats live as editor tabs rather than inside the sidebar — and bundles selected Pi ecosystem packages directly inside the VSIX. See **[Why this fork](#why-this-fork)** below for the full diff.
 
@@ -78,8 +85,14 @@ Type `/` in the input to trigger a slash-command menu that surfaces available Pi
 ### Prompt Cache Retention
 A `cache: …` chip in the chat footer controls prompt cache retention for future requests. Choose `short`, `long`, or `auto`; in `auto`, Pi Code uses provider-aware heuristics. OpenAI-style providers and other free-write cache backends prefer `long`, while Anthropic-style providers switch to `long` only after a meaningful idle gap or a large cached prefix. Providers that do not expose cache controls show the chip faded as informational.
 
+### Per-Chat ToDo
+Each chat panel has its own persistent task list that the agent can manage via a built-in `todo` tool. Tasks support creation, updates, status transitions (`pending`, `in_progress`, `completed`), dependencies (`blockedBy`), and deletion. The launcher sidebar displays the active chat's ToDo with a toggle to enable or disable it per tab — when disabled, the agent has no knowledge of the tool. Task state persists across reloads. The tool's behavior is configurable via the `pi-code.todo.promptGuidelines` setting.
+
 ### Context Usage
 Token usage and context window utilization are displayed in both the chat footer and the status bar tooltip.
+
+### User Message Glow
+User messages in the chat have a subtle colored glow outline for visual distinction. The color and opacity are configurable via `pi-code.userMessageGlowColor` and `pi-code.userMessageGlowOpacity` settings, allowing you to customize or disable the effect.
 
 ## Prerequisites
 
@@ -129,7 +142,7 @@ export GEMINI_API_KEY=...
 export DEEPSEEK_API_KEY=...
 ```
 
-Other supported API-key providers include Azure OpenAI, Google Vertex, Amazon Bedrock, Mistral, Groq, Cerebras, xAI, OpenRouter, Vercel AI Gateway, Hugging Face, Fireworks, Kimi For Coding, and MiniMax. See [Pi's provider docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md) for the full list and variable names.
+Other supported API-key providers include Azure OpenAI, Google Vertex, Amazon Bedrock, Mistral, Groq, Cerebras, xAI, OpenRouter, Vercel AI Gateway, Hugging Face, Fireworks, Kimi For Coding, MiniMax, Qwen (Alibaba DashScope), and Z.ai (GLM). See [Pi's provider docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md) for the full list and variable names.
 
 **Option C — Subscription login:**
 
@@ -213,6 +226,10 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Additional glob patterns to exclude from `@` file mention suggestions |
 | `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum number of `@` file mention suggestions to show |
 | `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative JSON config file for `@` file mention indexing |
+| `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat persistent ToDo for new chats by default |
+| `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines injected into the system prompt for the ToDo tool |
+| `pi-code.userMessageGlowColor` | `string` | `#00aaff` | Color of the subtle glow outline around user messages in the chat |
+| `pi-code.userMessageGlowOpacity` | `number` | `40` | Opacity of the glow around user messages, as a percentage (0–100) |
 
 API keys are managed through the settings page and stored via VS Code's SecretStorage (never in `settings.json`).
 
@@ -228,7 +245,7 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 │  │ (WebviewView)      │   │ (WebviewPanel per chat)        │   │
 │  │ - new / settings   │   │ - chat UI (main.ts + CSS)       │   │
 │  │ - history          │   │ - tool approval cards           │   │
-│  │                    │   │ - diffs, checkpoints, queue     │   │
+│  │ - per-tab ToDo     │   │ - diffs, checkpoints, queue     │   │
 │  └─────────┬──────────┘   └──────────────┬──────────────────┘   │
 │            │                              │                      │
 │            └──────────────┬───────────────┘                      │
@@ -255,6 +272,8 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 │   StatusBarManager — context usage / streaming state             │
 │   SettingsPanel    — WebviewPanel for settings + OAuth login     │
 │   ChatPanelSerializer — restores chat panels across Reload Window│
+│   FileMentions   — workspace file indexing for `@` mentions      │
+│   Providers      — API-key provider registry + custom sync      │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -264,11 +283,14 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 - **ChatPanel** ([src/providers/chat-panel.ts](src/providers/chat-panel.ts)) is one editor-area `WebviewPanel` per chat, hosting the actual chat UI. **ChatPanelSerializer** ([src/providers/chat-panel-serializer.ts](src/providers/chat-panel-serializer.ts)) restores these panels across `Reload Window` by replaying the bound tab id.
 - **SettingsPanel** ([src/providers/settings-panel.ts](src/providers/settings-panel.ts)) opens a `WebviewPanel` in the editor area for the settings page, backed by VS Code's configuration API and `SecretStorage`. Hosts API-key entry and the OAuth subscription-login flow.
 - **Webview** ([src/webview/main.ts](src/webview/main.ts)) renders the chat UI, inline tool approval cards, slash-command menu, and image attachment previews, and communicates with the extension host via typed messages defined in [src/shared/protocol.ts](src/shared/protocol.ts).
-- **PiSessionManager** ([src/pi/session.ts](src/pi/session.ts)) wraps `createAgentSession` from `@mariozechner/pi-coding-agent`, handling the prompt / steer / follow-up / abort lifecycle. Reads configuration on session creation, installs tool approval hooks via the SDK's extension runner, and feeds Pi's resource loader the bundled-extension paths from [src/pi/bundled-packages.ts](src/pi/bundled-packages.ts).
+- **PiSessionManager** ([src/pi/session.ts](src/pi/session.ts)) wraps `createAgentSession` from `@mariozechner/pi-coding-agent`, handling the prompt / steer / follow-up / abort lifecycle. Reads configuration on session creation, installs tool approval hooks via the SDK's extension runner, and feeds Pi's resource loader the bundled-extension paths from [src/pi/bundled-packages.ts](src/pi/bundled-packages.ts). Provider-specific logic (e.g. Qwen in [src/pi/providers/qwen.ts](src/pi/providers/qwen.ts)) is loaded per session.
 - **DiffManager** ([src/providers/diff.ts](src/providers/diff.ts)) tracks file changes from `edit`/`write` tool calls and provides unified diffs via a `pi-diff:` virtual document scheme.
 - **CheckpointManager** ([src/providers/checkpoint.ts](src/providers/checkpoint.ts)) snapshots file state per turn for rollback and redo.
 - **Codex usage plumbing** ([src/pi/codex-monitor.ts](src/pi/codex-monitor.ts) + [src/pi/codex-usage-store.ts](src/pi/codex-usage-store.ts)) captures subscription windows from Codex response headers and exposes them to the chat footer.
 - **CLAUDE.md injector** ([src/pi/claude-md-injector.ts](src/pi/claude-md-injector.ts)) hooks into the agent lifecycle to inline workspace-level and per-folder `CLAUDE.md` instructions into the system prompt.
+- **Per-chat ToDo** ([src/pi/todo/](src/pi/todo/)) provides a persistent, per-tab task list the agent manages via a built-in `todo` tool. The system includes a reducer-based task graph ([task-graph.ts](src/pi/todo/task-graph.ts)), replay-based persistence ([replay.ts](src/pi/todo/replay.ts)), a state store ([store.ts](src/pi/todo/store.ts)), and the tool schema ([tool.ts](src/pi/todo/tool.ts)). The launcher sidebar renders the active tab's ToDo with a per-tab enable/disable toggle.
+- **Workspace file mentions** ([src/workspace/file-mentions.ts](src/workspace/file-mentions.ts)) indexes the opened workspace for `@` file mention suggestions in the chat input, supporting fuzzy matching, configurable excludes, and cached file lists.
+- **Provider registry** ([src/shared/providers.ts](src/shared/providers.ts)) defines the supported API-key providers (Anthropic, OpenAI, Google, Qwen, Z.ai, and others). Custom provider sync ([src/pi/models.ts](src/pi/models.ts)) keeps the model registry up to date. Qwen-specific logic lives in [src/pi/providers/qwen.ts](src/pi/providers/qwen.ts).
 
 ## Project Structure
 
@@ -277,18 +299,31 @@ src/
 ├── extension.ts                      # Entry point, activation, command wiring
 ├── shared/
 │   ├── protocol.ts                   # Typed message protocol (Client ↔ Server)
-│   └── cache-info.ts                 # Provider cache-retention capability labels
+│   ├── cache-info.ts                 # Provider cache-retention capability labels
+│   └── providers.ts                  # API-key provider definitions
 ├── controllers/
 │   └── chat-controller.ts            # Tab lifecycle, message routing (shared)
 ├── pi/
 │   ├── session.ts                    # Agent session lifecycle
-│   ├── models.ts                     # Model registry wrapper
+│   ├── models.ts                     # Model registry wrapper + custom provider sync
 │   ├── auth.ts                       # Auth storage singleton + OAuth bridge
 │   ├── events.ts                     # Event router for agent events
 │   ├── bundled-packages.ts           # Pi extensions shipped inside the VSIX
 │   ├── claude-md-injector.ts         # Auto-injects CLAUDE.md / AGENTS.md into prompts
 │   ├── codex-monitor.ts              # Codex subscription header capture
-│   └── codex-usage-store.ts          # Per-window usage state (5h / weekly)
+│   ├── codex-usage-store.ts          # Per-window usage state (5h / weekly)
+│   ├── providers/
+│   │   └── qwen.ts                   # Qwen-specific provider logic
+│   └── todo/
+│       ├── extension.ts              # ToDo extension registration
+│       ├── tool.ts                   # ToDo tool schema and handler
+│       ├── types.ts                  # Task and action type definitions
+│       ├── store.ts                  # Per-tab task state store
+│       ├── reducer.ts                # Task state reducer
+│       ├── replay.ts                 # Persistence-by-replay from session tool results
+│       ├── task-graph.ts             # Dependency graph (blockedBy) and invariants
+│       ├── invariants.ts             # Task graph invariant checks
+│       └── response-envelope.ts      # Tool response envelope types
 ├── providers/
 │   ├── launcher-view.ts              # Activity-bar sidebar (launcher)
 │   ├── chat-panel.ts                 # Editor-area WebviewPanel per chat
@@ -299,6 +334,8 @@ src/
 │   └── status-bar.ts                 # Status bar item
 ├── utils/
 │   └── diff.ts                       # Myers diff algorithm, unified diff
+├── workspace/
+│   └── file-mentions.ts              # Workspace file indexing for `@` mentions
 ├── webview/
 │   ├── main.ts                       # Chat UI application
 │   ├── launcher.ts                   # Launcher sidebar UI
@@ -308,7 +345,10 @@ src/
 │       ├── launcher.css              # Launcher sidebar styles
 │       └── settings.css              # Settings page styles
 └── test/
+    ├── setup.ts                      # Vitest setup
     ├── unit/                         # Vitest unit tests
+    │   ├── pi/                       # Pi session, models, events, ToDo tests
+    │   └── shared/                   # Protocol tests
     └── integration/                  # VS Code integration tests
 ```
 

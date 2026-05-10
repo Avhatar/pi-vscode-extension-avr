@@ -12,6 +12,11 @@ TODO.md
 AGENTS.md
 CHANGELOG.md
 CLAUDE.md
+README.md
+MIGRATION_PANELS.md
+PERSISTENT_TODO.md
+WORKSPACE_FILE_MENTIONS.md
+nul
 .claude/**
 scripts/**
 .pi/**
