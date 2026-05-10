@@ -11,6 +11,7 @@ import { getBundledPiPackagePaths } from './bundled-packages';
 import { createClaudeMdInjectorExtension } from './claude-md-injector';
 import { createTodoExtension } from './todo/extension';
 import { TodoStore } from './todo/store';
+import { parseTodoPromptGuidelines } from './todo/tool';
 
 export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
 
@@ -87,12 +88,13 @@ export class PiSessionManager {
         await this._applyDefaultSettings(session);
         this._installToolApprovalHook(session);
 
-        // Default todo visibility = OFF. The tool is registered (so its
-        // state survives across toggles via branch replay) but excluded
-        // from the active set, so the model never sees the tool's
-        // schema or its promptGuidelines. PR4 will wire the per-tab
-        // toggle to flip this via `setTodoVisibility(true)`.
-        this.setTodoVisibility(false);
+        // Initial todo visibility is decided by the controller from the
+        // per-session persisted toggle (see ChatController._subscribeTab
+        // and _applyPersistedTodo). The SDK enables all extension tools
+        // by default via `includeAllExtensionTools: true`, so doing
+        // nothing here leaves `todo` ON and the controller flips it
+        // OFF only when the user explicitly toggled it off for this
+        // session.
 
         const model = session.model;
         this._outputChannel.appendLine(
@@ -128,6 +130,15 @@ export class PiSessionManager {
         const agentDir = getAgentDir();
         const settingsManager = SettingsManager.create(cwd, agentDir);
         const usageStore = getCodexUsageStore();
+        // Guidelines are read here (per resource-loader rebuild) so a
+        // settings change picks up next time `_buildResourceLoader`
+        // runs — i.e. on the next chat / loadSession / newSession /
+        // window reload. The currently-running agent session keeps
+        // whatever guidelines it was created with, since the SDK
+        // captures tool definitions at session-creation time.
+        const todoGuidelines = parseTodoPromptGuidelines(
+            vscode.workspace.getConfiguration('pi-code').get<string>('todo.promptGuidelines'),
+        );
         const factories = [
             createCodexMonitorExtension({
                 onResponse: ({ headers }) => {
@@ -135,7 +146,7 @@ export class PiSessionManager {
                 },
             }),
             createClaudeMdInjectorExtension(),
-            createTodoExtension(this.todoStore),
+            createTodoExtension(this.todoStore, todoGuidelines),
         ];
         const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const loader = new DefaultResourceLoader({

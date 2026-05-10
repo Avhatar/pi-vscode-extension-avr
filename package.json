@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.15.4",
+  "version": "0.15.6",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -183,6 +183,24 @@
           "type": "boolean",
           "default": true,
           "description": "Enable the per-chat persistent ToDo for new chats by default. Each chat keeps its own toggle state once you flip it; this setting only affects chats you have not customized yet."
+        },
+        "pi-code.todo.promptGuidelines": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "default": "ALWAYS create a `todo` for every actionable request before starting work — even single-step tasks. Skip only for purely conversational replies that produce no code, files, or commands.\nMark in_progress BEFORE doing the work, completed IMMEDIATELY when done. Exactly one task in_progress at a time; never batch completions.\nDon't mark completed when tests fail, work is partial, or errors are unresolved — keep it in_progress and add a new task for the blocker.\nUse `blockedBy` for dependencies (cycles are rejected).\nSubject must be short and imperative (e.g. \"Research existing tool\"); put long detail in `description`; pass `activeForm` (present-continuous, e.g. \"researching existing tool\") when marking in_progress.",
+          "description": "Prompt guidelines injected into the system prompt for the ToDo tool. One guideline per line. Changes apply to new chat sessions — open a new chat or reload the window for them to take effect. Clearing the field restores the built-in default."
+        },
+        "pi-code.userMessageGlowColor": {
+          "type": "string",
+          "default": "#00aaff",
+          "description": "Color of the subtle glow outline around user messages in the chat. Any valid CSS color."
+        },
+        "pi-code.userMessageGlowOpacity": {
+          "type": "number",
+          "default": 40,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Opacity of the glow around user messages, as a percentage (0 = invisible, 100 = fully opaque)."
         }
       }
     }

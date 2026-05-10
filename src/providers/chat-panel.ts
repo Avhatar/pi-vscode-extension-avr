@@ -117,6 +117,11 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         );
         const nonce = getNonce();
 
+        const config = vscode.workspace.getConfiguration('pi-code');
+        const glowColor = config.get<string>('userMessageGlowColor', '#00aaff');
+        const glowOpacity = (config.get<number>('userMessageGlowOpacity', 40) / 100).toFixed(2);
+        const glowRgba = hexToRgba(glowColor, parseFloat(glowOpacity));
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -125,6 +130,12 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data: blob:; script-src 'nonce-${nonce}';">
     <link rel="stylesheet" href="${styleUri}">
+    <style>
+        :root {
+            --pi-glow-border: 2px solid ${glowRgba};
+            --pi-glow-shadow: 0 0 12px ${glowRgba};
+        }
+    </style>
     <title>Pi Code</title>
 </head>
 <body data-mode="panel">
@@ -174,4 +185,18 @@ function getNonce(): string {
         text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
     return text;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+    hex = hex.replace(/^#/, '');
+    if (hex.length === 3) {
+        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    }
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) {
+        return `rgba(0, 170, 255, ${alpha})`;
+    }
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }

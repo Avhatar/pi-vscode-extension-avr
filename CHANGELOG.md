@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-05-10
+
+### Added
+- New "ToDo" section in the Settings page with a multi-line editor for the prompt guidelines that describe the ToDo tool to the agent. A "Reset" button restores the built-in default. Changes apply to new chat sessions — open a new chat or reload the window for them to take effect.
+
+### Changed
+- The default ToDo prompt guidelines now require the agent to create a `todo` entry for every actionable user request, including single-step and trivial tasks. Previously the guideline told the agent to skip ToDo for "single trivial tasks", which could leave plans unrecorded for short requests. Conversational replies that produce no code, files, or commands remain the only exception.
+- Tightened the default ToDo guidelines from 7 to 5 lines (~50% fewer tokens) by dropping points already documented in the tool's JSON schema (state-machine enumeration, `activeForm` being present-continuous, additive-merge semantics of `addBlockedBy`/`removeBlockedBy`, `list` filter behaviour). The five remaining lines carry the only signals the schema can't supply: when to use the tool, the lifecycle pattern, the no-premature-complete rule, the cycle-rejection fact, and the subject/description/activeForm style hint.
+- User message glow is now visible and configurable: the color and opacity of the glow outline around user messages can be set via the Settings page (Chat Appearance section).
+
+## [0.15.5] - 2026-05-10
+
+### Changed
+- User messages in chat now have a subtle white halo glow to improve visual distinction from assistant responses.
+
+### Fixed
+- ToDo toggle state now applies in both directions on every session entry. Previously a chat where the user had explicitly turned ToDo OFF could silently come back ON after `Reload Window`, switching sessions ("Load Session"), or starting a new session inside a tab — the agent would still see the `todo` tool even though the sidebar toggle showed OFF. The persisted per-chat preference is now re-applied on subscribe, on `loadSession`, and on `newSession`.
+
 ## [0.15.4] - 2026-05-10
 
 ### Changed

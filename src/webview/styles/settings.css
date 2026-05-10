@@ -63,6 +63,36 @@ body {
     margin-bottom: 6px;
 }
 
+.setting-color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.setting-color {
+    width: 32px;
+    height: 32px;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.setting-color::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.setting-color::-webkit-color-swatch {
+    border: none;
+    border-radius: 2px;
+}
+
+.setting-color-text {
+    flex: 1;
+}
+
 .setting-label-row label {
     font-size: 13px;
     font-weight: 500;
@@ -96,6 +126,27 @@ body {
     outline: none;
 }
 .setting-input:focus {
+    border-color: var(--focus-border);
+}
+
+.setting-textarea {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+    line-height: 1.45;
+    outline: none;
+    resize: vertical;
+    min-height: 120px;
+    box-sizing: border-box;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.setting-textarea:focus {
     border-color: var(--focus-border);
 }
 

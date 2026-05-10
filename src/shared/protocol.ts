@@ -70,6 +70,9 @@ export interface SettingsData {
     autoSaveSessions: boolean;
     sessionStoragePath: string;
     contextUsageWarningThreshold: number;
+    todoPromptGuidelines: string;
+    userMessageGlowColor: string;
+    userMessageGlowOpacity: number;
     oauthProviders: OAuthProviderInfo[];
 }
 

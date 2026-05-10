@@ -91,6 +91,16 @@ function render(data: SettingsData): void {
             'Comma-separated list of tool names to allow (e.g. read, grep, bash). Leave empty to allow all.'),
     ]));
 
+    container.appendChild(buildSection('ToDo', [
+        buildMultilineTextarea(
+            'todo.promptGuidelines',
+            'ToDo prompt guidelines',
+            data.todoPromptGuidelines,
+            'Instructions injected into the system prompt for the ToDo tool. One guideline per line. Changes apply to new chat sessions — open a new chat or reload the window for them to take effect. Clear the field (or click Reset) to restore the built-in default.',
+            12,
+        ),
+    ]));
+
     container.appendChild(buildSection('Session Behavior', [
         buildToggle('autoSaveSessions', 'Auto-save sessions', data.autoSaveSessions,
             'Automatically persist sessions after each turn.'),
@@ -103,6 +113,13 @@ function render(data: SettingsData): void {
     const skillsSection = buildSection('Skills', [buildSkillsPlaceholder()]);
     skillsSection.id = 'skills-section';
     container.appendChild(skillsSection);
+
+    container.appendChild(buildSection('Chat Appearance', [
+        buildColorInput('userMessageGlowColor', 'User Message Glow Color', data.userMessageGlowColor,
+            'Color of the subtle glow outline around user messages in the chat.'),
+        buildRange('userMessageGlowOpacity', 'User Message Glow Opacity', data.userMessageGlowOpacity, 0, 100,
+            `Opacity of the glow around user messages.`),
+    ]));
 
     container.appendChild(buildSection('Keyboard Shortcuts', [
         buildShortcutsInfo(),
@@ -167,6 +184,27 @@ function buildTextarea(key: string, label: string, value: string, description: s
     return row;
 }
 
+/** Real multi-line textarea. Used for prompt-style settings that span
+ *  many lines and need preserved newlines (e.g. ToDo guidelines). */
+function buildMultilineTextarea(
+    key: string,
+    label: string,
+    value: string,
+    description: string,
+    rows: number = 10,
+): HTMLElement {
+    const row = el('div', 'setting-row');
+    row.innerHTML = `
+        <div class="setting-label-row">
+            <label for="setting-${key}">${escHtml(label)}</label>
+            <button type="button" class="setting-btn secondary" data-reset-key="${key}" title="Reset to the built-in default">Reset</button>
+        </div>
+        <textarea id="setting-${key}" class="setting-textarea" data-key="${key}" rows="${rows}" spellcheck="false">${escHtml(value)}</textarea>
+        <p class="setting-description">${escHtml(description)}</p>
+    `;
+    return row;
+}
+
 function buildToggle(key: string, label: string, value: boolean, description: string): HTMLElement {
     const row = el('div', 'setting-row');
     row.innerHTML = `
@@ -192,6 +230,21 @@ function buildRange(key: string, label: string, value: number, min: number, max:
             <span class="range-value" id="range-val-${key}">${value}%</span>
         </div>
         <input type="range" id="setting-${key}" class="setting-range" data-key="${key}" min="${min}" max="${max}" value="${value}">
+        <p class="setting-description">${escHtml(description)}</p>
+    `;
+    return row;
+}
+
+function buildColorInput(key: string, label: string, value: string, description: string): HTMLElement {
+    const row = el('div', 'setting-row');
+    row.innerHTML = `
+        <div class="setting-label-row">
+            <label for="setting-${key}">${escHtml(label)}</label>
+        </div>
+        <div class="setting-color-row">
+            <input type="color" id="setting-${key}" class="setting-color" data-key="${key}" value="${escHtml(value)}">
+            <input type="text" id="setting-${key}-text" class="setting-input setting-color-text" data-key="${key}" value="${escHtml(value)}" placeholder="#00aaff">
+        </div>
         <p class="setting-description">${escHtml(description)}</p>
     `;
     return row;
@@ -484,11 +537,57 @@ function bindEvents(): void {
         });
     });
 
+    document.querySelectorAll('.setting-textarea[data-key]').forEach((textarea) => {
+        let debounce: ReturnType<typeof setTimeout>;
+        textarea.addEventListener('input', () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => {
+                const key = (textarea as HTMLTextAreaElement).dataset.key!;
+                const value = (textarea as HTMLTextAreaElement).value;
+                vscode.postMessage({ type: 'updateSetting', key, value });
+            }, 500);
+        });
+    });
+
+    document.querySelectorAll('button[data-reset-key]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = (btn as HTMLButtonElement).dataset.resetKey!;
+            // Setting value to undefined removes the user's override and
+            // VS Code falls back to the package.json default.
+            vscode.postMessage({ type: 'updateSetting', key, value: undefined });
+        });
+    });
+
     document.querySelectorAll('input[type="checkbox"][data-key]').forEach((cb) => {
         cb.addEventListener('change', () => {
             const key = (cb as HTMLInputElement).dataset.key!;
             const value = (cb as HTMLInputElement).checked;
             vscode.postMessage({ type: 'updateSetting', key, value });
+        });
+    });
+
+    document.querySelectorAll('.setting-color').forEach((colorInput) => {
+        colorInput.addEventListener('input', () => {
+            const key = (colorInput as HTMLInputElement).dataset.key!;
+            const value = (colorInput as HTMLInputElement).value;
+            const textInput = document.getElementById(`setting-${key}-text`) as HTMLInputElement;
+            if (textInput) textInput.value = value;
+            vscode.postMessage({ type: 'updateSetting', key, value });
+        });
+    });
+
+    document.querySelectorAll('.setting-color-text').forEach((textInput) => {
+        let debounce: ReturnType<typeof setTimeout>;
+        textInput.addEventListener('input', () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => {
+                const key = (textInput as HTMLInputElement).dataset.key!;
+                let value = (textInput as HTMLInputElement).value.trim();
+                if (!/^#[0-9a-fA-F]{3,6}$/.test(value)) return;
+                const colorInput = document.getElementById(`setting-${key}`) as HTMLInputElement;
+                if (colorInput) colorInput.value = value;
+                vscode.postMessage({ type: 'updateSetting', key, value });
+            }, 500);
         });
     });
 

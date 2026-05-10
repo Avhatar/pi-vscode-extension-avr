@@ -18,9 +18,12 @@ import { replayFromBranch } from './replay';
 import type { TodoStore } from './store';
 import { registerTodoTool } from './tool';
 
-export function createTodoExtension(store: TodoStore): (pi: ExtensionAPI) => void {
+export function createTodoExtension(
+    store: TodoStore,
+    guidelines?: readonly string[],
+): (pi: ExtensionAPI) => void {
     return (pi) => {
-        registerTodoTool(pi, store);
+        registerTodoTool(pi, store, guidelines);
 
         pi.on('session_start', (_event, ctx) => {
             store.replaceState(replayFromBranch(ctx.sessionManager.getEntries()));

@@ -378,6 +378,9 @@ body[data-mode="panel"] .tab-strip,
 /* ── Message groups ── */
 .message-group-user {
     margin: 8px;
+    border: var(--pi-glow-border, 2px solid rgba(0, 170, 255, 0.4));
+    border-radius: var(--radius);
+    box-shadow: var(--pi-glow-shadow, 0 0 12px rgba(0, 170, 255, 0.4));
 }
 
 .message-group-current-user {

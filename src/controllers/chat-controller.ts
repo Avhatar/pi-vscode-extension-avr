@@ -637,10 +637,13 @@ export class ChatController implements vscode.Disposable {
         // takes effect immediately — replay (which fired on
         // session_start during initialize) has populated the store
         // with whatever todos survived in the branch.
-        const persistedEnabled = this._isTodoEnabledFor(tab);
-        if (persistedEnabled) {
-            tab.session.setTodoVisibility(true);
-        }
+        //
+        // Symmetric: also force OFF when persisted is false. The SDK
+        // enables all extension tools by default, so without this the
+        // user's "OFF" preference would be silently ignored on paths
+        // that skip a fresh `initialize()` (panel restore via
+        // `initializeFromPath`, `loadSession`, `newSession`).
+        this._applyPersistedTodo(tab);
 
         tab.session.setToolApprovalHandler(async (toolCallId, toolName, args) => {
             return this._requestToolApproval(tab, toolCallId, toolName, args);
@@ -661,6 +664,16 @@ export class ChatController implements vscode.Disposable {
         return vscode.workspace
             .getConfiguration('pi-code')
             .get<boolean>('todo.defaultEnabled', true);
+    }
+
+    /** Read persisted ToDo state for `tab` and apply it to the session
+     *  without writing back. Used at subscribe time and after the
+     *  underlying agent session is swapped (`loadSession`, `newSession`)
+     *  — both of those create a session whose initial active-tools list
+     *  is the SDK default (todo ON) and need the user's explicit OFF
+     *  preference re-applied. */
+    private _applyPersistedTodo(tab: TabState): void {
+        tab.session.setTodoVisibility(this._isTodoEnabledFor(tab));
     }
 
     private _isTodoEnabledFor(tab: TabState): boolean {
@@ -1108,6 +1121,7 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'newSession':
                     await tab.session.newSession();
+                    this._applyPersistedTodo(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
                     tab.turnCounter = 0;
@@ -1130,6 +1144,7 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'loadSession':
                     await tab.session.loadSession(msg.sessionPath);
+                    this._applyPersistedTodo(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
                     tab.turnCounter = 0;
