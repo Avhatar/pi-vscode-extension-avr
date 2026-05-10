@@ -178,6 +178,38 @@ function trimErrorForStatus(raw: string | undefined): string {
 }
 
 /**
+ * True when an assistant message ended without producing any visible content —
+ * no text, no tool calls, no thinking. Some providers (notably DashScope/Qwen)
+ * answer HTTP 200 with no choices when the request is rejected for non-network
+ * reasons (invalid key, exhausted quota, region mismatch), which leaves
+ * `stopReason === 'stop'` and an empty `content` array. Treat that as an
+ * error rather than letting it disappear silently.
+ */
+function isEmptyAssistantResponse(message: any): boolean {
+    if (!message || message.role !== 'assistant') return false;
+    const content = message.content;
+    if (!Array.isArray(content) || content.length === 0) return true;
+    for (const block of content) {
+        if (!block || typeof block !== 'object') continue;
+        if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) return false;
+        if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.length > 0) return false;
+        if (block.type === 'toolCall') return false;
+    }
+    return true;
+}
+
+function buildEmptyResponseMessage(message: any): string {
+    const provider = message?.provider ? String(message.provider) : 'the provider';
+    const model = message?.model ? `/${message.model}` : '';
+    return (
+        `${provider}${model} returned an empty response (HTTP succeeded but no content was streamed). ` +
+        `This usually means an invalid API key, exhausted quota/balance, or a region/endpoint mismatch ` +
+        `(e.g. a China DashScope key on the international endpoint, or vice versa). ` +
+        `Check the "Pi Code" output channel and your provider dashboard.`
+    );
+}
+
+/**
  * Owns all chat tab state and routes messages from views to the appropriate
  * tab. View layers (sidebar, editor panels) attach themselves as a
  * {@link ChatViewSink} via {@link addSink} and forward webview messages via
@@ -794,8 +826,14 @@ export class ChatController implements vscode.Disposable {
                 for (let i = msgs.length - 1; i >= 0; i--) {
                     const m = msgs[i] as any;
                     if (m?.role === 'assistant') {
-                        if (m.stopReason === 'error' && typeof m.errorMessage === 'string') {
-                            this._postAgentError(tab, m.errorMessage);
+                        if (m.stopReason === 'error') {
+                            this._postAgentError(tab, m.errorMessage, m);
+                        } else if (m.stopReason !== 'aborted' && isEmptyAssistantResponse(m)) {
+                            this._postAgentError(
+                                tab,
+                                buildEmptyResponseMessage(m),
+                                m,
+                            );
                         }
                         break;
                     }
@@ -1290,11 +1328,18 @@ export class ChatController implements vscode.Disposable {
             // Errors from a panel-bound message route back to that panel; for sidebar
             // (no sourceTabId) they go to whoever currently shows the active tab.
             const targetId = sourceTabId ?? this._activeTabId;
-            this._postForTab(targetId, { type: 'error', message: err.message ?? String(err) });
+            const message = err?.message ?? String(err);
+            this._outputChannel.appendLine(
+                `[handleMessage error] type=${msg?.type ?? 'unknown'} tab=${targetId}: ${message}`,
+            );
+            if (err?.stack) {
+                this._outputChannel.appendLine(err.stack);
+            }
+            this._postForTab(targetId, { type: 'error', message });
         }
     }
 
-    private _postAgentError(tab: TabState, raw: string | undefined): void {
+    private _postAgentError(tab: TabState, raw: string | undefined, assistantMessage?: any): void {
         if (tab.errorReportedThisRun) { return; }
         tab.errorReportedThisRun = true;
         tab.streamingText = '';
@@ -1303,7 +1348,26 @@ export class ChatController implements vscode.Disposable {
         tab.thinkingStartTime = 0;
         tab.streamingThinkingDuration = 0;
         const message = formatProviderError(raw);
+        this._logProviderError(tab, raw, assistantMessage);
         this._postForTab(tab.id, { type: 'error', message });
+    }
+
+    private _logProviderError(tab: TabState, raw: string | undefined, assistantMessage?: any): void {
+        const provider = assistantMessage?.provider ? String(assistantMessage.provider) : 'unknown';
+        const model = assistantMessage?.model ? String(assistantMessage.model) : 'unknown';
+        const stopReason = assistantMessage?.stopReason ?? 'unknown';
+        const tabLabel = tab.name || tab.id;
+        const lines = [
+            `[provider error] tab="${tabLabel}" provider=${provider} model=${model} stopReason=${stopReason}`,
+        ];
+        if (raw) {
+            lines.push(`  message: ${raw.replace(/\r?\n/g, ' ')}`);
+        } else {
+            lines.push('  message: (none — see chat banner for details)');
+        }
+        for (const line of lines) {
+            this._outputChannel.appendLine(line);
+        }
     }
 
     private _requestToolApproval(tab: TabState, toolCallId: string, toolName: string, args: any): Promise<boolean> {

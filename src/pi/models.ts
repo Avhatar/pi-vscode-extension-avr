@@ -1,6 +1,7 @@
 import type { ModelRegistry } from '@mariozechner/pi-coding-agent';
 import type { ModelInfo } from '../shared/protocol';
 import { getAuthStorage } from './auth';
+import { registerQwenCnProvider, registerQwenProvider } from './providers/qwen';
 
 let cached: ModelRegistry | undefined;
 
@@ -11,7 +12,43 @@ export async function getModelRegistry(): Promise<ModelRegistry> {
     const { ModelRegistry: MR } = await import('@mariozechner/pi-coding-agent');
     const authStorage = await getAuthStorage();
     cached = MR.create(authStorage);
+    await syncCustomProviders();
     return cached;
+}
+
+// Dynamically register/unregister providers that pi-coding-agent's validator
+// refuses without an `apiKey OR oauth` field. We only register them when the
+// user has actually stored a key (so `getAvailable()` doesn't show models
+// with no working credentials), and we tear them down when the key is removed.
+export async function syncCustomProviders(): Promise<void> {
+    if (!cached) return;
+    const registry = cached;
+    const authStorage = await getAuthStorage();
+    syncProvider(registry, 'qwen', () => registerQwenProvider(registry), () => authStorage.hasAuth('qwen'));
+    syncProvider(registry, 'qwen-cn', () => registerQwenCnProvider(registry), () => authStorage.hasAuth('qwen-cn'));
+}
+
+const registeredProviders = new Set<string>();
+
+function syncProvider(
+    registry: ModelRegistry,
+    providerId: string,
+    register: () => void,
+    hasKey: () => boolean,
+): void {
+    const wantRegistered = hasKey();
+    const isRegistered = registeredProviders.has(providerId);
+    try {
+        if (wantRegistered && !isRegistered) {
+            register();
+            registeredProviders.add(providerId);
+        } else if (!wantRegistered && isRegistered) {
+            registry.unregisterProvider(providerId);
+            registeredProviders.delete(providerId);
+        }
+    } catch (err) {
+        console.error(`[pi-code] Failed to sync provider "${providerId}":`, err);
+    }
 }
 
 export async function refreshModelRegistry(): Promise<void> {

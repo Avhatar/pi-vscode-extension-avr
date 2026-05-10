@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.15.6",
+  "version": "0.17.3",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -95,7 +95,7 @@
         "pi-code.apiProvider": {
           "type": "string",
           "default": "",
-          "description": "Preferred AI provider (e.g. anthropic, openai, google, deepseek). Leave empty for automatic detection."
+          "description": "Preferred AI provider (e.g. anthropic, openai, google, deepseek, qwen, openrouter, groq, cerebras, xai, mistral, fireworks). Leave empty for automatic detection."
         },
         "pi-code.apiBaseUrl": {
           "type": "string",

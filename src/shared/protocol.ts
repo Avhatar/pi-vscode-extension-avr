@@ -62,6 +62,7 @@ export interface SettingsData {
     apiProvider: string;
     apiBaseUrl: string;
     apiKeySet: boolean;
+    configuredProviders: string[];
     authMethod: 'env' | 'pi-login' | 'manual' | 'none';
     defaultModel: string;
     thinkingLevel: string;

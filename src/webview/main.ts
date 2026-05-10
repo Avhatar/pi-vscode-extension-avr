@@ -260,7 +260,13 @@ function applyStateSync(s: SerializedAgentState): void {
         draftFiles.set(prevTab, [...currentFileAttachments]);
     }
 
-    state.messages = s.messages ?? [];
+    // Preserve locally-pushed error banners across server-driven state syncs.
+    // The server replaces state.messages with the SDK's transcript, which does
+    // not include role:'error' entries; without this re-append, error banners
+    // posted by the controller (e.g. provider failures, empty responses) would
+    // render for one frame and then be wiped by the agent_end stateSync.
+    const localErrors = state.messages.filter((m: any) => m?.role === 'error');
+    state.messages = [...(s.messages ?? []), ...localErrors];
     state.isStreaming = s.isStreaming;
     state.isCompacting = s.isCompacting ?? false;
     state.model = s.model;
@@ -351,6 +357,9 @@ function handleAgentEvent(event: any): void {
             }
             break;
         case 'agent_start':
+            // Drop error banners from the previous turn so a successful retry
+            // doesn't leave a stale provider-error message stuck to the chat.
+            state.messages = state.messages.filter((m: any) => m?.role !== 'error');
             state.isStreaming = true;
             state.streamingText = '';
             state.streamingThinking = '';

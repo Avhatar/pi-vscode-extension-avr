@@ -1,4 +1,5 @@
 import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo, OAuthFlowState } from '../shared/protocol';
+import { API_KEY_PROVIDERS } from '../shared/providers';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: SettingsClientMessage): void;
@@ -54,14 +55,19 @@ function render(data: SettingsData): void {
     header.innerHTML = `<h1>Pi Code Settings</h1>`;
     container.appendChild(header);
 
+    const configuredSet = new Set(data.configuredProviders ?? []);
+    const providerOptions = [
+        { value: '', label: 'Auto-detect' },
+        ...API_KEY_PROVIDERS.map((p) => ({
+            value: p.id,
+            label: configuredSet.has(p.id) ? `✓ ${p.label}` : p.label,
+        })),
+    ];
+
     container.appendChild(buildSection('API Connection', [
-        buildSelect('apiProvider', 'Provider', data.apiProvider, [
-            { value: '', label: 'Auto-detect' },
-            { value: 'anthropic', label: 'Anthropic' },
-            { value: 'openai', label: 'OpenAI' },
-            { value: 'google', label: 'Google Gemini' },
-            { value: 'deepseek', label: 'DeepSeek' },
-        ], 'Select which AI provider to use. Leave on Auto-detect for automatic resolution.'),
+        buildSelect('apiProvider', 'Provider', data.apiProvider, providerOptions,
+            'Select which AI provider to use. Leave on Auto-detect for automatic resolution. A leading ✓ means an API key is already saved for that provider.'),
+        buildConfiguredProvidersChips(data.configuredProviders ?? []),
         buildApiKeyField(data),
         buildTextInput('apiBaseUrl', 'API Base URL', data.apiBaseUrl,
             'Custom endpoint URL for proxies or self-hosted models. Leave empty for default.'),
@@ -280,6 +286,35 @@ function buildApiKeyField(data: SettingsData): HTMLElement {
         `;
     }
     return row;
+}
+
+function buildConfiguredProvidersChips(configured: string[]): HTMLElement {
+    const row = el('div', 'setting-row configured-providers');
+    if (configured.length === 0) {
+        row.innerHTML = `<p class="setting-description">No API keys saved yet. Pick a provider above and add a key.</p>`;
+        return row;
+    }
+    const labelById = new Map(API_KEY_PROVIDERS.map((p) => [p.id, p.label]));
+    const chips = configured
+        .map((id) => {
+            const label = labelById.get(id) ?? id;
+            return `<button type="button" class="provider-chip" data-provider-id="${escapeAttr(id)}" title="Switch to ${escapeAttr(label)}">✓ ${escapeHtml(label)}</button>`;
+        })
+        .join('');
+    row.innerHTML = `
+        <label>Saved API keys</label>
+        <div class="provider-chips">${chips}</div>
+        <p class="setting-description">Click a chip to switch the active provider to it.</p>
+    `;
+    return row;
+}
+
+function escapeHtml(s: string): string {
+    return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+}
+
+function escapeAttr(s: string): string {
+    return escapeHtml(s).replace(/'/g, '&#39;');
 }
 
 function buildAuthIndicator(method: SettingsData['authMethod']): HTMLElement {
@@ -635,6 +670,14 @@ function bindEvents(): void {
         if (provider) {
             vscode.postMessage({ type: 'clearApiKey', provider });
         }
+    });
+
+    document.querySelectorAll<HTMLButtonElement>('.provider-chip[data-provider-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-provider-id') || '';
+            if (!id) return;
+            vscode.postMessage({ type: 'updateSetting', key: 'apiProvider', value: id });
+        });
     });
 
     const keybindingsLink = document.getElementById('btn-open-keybindings');

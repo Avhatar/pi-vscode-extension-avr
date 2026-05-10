@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo, OAuthProviderInfo } from '../shared/protocol';
+import { API_KEY_PROVIDERS } from '../shared/providers';
 import { getAuthStorage, notifyAuthChanged } from '../pi/auth';
 import { refreshModelRegistry } from '../pi/models';
 
@@ -112,11 +113,12 @@ export class SettingsPanel {
         const config = vscode.workspace.getConfiguration('pi-code');
         const provider = config.get<string>('apiProvider', '');
 
-        let apiKeySet = false;
-        if (provider) {
-            const stored = await this._secrets.get(`${API_KEY_PREFIX}${provider}`);
-            apiKeySet = !!stored;
+        const configuredProviders: string[] = [];
+        for (const p of API_KEY_PROVIDERS) {
+            const stored = await this._secrets.get(`${API_KEY_PREFIX}${p.id}`);
+            if (stored) configuredProviders.push(p.id);
         }
+        const apiKeySet = !!provider && configuredProviders.includes(provider);
 
         const authMethod = this._detectAuthMethod(provider, apiKeySet);
         const oauthProviders = await this._getOAuthProviders();
@@ -125,6 +127,7 @@ export class SettingsPanel {
             apiProvider: provider,
             apiBaseUrl: config.get<string>('apiBaseUrl', ''),
             apiKeySet,
+            configuredProviders,
             authMethod,
             defaultModel: config.get<string>('defaultModel', ''),
             thinkingLevel: config.get<string>('thinkingLevel', 'off'),
@@ -291,8 +294,24 @@ export class SettingsPanel {
         const envVarMap: Record<string, string> = {
             anthropic: 'ANTHROPIC_API_KEY',
             openai: 'OPENAI_API_KEY',
+            'azure-openai-responses': 'AZURE_OPENAI_API_KEY',
             google: 'GEMINI_API_KEY',
+            'google-vertex': 'GOOGLE_CLOUD_API_KEY',
             deepseek: 'DEEPSEEK_API_KEY',
+            qwen: 'DASHSCOPE_API_KEY',
+            'qwen-cn': 'DASHSCOPE_CN_API_KEY',
+            openrouter: 'OPENROUTER_API_KEY',
+            groq: 'GROQ_API_KEY',
+            cerebras: 'CEREBRAS_API_KEY',
+            xai: 'XAI_API_KEY',
+            mistral: 'MISTRAL_API_KEY',
+            fireworks: 'FIREWORKS_API_KEY',
+            huggingface: 'HF_TOKEN',
+            'kimi-coding': 'KIMI_API_KEY',
+            minimax: 'MINIMAX_API_KEY',
+            'minimax-cn': 'MINIMAX_CN_API_KEY',
+            zai: 'ZAI_API_KEY',
+            'vercel-ai-gateway': 'AI_GATEWAY_API_KEY',
         };
 
         if (provider && envVarMap[provider] && process.env[envVarMap[provider]]) {

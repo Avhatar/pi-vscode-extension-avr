@@ -7,6 +7,48 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-05-10
+
+### Fixed
+- Qwen requests no longer fail with `400 'developer' is not one of ['system','assistant','user','tool','function']`. The Pi SDK's OpenAI-compatible adapter switches the system prompt to `role: 'developer'` for any reasoning-enabled model unless the model explicitly opts out, but DashScope's OpenAI-compatible endpoint only accepts the standard chat-completions roles. All bundled Qwen models now declare `supportsDeveloperRole: false` (along with `supportsStore` and `supportsLongCacheRetention` opt-outs for the same reason: those parameters are OpenAI-specific and confuse DashScope), so the system prompt is sent as `role: 'system'` instead.
+
+## [0.17.2] - 2026-05-10
+
+### Fixed
+- Provider error banners now actually stay visible. Previously every error pushed to the chat was wiped one frame later by the `agent_end` state sync (which replaces the message list with the SDK's transcript, and the SDK does not store `role:'error'` entries), so silent Qwen/DashScope failures stayed silent even after the 0.17.1 detection fix. The webview now preserves locally-pushed error banners across state syncs and clears them on the next `agent_start`.
+
+## [0.17.1] - 2026-05-10
+
+### Fixed
+- Empty or unreported provider responses are no longer swallowed silently. When a turn ends with an `error` stop reason but no error message attached (some providers omit it), the chat now still surfaces a banner. When a turn ends with HTTP success but no streamed content at all (e.g. DashScope/Qwen returning 200 with no choices on quota or region/auth issues), the chat now shows an actionable banner explaining the most likely causes (invalid key, exhausted quota, region/endpoint mismatch). Provider errors are also written to the "Pi Code" output channel with the provider, model, and stop reason for diagnostics.
+
+## [0.17.0] - 2026-05-10
+
+### Added
+- Qwen model picker now includes the Qwen3.6 and Qwen3.5 flagship lineup: `qwen3.6-max-preview`, `qwen3.6-max` (latest alias), `qwen3.6-plus`, `qwen3.5-plus`. The Qwen3.6 series is vision-language so it accepts images, and reasoning is enabled with the DashScope `enable_thinking` format. Existing aliases (`qwen3-max`, `qwen-plus`, `qwen-turbo`, `qwen3-coder-plus`/`-flash`, `qwq-plus`, `qwen-vl-max`, `qwen3-vl-plus`) are kept and now have a "(latest)" suffix in their display name to make it explicit they track DashScope's current snapshot.
+
+## [0.16.3] - 2026-05-10
+
+### Fixed
+- Qwen models now actually appear in the chat model picker after entering a DashScope API key. Previously the Qwen provider registration was silently rejected by the Pi SDK validator (which requires an `apiKey` field at registration time), so Qwen models were never added to the registry. The provider is now registered dynamically once a key is saved and unregistered when the key is removed.
+
+## [0.16.2] - 2026-05-10
+
+### Fixed
+- Models list in the chat now refreshes immediately after saving a new API key in Settings. Previously the new provider's models (e.g. Qwen) only became selectable after a window reload, because the auth-changed signal that triggers the model rebroadcast was wired only to OAuth login/logout, not to manual API-key saves.
+
+## [0.16.1] - 2026-05-10
+
+### Added
+- Settings page now shows which providers already have a saved API key: configured providers are listed as clickable chips under the dropdown ("Saved API keys"), and the dropdown itself prefixes those entries with a ✓ check mark. Click a chip to switch the active provider to it.
+
+## [0.16.0] - 2026-05-10
+
+### Added
+- Provider dropdown in Settings now exposes the full set of providers supported by the Pi SDK (OpenRouter, Groq, Cerebras, xAI, Mistral, Fireworks, Hugging Face, Kimi, MiniMax, Z.ai, Vercel AI Gateway, Google Vertex AI, Azure OpenAI, Amazon Bedrock) so their API keys can be entered directly from the UI.
+- Built-in Qwen (Alibaba DashScope) provider for both regions: choose "Qwen (Alibaba DashScope International)" (`dashscope-intl.aliyuncs.com`) or "Qwen (Alibaba DashScope China)" (`dashscope.aliyuncs.com`) in Settings and paste your DashScope API key to use Qwen3 Max, Qwen3 Coder Plus/Flash, Qwen Plus, Qwen Turbo, QwQ Plus, Qwen VL Max, and Qwen3 VL Plus.
+- Auth-method detection in Settings now recognises the standard environment variables for every newly exposed provider (e.g. `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `DASHSCOPE_API_KEY`).
+
 ## [0.15.6] - 2026-05-10
 
 ### Added

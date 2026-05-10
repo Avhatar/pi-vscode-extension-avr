@@ -6,8 +6,11 @@ const API_KEY_PREFIX = 'pi-code.apiKey.';
 const KNOWN_PROVIDERS = [
     'anthropic', 'openai', 'google', 'deepseek', 'mistral', 'groq',
     'cerebras', 'xai', 'openrouter', 'fireworks', 'huggingface',
-    'bedrock', 'vertex', 'azure', 'kimi', 'minimax', 'gateway',
-    'gemini', 'claude',
+    'bedrock', 'amazon-bedrock', 'vertex', 'google-vertex',
+    'azure', 'azure-openai-responses',
+    'kimi', 'kimi-coding', 'minimax', 'minimax-cn',
+    'gateway', 'vercel-ai-gateway',
+    'gemini', 'claude', 'zai', 'qwen', 'qwen-cn',
 ];
 
 let cached: AuthStorage | undefined;
