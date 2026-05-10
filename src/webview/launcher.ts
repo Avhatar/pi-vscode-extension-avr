@@ -266,7 +266,7 @@ function renderTodoIcon(status: TaskStatus): HTMLElement {
 }
 
 function renderRecentSessions(): HTMLElement {
-    const section = el('div', 'section');
+    const section = el('div', 'section history-section');
 
     // Show only sessions that aren't currently open in editor tabs.
     const closed = currentState.recentSessions.filter(s => !s.isOpen);

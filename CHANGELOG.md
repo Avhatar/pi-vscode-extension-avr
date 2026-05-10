@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-05-10
+
+### Changed
+- History section in the launcher sidebar now has the same framed visual style (border, rounded corners) as the ToDo section.
+
+## [0.15.3] - 2026-05-10
+
+### Changed
+- History panel in sidebar now has the same framed visual style (border, rounded corners) as the ToDo panel.
+
 ## [0.15.2] - 2026-05-10
 
 ### Added

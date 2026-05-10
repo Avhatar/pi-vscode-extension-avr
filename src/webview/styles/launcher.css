@@ -276,6 +276,15 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* ── History section ── */
+
+.history-section {
+    border: 1px solid var(--vscode-widget-border, transparent);
+    border-radius: var(--row-radius);
+    padding: 4px 6px 6px;
+    background: var(--vscode-sideBarSectionHeader-background, transparent);
+}
+
 /* ── Session rows ── */
 
 .session-list {

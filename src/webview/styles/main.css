@@ -1612,11 +1612,13 @@ body[data-mode="panel"] .tab-strip,
 
 /* ── Sessions panel ── */
 .session-panel {
-    border-bottom: 1px solid var(--border);
+    margin: 0 8px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     max-height: 250px;
     overflow-y: auto;
     flex-shrink: 0;
-    background: var(--card-bg);
+    background: rgba(0, 0, 0, 0.15);
 }
 .session-header {
     display: flex;
@@ -1628,7 +1630,7 @@ body[data-mode="panel"] .tab-strip,
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
-    background: var(--card-bg);
+    background: rgba(0, 0, 0, 0.15);
 }
 .session-list { padding: 2px 0; }
 .session-item {
