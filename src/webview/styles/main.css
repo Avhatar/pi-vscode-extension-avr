@@ -767,6 +767,11 @@ body[data-mode="panel"] .tab-strip,
     height: 18px;
     filter: brightness(0) invert(0.8);
 }
+.tool-header:has(.tool-status.running) .tool-icon,
+.diff-file-header:has(.tool-status.running) .tool-icon {
+    opacity: 1;
+    animation: pulse-dot 1.5s ease-in-out infinite;
+}
 .tool-name { font-weight: normal; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .tool-status {

@@ -12,6 +12,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - ToDo items in the left sidebar now show incomplete tasks as dots and completed tasks as checkmarks.
+- Running action icons in chat now pulse while their tool call is still active, matching the thinking indicator.
 
 ## [0.17.6] - 2026-05-10
 
