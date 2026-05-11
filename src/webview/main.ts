@@ -1667,7 +1667,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
         }
         const rawText = extractText(msg);
         const images = extractImages(msg);
-        const { cleanText, fileNames } = stripFileBlocks(rawText);
+        const { cleanText, fileNames } = stripFileBlocks(stripPlanModeBlock(rawText));
         const { skillName, userText } = parseSkillFromUserMessage(cleanText);
         if (skillName) {
             const badge = el('span', 'skill-badge');
@@ -1697,7 +1697,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
 
     // Assistant messages: wrap in a styled container
     const thinking = extractThinking(msg);
-    const text = extractText(msg);
+    const text = stripPlanCompleteMarker(extractText(msg));
 
     if (!thinking && !text) {
         const empty = el('div');
@@ -1989,7 +1989,7 @@ function renderStreamingContent(): void {
 
     const textEl = document.getElementById('streaming-text');
     if (textEl) {
-        textEl.innerHTML = renderMarkdown(state.streamingText);
+        textEl.innerHTML = renderMarkdown(stripPlanCompleteMarker(state.streamingText));
     }
 
     bindCopyButtons();
@@ -4097,6 +4097,17 @@ function extractText(msg: any): string {
  *  Text files:   [File: name]\ncontent\n[/File]\n */
 const FILE_BLOCK_RE = /\[File:\s*(.+?)\]\s*(?:\(binary file\))?[\s\S]*?\[\/File\]\s*\n?/g;
 
+/** Pattern for the Plan Mode prefix injected by chat-controller when entering
+ *  the PLAN or EXEC phase. Always lives at the very start of the prompt. Keep
+ *  in sync with the wrapper tags in chat-controller.ts. */
+const PLAN_MODE_BLOCK_RE = /^<plan-mode-instructions>[\s\S]*?<\/plan-mode-instructions>\s*\n?/;
+
+/** Pattern for the agent's plan-complete signal. Matches the marker plus any
+ *  surrounding whitespace so the surrounding lines don't end up with a blank
+ *  trailing paragraph after stripping. Kept lenient on whitespace and the
+ *  optional self-closing slash. */
+const PLAN_COMPLETE_MARKER_RE = /\s*<\s*plan-complete\s*\/?\s*>\s*/gi;
+
 interface StrippedFileInfo {
     cleanText: string;
     fileNames: string[];
@@ -4110,6 +4121,19 @@ function stripFileBlocks(text: string): StrippedFileInfo {
         return '';
     });
     return { cleanText, fileNames };
+}
+
+/** Strip the leading <plan-mode-instructions>...</plan-mode-instructions> block
+ *  so the chat bubble shows only what the user typed. */
+function stripPlanModeBlock(text: string): string {
+    return text.replace(PLAN_MODE_BLOCK_RE, '');
+}
+
+/** Strip the agent's `<plan-complete/>` completion marker from assistant text
+ *  before rendering. The marker is a control signal for the chat controller,
+ *  not user-facing content. */
+function stripPlanCompleteMarker(text: string): string {
+    return text.replace(PLAN_COMPLETE_MARKER_RE, '');
 }
 
 function extractImages(msg: any): ImageAttachment[] {

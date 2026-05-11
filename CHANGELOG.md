@@ -7,8 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-05-11
+
 ### Added
 - `find` tool now uses the magnifying-glass icon, matching `glob` and `grep`.
+
+### Changed
+- Plan Mode: replaced the hardcoded English/Russian follow-up keyword heuristic with an agent-driven completion signal. After executing a plan the agent now emits the marker `<plan-complete/>` when (and only when) the planned work is fully done. The next user prompt then restarts the planning cycle, while follow-up prompts (no marker) stay in execution. Works in any language. A 10-minute idle reset is kept as a safety net in case the agent forgets to emit the marker.
+
+### Fixed
+- Plan Mode: the planning-phase instructions injected into the agent prompt are now wrapped in a marker block and stripped from the chat bubble, so the user's message displays exactly what they typed instead of the internal scaffolding text.
+- Plan Mode: the agent's `<plan-complete/>` control marker is stripped from the assistant message bubble (both streaming and final) so it is not shown to the user.
 
 ## [0.19.1] - 2026-05-11
 
