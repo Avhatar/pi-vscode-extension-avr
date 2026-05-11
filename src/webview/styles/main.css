@@ -398,7 +398,20 @@ body[data-mode="panel"] .tab-strip,
     background: transparent;
     border: none;
     border-radius: 0;
-    margin: 0 0 8px 0;
+    margin: 0;
+    padding: 0 0 8px 0;
+    position: relative;
+}
+.message-group-assistant::before {
+    content: '';
+    position: absolute;
+    left: 24px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+    pointer-events: none;
+    z-index: 0;
 }
 
 .message-group-compaction {
@@ -467,7 +480,7 @@ body[data-mode="panel"] .tab-strip,
     padding: 0;
 }
 .message-assistant > .message-content {
-    padding: 8px 16px 16px;
+    padding: 8px 16px 16px 48px;
 }
 
 /* ── Message footer (timestamp / stats) ── */
@@ -489,7 +502,7 @@ body[data-mode="panel"] .tab-strip,
     border-top: none;
     background: transparent;
     border-radius: 0;
-    padding: 0 16px 2px;
+    padding: 0 16px 2px 48px;
 }
 
 .message-role {
@@ -747,7 +760,7 @@ body[data-mode="panel"] .tab-strip,
 .tool-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 14px;
     padding: 6px 16px;
     font-size: var(--vscode-font-size, 13px) !important;
     user-select: none;
@@ -760,6 +773,10 @@ body[data-mode="panel"] .tab-strip,
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+    background: var(--bg);
+    box-shadow: 0 0 0 4px var(--bg);
 }
 
 .tool-icon-img {
@@ -786,7 +803,7 @@ body[data-mode="panel"] .tab-strip,
 .tool-status.pending { background: var(--badge-bg); color: var(--badge-fg); }
 
 .tool-intent {
-    padding: 4px 16px;
+    padding: 4px 16px 4px 48px;
     font-style: italic;
     font-size: 12px;
     color: var(--muted);
@@ -794,7 +811,7 @@ body[data-mode="panel"] .tab-strip,
 }
 
 .tool-args, .tool-result {
-    padding: 8px 16px;
+    padding: 8px 16px 8px 48px;
     font-family: var(--font-mono);
     font-size: 11px;
     overflow-x: auto;
@@ -835,11 +852,11 @@ body[data-mode="panel"] .tab-strip,
 }
 
 .tool-body {
-    margin: 0 16px;
+    margin: 0 16px 0 48px;
 }
 
 .todo-tool-result {
-    margin: 0 16px 8px;
+    margin: 0 16px 8px 48px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: rgba(0, 0, 0, 0.15);
@@ -919,7 +936,7 @@ body[data-mode="panel"] .tab-strip,
 .tool-io-card[open] .tool-io-preview { display: none; }
 .tool-io-preview,
 .tool-io-full {
-    margin: 0 16px 8px;
+    margin: 0 16px 8px 48px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: rgba(0, 0, 0, 0.15);
@@ -977,7 +994,44 @@ body[data-mode="panel"] .tab-strip,
 .tool-result::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
 
 .tool-card-wrapper {
-    margin: 0 0 4px 0;
+    margin: 0;
+    padding: 0 0 4px 0;
+    position: relative;
+}
+.tool-card-wrapper::before {
+    content: '';
+    position: absolute;
+    left: 24px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Rail trim: hide line above the icon when this is the first action in a turn
+   (no previous element or previous is a user message). y:15 = icon vertical center. */
+.message-group-user + .message-group-assistant::before,
+.message-group-user + .tool-card-wrapper::before,
+.messages > .message-group-assistant:first-child::before,
+.messages > .tool-card-wrapper:first-child::before,
+#streaming-message > .tool-card-wrapper:first-child::before,
+#streaming-message > .message-group-assistant:first-child::before {
+    top: 15px;
+}
+
+/* Rail trim: hide line below the icon when this is the last action in a turn
+   (next is a user message, or no next action — empty streaming). */
+.message-group-assistant:has(+ .message-group-user)::before,
+.tool-card-wrapper:has(+ .message-group-user)::before,
+.message-group-assistant:has(+ #streaming-message:empty)::before,
+.tool-card-wrapper:has(+ #streaming-message:empty)::before,
+#streaming-message > .tool-card-wrapper:last-child::before,
+#streaming-message > .message-group-assistant:last-child::before {
+    top: 0;
+    bottom: auto;
+    height: 15px;
 }
 .tool-card-wrapper > .tool-card {
     margin-bottom: 0;
@@ -994,7 +1048,7 @@ body[data-mode="panel"] .tab-strip,
 }
 
 .tool-footer {
-    padding: 2px 16px 4px;
+    padding: 2px 16px 4px 48px;
     font-size: 11px;
     color: var(--muted);
     background: transparent;
@@ -1022,7 +1076,7 @@ body[data-mode="panel"] .tab-strip,
     list-style: none;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 14px;
     transition: color 0.15s;
     outline: none;
     white-space: nowrap;
@@ -1040,6 +1094,10 @@ body[data-mode="panel"] .tab-strip,
     height: 18px;
     flex-shrink: 0;
     opacity: 0.7;
+    position: relative;
+    z-index: 1;
+    background: var(--bg);
+    box-shadow: 0 0 0 4px var(--bg);
 }
 
 .thinking-indicator-icon {
@@ -1081,7 +1139,7 @@ body[data-mode="panel"] .tab-strip,
     font-size: 12px;
     color: var(--muted);
     border-top: 1px solid var(--border);
-    margin: 0 16px;
+    margin: 0 16px 0 48px;
     max-height: 300px;
     overflow-y: auto;
     line-height: 1.5;
@@ -1658,7 +1716,7 @@ body[data-mode="panel"] .tab-strip,
 
 /* ── Inline diff cards ── */
 .diff-card {
-    margin: 0 0 8px 0;
+    margin: 0;
     border: none;
     border-radius: 0;
     background: transparent;
@@ -1672,7 +1730,7 @@ body[data-mode="panel"] .tab-strip,
 .diff-file-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 14px;
     padding: 6px 16px;
     font-size: var(--vscode-font-size, 13px) !important;
     cursor: pointer;
@@ -1725,7 +1783,7 @@ body[data-mode="panel"] .tab-strip,
 
 .diff-view {
     position: relative;
-    margin: 0 16px 8px;
+    margin: 0 16px 8px 48px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     max-height: 250px;

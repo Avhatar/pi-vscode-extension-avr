@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Chat: tool, diff and thinking rows now sit on a vertical timeline rail — action icons line up in a column on the left, a faint connecting line runs through them top-to-bottom, and labels and bodies are shifted right of the icon column for clearer separation. User prompt bubbles are unchanged.
+
 ### Fixed
 - Sidebar launcher: aligned the Plan Mode heading with the ToDo and History rows so the title and toggle line up uniformly.
 
