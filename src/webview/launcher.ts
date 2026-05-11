@@ -119,6 +119,9 @@ function renderPlanMode(): HTMLElement | undefined {
 
     const heading = el('div', 'section-heading plan-mode-heading');
     heading.title = 'When enabled, the agent studies your request with read-only tools and proposes a plan before making any changes.';
+    // Empty chevron-width spacer keeps the title aligned with the ToDo /
+    // History headings, which start their text after a real chevron.
+    heading.appendChild(el('span', 'section-chevron'));
     heading.appendChild(el('span', 'section-title', 'Plan Mode'));
 
     const toggleHost = el('span', 'todo-toggle-host');

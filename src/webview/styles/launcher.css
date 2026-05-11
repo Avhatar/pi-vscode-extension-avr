@@ -134,7 +134,9 @@ body {
     align-items: center;
     gap: 4px;
     margin-top: 0;
-    padding: 2px 0;
+    /* Horizontal padding matches .section-heading-button so the title
+       and right-aligned toggle line up with the ToDo / History rows. */
+    padding: 2px 4px;
 }
 
 /* ── ToDo section ── */

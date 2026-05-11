@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Sidebar launcher: aligned the Plan Mode heading with the ToDo and History rows so the title and toggle line up uniformly.
+
 ## [0.19.2] - 2026-05-11
 
 ### Added
