@@ -95,6 +95,9 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                 case 'setTodoEnabled':
                     await this._controller.setActiveTabTodoEnabled(msg.enabled);
                     break;
+                case 'setPlanModeEnabled':
+                    await this._controller.setActiveTabPlanModeEnabled(msg.enabled);
+                    break;
                 case 'openSettings':
                     vscode.commands.executeCommand('pi-code.openSettings');
                     break;

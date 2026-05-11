@@ -120,6 +120,23 @@ body {
     font-size: 0.92em;
 }
 
+/* ── Plan Mode section ── */
+
+.plan-mode-section {
+    border: 1px solid var(--vscode-widget-border, transparent);
+    border-radius: var(--row-radius);
+    padding: 4px 6px 6px;
+    background: var(--vscode-sideBarSectionHeader-background, transparent);
+}
+
+.plan-mode-heading {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 0;
+    padding: 2px 0;
+}
+
 /* ── ToDo section ── */
 
 .todo-section {

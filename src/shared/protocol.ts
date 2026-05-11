@@ -291,6 +291,13 @@ export interface LauncherState {
      *  (purely a UI preference, global like `historyCollapsed`).
      *  Persisted via globalState. */
     todoCollapsed: boolean;
+    /** Per-tab Plan Mode toggle state for the active tab. Absent when
+     *  there is no active tab. When enabled, the agent first studies
+     *  the task with read-only tools before executing. */
+    planModeEnabled?: boolean;
+    /** True when the active tab is streaming or compacting and the
+     *  Plan Mode toggle should be greyed out. */
+    planModeToggleDisabled?: boolean;
 }
 
 export type LauncherClientMessage =
@@ -303,6 +310,7 @@ export type LauncherClientMessage =
     | { type: 'setHistoryCollapsed'; collapsed: boolean }
     | { type: 'setTodoEnabled'; enabled: boolean }
     | { type: 'setTodoCollapsed'; collapsed: boolean }
+    | { type: 'setPlanModeEnabled'; enabled: boolean }
     | { type: 'openSettings' };
 
 export type LauncherServerMessage =

@@ -67,6 +67,8 @@ function render(): void {
     root.innerHTML = '';
 
     root.appendChild(renderToolbar());
+    const planMode = renderPlanMode();
+    if (planMode) root.appendChild(planMode);
     const todos = renderTodos();
     if (todos) root.appendChild(todos);
     root.appendChild(renderRecentSessions());
@@ -98,6 +100,62 @@ function setHistoryCollapsed(collapsed: boolean): void {
     currentState = { ...currentState, historyCollapsed: collapsed };
     render();
     vscode.postMessage({ type: 'setHistoryCollapsed', collapsed });
+}
+
+// ── Plan Mode section ──
+//
+// A compact toggle row above ToDo. When ON, the agent studies the
+// task with read-only tools, proposes a plan, and asks clarifying
+// questions before executing. Simple toggle — no collapsible body.
+
+function renderPlanMode(): HTMLElement | undefined {
+    // Only show when there's an active panel (planModeEnabled is defined).
+    if (currentState.planModeEnabled === undefined) return undefined;
+
+    const enabled = currentState.planModeEnabled === true;
+    const toggleDisabled = currentState.planModeToggleDisabled === true;
+
+    const section = el('div', 'section plan-mode-section');
+
+    const heading = el('div', 'section-heading plan-mode-heading');
+    heading.appendChild(el('span', 'section-title', 'Plan Mode'));
+
+    const toggleHost = el('span', 'todo-toggle-host');
+    toggleHost.addEventListener('click', (e) => e.stopPropagation());
+    toggleHost.appendChild(renderPlanModeToggle(enabled, toggleDisabled));
+    heading.appendChild(toggleHost);
+
+    section.appendChild(heading);
+    return section;
+}
+
+function renderPlanModeToggle(enabled: boolean, disabled: boolean): HTMLElement {
+    const wrap = el('label', `todo-toggle${disabled ? ' todo-toggle-disabled' : ''}`);
+    wrap.title = disabled
+        ? 'Wait for the agent to finish before toggling Plan Mode'
+        : enabled
+            ? 'Disable Plan Mode — agent executes immediately'
+            : 'Enable Plan Mode — agent plans before making changes';
+
+    const input = el('input', 'todo-toggle-input') as HTMLInputElement;
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.disabled = disabled;
+    input.addEventListener('change', () => {
+        if (disabled) return;
+        const next = input.checked;
+        currentState = { ...currentState, planModeEnabled: next };
+        render();
+        vscode.postMessage({ type: 'setPlanModeEnabled', enabled: next });
+    });
+    wrap.appendChild(input);
+
+    const track = el('span', 'todo-toggle-track');
+    const thumb = el('span', 'todo-toggle-thumb');
+    track.appendChild(thumb);
+    wrap.appendChild(track);
+
+    return wrap;
 }
 
 // ── ToDo section ──

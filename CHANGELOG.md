@@ -7,7 +7,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-10
+
 ### Added
+- **Plan Mode**: A per-chat toggle in the sidebar that makes the agent study the task and propose a plan with read-only tools before making any changes. When enabled, the first message in a new task is sent with only diagnostic/read tools — the model analyses, asks clarifying questions, and suggests an approach. The user's response then unlocks the full tool set for execution. After execution, the next prompt restarts the cycle. Minor follow-ups (short messages, confirmations) keep execution tools so the flow stays natural. Disabled by default for new chats; toggle it on via the Plan Mode switch above ToDo in the sidebar.
 - Assistant message footers now show each turn's elapsed time and the cumulative active turn time for the chat alongside token usage, excluding idle gaps between turns.
 
 ### Changed

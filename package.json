@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.17.6",
+  "version": "0.18.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -178,6 +178,11 @@
           "type": "string",
           "default": ".pi/file-mentions.json",
           "description": "Workspace-relative JSON config file for @ file mention indexing settings."
+        },
+        "pi-code.planMode.defaultEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Plan Mode for new chats by default. When on, the agent studies the task and proposes a plan before making any changes. Each chat keeps its own toggle state."
         },
         "pi-code.todo.defaultEnabled": {
           "type": "boolean",

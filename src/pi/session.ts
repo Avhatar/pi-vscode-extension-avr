@@ -123,6 +123,71 @@ export class PiSessionManager {
             ? [...active, 'todo']
             : active.filter((name) => name !== 'todo');
         session.setActiveToolsByName(next);
+        // If Plan Mode is active, the saved full tool set must stay in
+        // sync so restoring later reflects the user's ToDo preference.
+        if (this._planModeActive && this._savedToolNames.length > 0) {
+            if (visible && !this._savedToolNames.includes('todo')) {
+                this._savedToolNames = [...this._savedToolNames, 'todo'];
+            } else if (!visible) {
+                this._savedToolNames = this._savedToolNames.filter((n) => n !== 'todo');
+            }
+        }
+    }
+
+    // ── Plan Mode ──
+    //
+    // When Plan Mode is active, the agent is restricted to read-only
+    // tools so it can study the task and propose a plan without making
+    // any changes. The full tool set is saved before restriction and
+    // restored when Plan Mode is deactivated.
+
+    /** Tools allowed during Plan Mode's PLAN phase (study/plan only). */
+    static readonly PLAN_MODE_READONLY_TOOLS: ReadonlySet<string> = new Set([
+        'read', 'grep', 'find', 'ls',           // Pi built-in read-only
+        'web_search', 'code_search',             // pi-web-access
+        'fetch_content', 'get_search_content',   // pi-web-access
+        'todo',                                   // our inline extension
+        'mcp',                                    // MCP adapter (diagnostic queries)
+    ]);
+
+    /** True when Plan Mode has restricted tools to read-only. */
+    private _planModeActive = false;
+    /** Saved full tool set, restored when Plan Mode deactivates. */
+    private _savedToolNames: string[] = [];
+
+    get isPlanModeActive(): boolean {
+        return this._planModeActive;
+    }
+
+    /**
+     * Activate or deactivate Plan Mode's read-only tool restriction.
+     * When `active` is true, restricts to PLAN_MODE_READONLY_TOOLS
+     * (intersected with registered tools). When false, restores the
+     * full tool set saved during activation.
+     *
+     * Idempotent — passing the current state is a no-op.
+     */
+    setPlanModeActive(active: boolean): void {
+        const session = this._session;
+        if (!session) return;
+        if (active === this._planModeActive) return;
+
+        if (active) {
+            // Save full set, then restrict to read-only.
+            this._savedToolNames = session.getActiveToolNames();
+            const readOnly = this._savedToolNames.filter(
+                (name) => PiSessionManager.PLAN_MODE_READONLY_TOOLS.has(name),
+            );
+            session.setActiveToolsByName(readOnly);
+            this._planModeActive = true;
+        } else {
+            // Restore the saved full set.
+            if (this._savedToolNames.length > 0) {
+                session.setActiveToolsByName(this._savedToolNames);
+            }
+            this._savedToolNames = [];
+            this._planModeActive = false;
+        }
     }
 
     private async _buildResourceLoader(cwd: string): Promise<ResourceLoader> {
@@ -280,6 +345,8 @@ export class PiSessionManager {
         if (!this._session) { return; }
         this._unsubscribe?.();
         this._session.dispose();
+        this._planModeActive = false;
+        this._savedToolNames = [];
 
         const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
@@ -323,6 +390,8 @@ export class PiSessionManager {
 
     async initializeFromPath(sessionPath: string): Promise<void> {
         this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
+        this._planModeActive = false;
+        this._savedToolNames = [];
         const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
@@ -387,6 +456,8 @@ export class PiSessionManager {
         if (!this._session) { return; }
         this._unsubscribe?.();
         this._session.dispose();
+        this._planModeActive = false;
+        this._savedToolNames = [];
 
         const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
@@ -577,6 +648,8 @@ export class PiSessionManager {
         this._unsubscribe?.();
         this._session?.dispose();
         this._session = undefined;
+        this._planModeActive = false;
+        this._savedToolNames = [];
         this.events.clear();
     }
 

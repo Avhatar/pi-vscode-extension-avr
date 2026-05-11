@@ -26,6 +26,9 @@ interface PendingApproval {
     resolve: (approved: boolean) => void;
 }
 
+/** Plan Mode phase for the current tab. */
+type PlanModePhase = 'idle' | 'plan' | 'exec';
+
 interface TabState {
     id: string;
     name: string;
@@ -60,6 +63,8 @@ interface TabState {
     maxIdleGapMs: number;
     /** Cache retention applied to the most recent request from this tab. */
     cacheEffective: CacheEffective;
+    /** Plan Mode: current phase (idle → plan → exec → idle). */
+    planModePhase: PlanModePhase;
 }
 
 interface PersistedTabsState {
@@ -117,6 +122,7 @@ function makeTabState(
         lastTurnEndAt: 0,
         maxIdleGapMs: 0,
         cacheEffective: 'short',
+        planModePhase: 'idle',
     };
 }
 
@@ -254,6 +260,9 @@ export class ChatController implements vscode.Disposable {
      *  restore. Default for missing entries: `false` — the model
      *  knows nothing about ToDo until the user explicitly opts in. */
     private static readonly TODO_ENABLED_KEY_PREFIX = 'pi-code.todoEnabled.';
+
+    /** Persistence for per-tab Plan Mode toggle. Same shape as ToDo. */
+    private static readonly PLAN_MODE_KEY_PREFIX = 'pi-code.planModeEnabled.';
 
     /** Wired by the host (extension.ts) to construct a `ChatPanel` for a tab. */
     private _panelOpener?: (tabId: string) => void;
@@ -441,15 +450,19 @@ export class ChatController implements vscode.Disposable {
         let todos: TodoSnapshot | undefined;
         let todoEnabled: boolean | undefined;
         let todoToggleDisabled: boolean | undefined;
+        let planModeEnabled: boolean | undefined;
+        let planModeToggleDisabled: boolean | undefined;
         const activeTab = this._tabs.get(this._activeTabId);
         if (activeTab && this._openPanels.has(activeTab.id)) {
             const state = activeTab.session.todoStore.getState();
             todos = { tasks: state.tasks, nextId: state.nextId };
             todoEnabled = this._isTodoEnabledFor(activeTab);
             todoToggleDisabled = this._isTabBusy(activeTab);
+            planModeEnabled = this._isPlanModeEnabledFor(activeTab);
+            planModeToggleDisabled = this._isTabBusy(activeTab);
         }
 
-        return { tabs, recentSessions, todos, todoEnabled, todoToggleDisabled };
+        return { tabs, recentSessions, todos, todoEnabled, todoToggleDisabled, planModeEnabled, planModeToggleDisabled };
     }
 
     /** Expose the active tab's session for global commands (palette, keybindings). */
@@ -682,6 +695,11 @@ export class ChatController implements vscode.Disposable {
         // `initializeFromPath`, `loadSession`, `newSession`).
         this._applyPersistedTodo(tab);
 
+        // Apply persisted Plan Mode toggle. Same shape as ToDo — the
+        // toggle gates the feature; when OFF the agent has full tools
+        // immediately on every prompt.
+        this._applyPersistedPlanMode(tab);
+
         tab.session.setToolApprovalHandler(async (toolCallId, toolName, args) => {
             return this._requestToolApproval(tab, toolCallId, toolName, args);
         });
@@ -750,6 +768,104 @@ export class ChatController implements vscode.Disposable {
 
     private _isTabBusy(tab: TabState): boolean {
         return tab.isStreamingLocal || tab.isCompacting;
+    }
+
+    // ── Plan Mode ──
+
+    private _planModeKey(sessionPath: string | undefined): string | undefined {
+        if (!sessionPath) return undefined;
+        return `${ChatController.PLAN_MODE_KEY_PREFIX}${sessionPath}`;
+    }
+
+    private _planModeDefaultEnabled(): boolean {
+        return vscode.workspace
+            .getConfiguration('pi-code')
+            .get<boolean>('planMode.defaultEnabled', false);
+    }
+
+    private _applyPersistedPlanMode(tab: TabState): void {
+        const enabled = this._isPlanModeEnabledFor(tab);
+        // When enabled, start in `idle` phase so the next prompt
+        // triggers a planning cycle. When disabled, ensure full
+        // tools are restored.
+        if (enabled) {
+            tab.planModePhase = 'idle';
+            tab.session.setPlanModeActive(false); // ensure full tools initially
+        } else {
+            tab.session.setPlanModeActive(false);
+            tab.planModePhase = 'idle';
+        }
+    }
+
+    private _isPlanModeEnabledFor(tab: TabState): boolean {
+        const key = this._planModeKey(tab.session.sessionPath);
+        const fallback = this._planModeDefaultEnabled();
+        if (!key) return fallback;
+        return this._context.workspaceState.get<boolean>(key, fallback);
+    }
+
+    private async _setPlanModeEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
+        const key = this._planModeKey(tab.session.sessionPath);
+        if (!key) {
+            tab.session.setPlanModeActive(false);
+            tab.planModePhase = 'idle';
+            this._onLauncherStateChanged.fire();
+            return;
+        }
+        await this._context.workspaceState.update(key, enabled);
+        if (enabled) {
+            tab.planModePhase = 'idle';
+            tab.session.setPlanModeActive(false);
+        } else {
+            tab.session.setPlanModeActive(false);
+            tab.planModePhase = 'idle';
+        }
+        this._onLauncherStateChanged.fire();
+    }
+
+    /** Public entry for the launcher's Plan Mode toggle click. */
+    async setActiveTabPlanModeEnabled(enabled: boolean): Promise<void> {
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return;
+        if (this._isTabBusy(tab)) return;
+        await this._setPlanModeEnabledFor(tab, enabled);
+    }
+
+    // ── Plan Mode heuristic: follow-up vs new task ──
+    //
+    // After the agent finishes executing (EXEC phase → agent_end),
+    // the next user message might be a minor follow-up ("also add X",
+    // "fix the typo", "thanks") or a brand-new task. We distinguish
+    // based on message length and timing to avoid re-entering the
+    // PLAN phase for trivial continuations.
+
+    /** Max message length (chars) for a message to be considered a follow-up. */
+    private static readonly FOLLOWUP_MAX_LENGTH = 120;
+    /** Max idle time (ms) since last agent_end before forcing a new PLAN cycle. */
+    private static readonly FOLLOWUP_MAX_IDLE_MS = 2 * 60 * 1000;
+
+    /** Heuristic patterns that suggest a confirmation or follow-up. */
+    private static readonly FOLLOWUP_PATTERNS = [
+        /^(ok|okay|yes|yeah|yep|sure|да|ага|ок|хорошо|ладно|го|погнали|поехали|давай|продолжай|continue|proceed|go ahead|go on|lgtm|looks good|approved?\.?)/i,
+        /^(thanks|thank you|thx|спасибо|спс|мерси)/i,
+        /^(и|а|a|and|also|тоже|также|ещё|еще|plus|additionally)/i,
+        /^(fix|исправь|поправь|добавь|удали|поменяй|переименуй|сделай).{0,50}$/i,
+        /^(what about|как насчет|как насчёт|а как|what if|а если)/i,
+        /^(no|нет|не|don't|не надо).{0,80}$/i,
+        /^[?]\w|^(why|почему|зачем|как|how|what|что|where|где|when|когда).{0,60}[?]$/i,
+    ];
+
+    private _isFollowUp(tab: TabState, text: string): boolean {
+        const trimmed = text.trim();
+        if (trimmed.length > ChatController.FOLLOWUP_MAX_LENGTH) return false;
+
+        const idleGap = tab.lastTurnEndAt > 0 ? Date.now() - tab.lastTurnEndAt : 0;
+        if (idleGap > ChatController.FOLLOWUP_MAX_IDLE_MS) return false;
+
+        for (const pattern of ChatController.FOLLOWUP_PATTERNS) {
+            if (pattern.test(trimmed)) return true;
+        }
+        return false;
     }
 
     private _unsubscribeTab(tabId: string): void {
@@ -876,6 +992,11 @@ export class ChatController implements vscode.Disposable {
             tab.agentStartTime = 0;
             tab.isStreamingLocal = false;
             tab.lastTurnEndAt = turnEndAt;
+            // Plan Mode: after executing, return to idle so the next
+            // prompt starts a fresh planning cycle (unless it's a follow-up).
+            if (tab.planModePhase === 'exec') {
+                tab.planModePhase = 'idle';
+            }
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
             } else {
@@ -1086,6 +1207,30 @@ export class ChatController implements vscode.Disposable {
                         this.sendStateSync(tab.id);
                         break;
                     }
+
+                    // Plan Mode interception — restrict tools during PLAN phase.
+                    const planEnabled = this._isPlanModeEnabledFor(tab);
+                    if (planEnabled) {
+                        if (tab.planModePhase === 'idle') {
+                            // Start a new planning cycle: restrict to read-only tools.
+                            tab.planModePhase = 'plan';
+                            tab.session.setPlanModeActive(true);
+                        } else if (tab.planModePhase === 'plan') {
+                            // User is responding to the plan — grant full tools for execution.
+                            tab.planModePhase = 'exec';
+                            tab.session.setPlanModeActive(false);
+                        } else if (tab.planModePhase === 'exec') {
+                            // During execution, decide: follow-up or new task?
+                            if (this._isFollowUp(tab, msg.text)) {
+                                // Minor follow-up — keep full tools, stay in exec.
+                            } else {
+                                // New task — start a fresh planning cycle.
+                                tab.planModePhase = 'plan';
+                                tab.session.setPlanModeActive(true);
+                            }
+                        }
+                    }
+
                     if (tab.checkpointManager.rollbackPoint !== null) {
                         tab.checkpointManager.discardSuspended();
                         tab.diffManager.discardSuspended();
@@ -1144,6 +1289,12 @@ export class ChatController implements vscode.Disposable {
                 }
                 case 'abort':
                     await tab.session.abort();
+                    // If the user aborted during PLAN phase, reset to idle
+                    // so the next prompt starts a fresh planning cycle rather
+                    // than jumping directly to execution.
+                    if (tab.planModePhase === 'plan') {
+                        tab.planModePhase = 'idle';
+                    }
                     break;
                 case 'getModels': {
                     const models = tab.session.getModels();
@@ -1183,6 +1334,7 @@ export class ChatController implements vscode.Disposable {
                 case 'newSession':
                     await tab.session.newSession();
                     this._applyPersistedTodo(tab);
+                    this._applyPersistedPlanMode(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
                     tab.turnCounter = 0;
@@ -1207,6 +1359,7 @@ export class ChatController implements vscode.Disposable {
                 case 'loadSession':
                     await tab.session.loadSession(msg.sessionPath);
                     this._applyPersistedTodo(tab);
+                    this._applyPersistedPlanMode(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
                     tab.turnCounter = 0;
