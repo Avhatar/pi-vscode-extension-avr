@@ -2005,6 +2005,7 @@ function getToolIcon(name: string): string {
         read: 'text.png',
         write: 'pencil.png',
         edit: 'pencil.png',
+        find: 'magnifying-glass.png',
         glob: 'magnifying-glass.png',
         grep: 'magnifying-glass.png',
         list: 'folder.png',

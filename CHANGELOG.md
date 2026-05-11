@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `find` tool now uses the magnifying-glass icon, matching `glob` and `grep`.
+
 ## [0.19.1] - 2026-05-11
 
 ### Changed
