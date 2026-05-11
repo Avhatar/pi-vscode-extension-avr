@@ -1210,24 +1210,45 @@ export class ChatController implements vscode.Disposable {
 
                     // Plan Mode interception — restrict tools during PLAN phase.
                     const planEnabled = this._isPlanModeEnabledFor(tab);
+                    let promptText = msg.text;
                     if (planEnabled) {
                         if (tab.planModePhase === 'idle') {
                             // Start a new planning cycle: restrict to read-only tools.
+                            this._outputChannel.appendLine(`Plan Mode: idle → plan ("${msg.text.slice(0, 80)}")`);
                             tab.planModePhase = 'plan';
                             tab.session.setPlanModeActive(true);
                         } else if (tab.planModePhase === 'plan') {
                             // User is responding to the plan — grant full tools for execution.
+                            this._outputChannel.appendLine(`Plan Mode: plan → exec ("${msg.text.slice(0, 80)}")`);
                             tab.planModePhase = 'exec';
                             tab.session.setPlanModeActive(false);
                         } else if (tab.planModePhase === 'exec') {
                             // During execution, decide: follow-up or new task?
                             if (this._isFollowUp(tab, msg.text)) {
+                                this._outputChannel.appendLine(`Plan Mode: exec → exec (follow-up: "${msg.text.slice(0, 80)}")`);
                                 // Minor follow-up — keep full tools, stay in exec.
                             } else {
+                                this._outputChannel.appendLine(`Plan Mode: exec → plan (new task: "${msg.text.slice(0, 80)}")`);
                                 // New task — start a fresh planning cycle.
                                 tab.planModePhase = 'plan';
                                 tab.session.setPlanModeActive(true);
                             }
+                        }
+                        // When entering PLAN phase, inject Plan Mode instructions so the
+                        // model knows it is in read-only planning mode — not broken.
+                        if (tab.planModePhase === 'plan') {
+                            promptText =
+                                '[Plan Mode — PLANNING PHASE]\n' +
+                                'You are in Plan Mode. You have read-only tools — read, search,\n' +
+                                'code search, fetch, grep, find, ls. You CANNOT write, edit,\n' +
+                                'or run commands right now.\n' +
+                                'Your job: study the task, examine the codebase, create a clear\n' +
+                                'step-by-step plan (use the todo tool), and ask any clarifying\n' +
+                                'questions. When ready, present your plan to the user and\n' +
+                                'explicitly ask for confirmation to proceed.\n' +
+                                'Do NOT attempt to make changes or say you cannot do something.\n' +
+                                'Just plan and wait for the user to confirm.\n\n' +
+                                promptText;
                         }
                     }
 
@@ -1241,7 +1262,7 @@ export class ChatController implements vscode.Disposable {
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
                     this._prepareCacheForRequest(tab);
-                    await tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
+                    await tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(promptText), msg.images, msg.files);
                     break;
                 }
                 case 'steer':

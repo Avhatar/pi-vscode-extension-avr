@@ -7,6 +7,26 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-05-11
+
+### Changed
+- ToDo section tooltip now explicitly mentions that the task list survives `/compact`.
+
+## [0.19.0] - 2026-05-11
+
+### Added
+- Explanatory tooltips on the Plan Mode, ToDo, and History section headings in the sidebar launcher.
+
+## [0.18.2] - 2026-05-11
+
+### Fixed
+- Plan Mode: the agent now receives a clear planning-phase instruction when entering PLAN mode, so it knows it is in read-only planning mode (not broken) and presents a plan waiting for user confirmation instead of complaining about missing write tools.
+
+## [0.18.1] - 2026-05-11
+
+### Fixed
+- Plan Mode: fixed tool restriction so all read-only tools (`read`, `grep`, `find`, `ls`, `web_search`, `code_search`, `fetch_content`, `get_search_content`) are now activated from the full registry instead of only from currently-active tools, preventing missing-tool errors.
+
 ## [0.18.0] - 2026-05-10
 
 ### Added

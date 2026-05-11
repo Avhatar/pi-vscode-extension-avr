@@ -173,16 +173,32 @@ export class PiSessionManager {
         if (active === this._planModeActive) return;
 
         if (active) {
-            // Save full set, then restrict to read-only.
+            // Save the current active tool set so we can restore it later.
             this._savedToolNames = session.getActiveToolNames();
-            const readOnly = this._savedToolNames.filter(
-                (name) => PiSessionManager.PLAN_MODE_READONLY_TOOLS.has(name),
+            // Build the read-only tool set: all PLAN_MODE_READONLY_TOOLS
+            // that exist in the registry, respecting the ToDo toggle.
+            const readOnly = [...PiSessionManager.PLAN_MODE_READONLY_TOOLS];
+            // Respect ToDo visibility: if the user toggled todo OFF, remove
+            // it so Plan Mode doesn't silently re-enable it.
+            if (!this._savedToolNames.includes('todo')) {
+                const idx = readOnly.indexOf('todo');
+                if (idx >= 0) readOnly.splice(idx, 1);
+            }
+            this._outputChannel.appendLine(
+                `Plan Mode: restricting tools (${readOnly.join(', ')}) — saved ${this._savedToolNames.length} tools`,
             );
             session.setActiveToolsByName(readOnly);
+            const afterRestrict = session.getActiveToolNames();
+            this._outputChannel.appendLine(
+                `Plan Mode: active tools after restriction: ${afterRestrict.join(', ')}`,
+            );
             this._planModeActive = true;
         } else {
-            // Restore the saved full set.
+            // Restore the full tool set saved during activation.
             if (this._savedToolNames.length > 0) {
+                this._outputChannel.appendLine(
+                    `Plan Mode: restoring full tools (${this._savedToolNames.join(', ')})`,
+                );
                 session.setActiveToolsByName(this._savedToolNames);
             }
             this._savedToolNames = [];

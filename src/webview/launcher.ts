@@ -118,6 +118,7 @@ function renderPlanMode(): HTMLElement | undefined {
     const section = el('div', 'section plan-mode-section');
 
     const heading = el('div', 'section-heading plan-mode-heading');
+    heading.title = 'When enabled, the agent studies your request with read-only tools and proposes a plan before making any changes.';
     heading.appendChild(el('span', 'section-title', 'Plan Mode'));
 
     const toggleHost = el('span', 'todo-toggle-host');
@@ -198,7 +199,7 @@ function renderTodos(): HTMLElement | undefined {
     const heading = el('button', 'section-heading section-heading-button todo-heading');
     heading.type = 'button';
     heading.setAttribute('aria-expanded', String(!collapsed));
-    heading.title = collapsed ? 'Expand ToDo' : 'Collapse ToDo';
+    heading.title = (collapsed ? 'Expand ToDo' : 'Collapse ToDo') + ' — Task list managed by the agent. Tracks pending, in-progress, and completed tasks during your conversation. This list survives /compact — the agent always remembers its tasks.';
 
     const chevron = el('span', 'section-chevron', collapsed ? '▶' : '▼');
     heading.appendChild(chevron);
@@ -320,7 +321,7 @@ function renderRecentSessions(): HTMLElement {
     const heading = el('button', 'section-heading section-heading-button');
     heading.type = 'button';
     heading.setAttribute('aria-expanded', String(!currentState.historyCollapsed));
-    heading.title = currentState.historyCollapsed ? 'Expand history' : 'Collapse history';
+    heading.title = (currentState.historyCollapsed ? 'Expand history' : 'Collapse history') + ' — Previously active chat sessions. Click a session to reopen it.';
 
     const chevron = el('span', 'section-chevron', currentState.historyCollapsed ? '▶' : '▼');
     heading.appendChild(chevron);
