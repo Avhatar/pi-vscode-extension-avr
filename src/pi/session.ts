@@ -12,6 +12,7 @@ import { createClaudeMdInjectorExtension } from './claude-md-injector';
 import { createTodoExtension } from './todo/extension';
 import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
+import { createLspExtension } from './lsp/extension';
 
 export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
 
@@ -220,6 +221,9 @@ export class PiSessionManager {
         const todoGuidelines = parseTodoPromptGuidelines(
             vscode.workspace.getConfiguration('pi-code').get<string>('todo.promptGuidelines'),
         );
+        const lspEnabled = vscode.workspace
+            .getConfiguration('pi-code')
+            .get<boolean>('lsp.enabled', false);
         const factories = [
             createCodexMonitorExtension({
                 onResponse: ({ headers }) => {
@@ -228,6 +232,7 @@ export class PiSessionManager {
             }),
             createClaudeMdInjectorExtension(),
             createTodoExtension(this.todoStore, todoGuidelines),
+            createLspExtension({ enabled: lspEnabled }),
         ];
         const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const loader = new DefaultResourceLoader({

@@ -95,6 +95,8 @@ function render(data: SettingsData): void {
             'When enabled, the agent executes tools without asking for confirmation. When disabled, each tool call shows an inline approval card.'),
         buildTextarea('allowedTools', 'Allowed Tools', data.allowedTools.join(', '),
             'Comma-separated list of tool names to allow (e.g. read, grep, bash). Leave empty to allow all.'),
+        buildToggle('lsp.enabled', 'Language Server tools', data.lspEnabled,
+            'Expose Language Server tools (find_references, …) to the agent. Each tool delegates to the active VS Code language extension (C#, rust-analyzer, Pylance, TypeScript, etc.). Turn off to work without LSP — the tools disappear from the system prompt entirely. Applies on new sessions or window reload.'),
     ]));
 
     container.appendChild(buildSection('ToDo', [

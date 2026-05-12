@@ -72,6 +72,7 @@ export interface SettingsData {
     sessionStoragePath: string;
     contextUsageWarningThreshold: number;
     todoPromptGuidelines: string;
+    lspEnabled: boolean;
     userMessageGlowColor: string;
     userMessageGlowOpacity: number;
     oauthProviders: OAuthProviderInfo[];

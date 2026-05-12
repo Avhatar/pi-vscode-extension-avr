@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- New `find_references` tool: the agent can now ask the active language extension (C#, rust-analyzer, Pylance, TypeScript, etc.) for all references to a symbol — addressed either by file/line/column or by symbol name. Results include matches in external dependency sources (cargo registry, NuGet, node_modules) annotated as `external`. Toggle with the new `pi-code.lsp.enabled` setting (default **off**, opt-in); when off, the tool is not registered and adds nothing to the system prompt.
+- New `document_symbols` tool: lists every declaration in a file (classes, methods, fields, properties, etc.) with authoritative LSP positions, parent container, and kind. Use it before `find_references` to avoid hand-counting columns from a `read` output — particularly important on declarations like `public Player Player;` where the type and the field share a name. Supports an optional `nameContains` substring filter for large files.
+- `find_references` now accepts `includeAccessKind: true` to tag each reference as `read`/`write`/`text`/`unknown` using the language server's document-highlight provider (Roslyn, rust-analyzer, tsserver, …). Header line surfaces a breakdown (e.g. `72 reference sites — read: 65, write: 5`). Off by default — classification costs one extra LSP call per file containing references.
+
 ### Changed
 - Chat: tool, diff and thinking rows now sit on a vertical timeline rail — action icons line up in a column on the left, a faint connecting line runs through them top-to-bottom, and labels and bodies are shifted right of the icon column for clearer separation. User prompt bubbles are unchanged.
 

@@ -70,6 +70,10 @@
         "command": "pi-code.createTab",
         "title": "Pi Code: New Agent Tab",
         "icon": "$(add)"
+      },
+      {
+        "command": "pi-code.lspSmoke",
+        "title": "Pi Code: LSP Smoke Test (cursor)"
       }
     ],
     "keybindings": [
@@ -188,6 +192,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable the per-chat persistent ToDo for new chats by default. Each chat keeps its own toggle state once you flip it; this setting only affects chats you have not customized yet."
+        },
+        "pi-code.lsp.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Expose Language Server tools (find_references, document_symbols) to the agent. When disabled (default), the tools are not registered and add nothing to the system prompt — the agent works with grep / read / etc. as usual. Enable for projects where semantic accuracy is worth the extra system-prompt footprint (e.g. large Unity / Rust / TS codebases with name collisions). Tools require a language extension to be installed for each file's language (e.g. C#, rust-analyzer, Pylance). Changes apply on new sessions or window reload."
         },
         "pi-code.todo.promptGuidelines": {
           "type": "string",

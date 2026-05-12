@@ -137,6 +137,7 @@ export class SettingsPanel {
             sessionStoragePath: config.get<string>('sessionStoragePath', ''),
             contextUsageWarningThreshold: config.get<number>('contextUsageWarningThreshold', 80),
             todoPromptGuidelines: config.get<string>('todo.promptGuidelines', ''),
+            lspEnabled: config.get<boolean>('lsp.enabled', false),
             userMessageGlowColor: config.get<string>('userMessageGlowColor', '#00aaff'),
             userMessageGlowOpacity: config.get<number>('userMessageGlowOpacity', 40),
             oauthProviders,
