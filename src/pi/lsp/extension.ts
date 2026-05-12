@@ -14,11 +14,15 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { registerDocumentSymbolsTool } from './tools/document-symbols';
 import { registerFindReferencesTool } from './tools/find-references';
+import { registerGotoDefinitionTool } from './tools/goto-definition';
+import { registerHoverTool } from './tools/hover';
 
 export function createLspExtension(opts: { enabled: boolean }): (pi: ExtensionAPI) => void {
     return (pi) => {
         if (!opts.enabled) return;
         registerFindReferencesTool(pi);
         registerDocumentSymbolsTool(pi);
+        registerGotoDefinitionTool(pi);
+        registerHoverTool(pi);
     };
 }

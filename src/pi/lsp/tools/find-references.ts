@@ -33,16 +33,18 @@ const DEFAULT_MAX_RESULTS = 200;
 const TOOL_DESCRIPTION =
     'Find all reference sites of the symbol at a given file position via ' +
     'the active language server (Roslyn for C#, rust-analyzer for Rust, ' +
-    'tsserver for TS, Pylance for Python, etc.). Each result is a place ' +
-    'in the codebase where the symbol is USED or DEFINED — not a place ' +
-    'where the symbol is unrelated. Cross-file results are expected: a ' +
-    'reference in `Foo.cs` simply means that file mentions the symbol. ' +
-    'The returned snippet is the code AT the reference site (with ' +
-    'surrounding context); the matching line is marked with `>` and ' +
-    'every line is numbered so you can open the file at the exact ' +
+    'tsserver for TS, Pylance for Python, etc.). USE THIS FOR "where is ' +
+    'X used / called / written?" — NOT for "what is X?" (use `hover`) ' +
+    'or "where is X declared?" (use `goto_definition`). Each result is ' +
+    'a place in the codebase where the symbol is USED or DEFINED — not ' +
+    'a place where the symbol is unrelated. Cross-file results are ' +
+    'expected: a reference in `Foo.cs` simply means that file mentions ' +
+    'the symbol. The returned snippet is the code AT the reference site ' +
+    '(with surrounding context); the matching line is marked with `>` ' +
+    'and every line is numbered so you can open the file at the exact ' +
     'location. Address the symbol either via (file, line, column) — ' +
-    'preferred when you already have a position from grep/read or from ' +
-    '`document_symbols` — or via a symbol name, which is resolved via ' +
+    'preferred when you already have a position from `document_symbols`, ' +
+    'grep, or read — or via a symbol name, which is resolved via ' +
     'workspace symbol search and returns the candidate list if ' +
     'ambiguous. Pass `includeAccessKind: true` to tag each reference ' +
     'with `read`/`write`/`text` from the language server itself when ' +
@@ -53,6 +55,8 @@ const TOOL_DESCRIPTION =
 const TOOL_PROMPT_SNIPPET = 'Find all reference sites of a symbol via the language server';
 
 const TOOL_PROMPT_GUIDELINES: readonly string[] = [
+    'BEFORE calling this tool, check the user\'s question. "Where is X USED / CALLED / WRITTEN" → this tool. "What IS X / what does X do / what type is X" → use `hover` instead (one cheap call returns signature + docs). "Where is X DECLARED" → use `goto_definition` (returns the definition with a snippet). Reaching for `find_references` to answer "what does X do" wastes a 200-result payload trying to infer meaning from use sites; hover gives you the language server\'s structured answer in 10 ms.',
+    'When you know the target file and the target symbol name, ALWAYS call `document_symbols` first to get the authoritative `(line, column)` for that symbol — then pass that position here. Hand-counting columns from a `read` output is fragile around generics, attributes, and same-named tokens (e.g. `public Player Player;` where the type and field share a name; or `[field: SerializeField]` attribute targets resolving instead of the field).',
     'ALWAYS read the three header lines before the reference entries: `Position:`, `Line: |...`, `Column: |...`, and `Resolved symbol at position:`. The `Line` shows the actual source line at the column you sent; the `Column` line has a caret `^` under that exact column. The `Resolved symbol` shows what the language server saw there. Three outcomes: (1) caret lands on the intended token AND resolved symbol matches — proceed. (2) caret lands on the WRONG token (e.g. you intended `Player` but the caret sits on `Player ` the type or on whitespace) — adjust your column and retry. (3) caret lands on the right token but resolved symbol is something unrelated (e.g. `[field: SerializeField]` instead of the field — known Roslyn quirk on field-targeted attributes) — retry this same tool with the `symbol` parameter (e.g. `{symbol: "Player"}`); workspace symbol search bypasses the attribute-target quirk and gives an authoritative position from the language server. If the symbol-name form also returns "not found" or an ambiguous list with no clear match, only THEN fall back to grep.',
     'Each result is a USE SITE of the resolved symbol. The snippet shows the code at that site, not the symbol\'s definition. If a result lives in `Foo.cs`, it means Foo.cs *uses* the symbol — that is the expected outcome of a references query, not a wrong match.',
     'For "where is X assigned?" / "show only reads/writes of X" questions, pass `includeAccessKind: true`. Each result then carries `accessKind: read|write|text|unknown` from the language server\'s document-highlight provider — no need to grep for `X =` separately or eyeball snippets to classify them. The header line shows the breakdown counts (e.g. "72 reference sites — read: 65, write: 5, text: 2"). When the access kind is what the user is asking about, this flag is the correct, authoritative way to get it.',

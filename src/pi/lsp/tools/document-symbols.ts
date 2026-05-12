@@ -42,7 +42,7 @@ const TOOL_DESCRIPTION =
 const TOOL_PROMPT_SNIPPET = 'List declarations in a file with authoritative LSP positions';
 
 const TOOL_PROMPT_GUIDELINES: readonly string[] = [
-    'Call this tool BEFORE `find_references` whenever you know the target file and the target symbol name. The returned (line, column) is authoritative — pass it straight into `find_references` instead of counting characters yourself.',
+    'Call this tool BEFORE `find_references`, `goto_definition`, or `hover` whenever you know the target file and the target symbol name. The returned (line, column) is authoritative — pass it straight into the next LSP tool instead of counting characters yourself. Skipping this step is the most common reason those tools resolve to the wrong symbol.',
     'When two declarations share a name in the same scope (e.g. `public Player Player;` — a type AND a field both called Player), filter by `kind`: pick `field` / `property` for instance members, `class` / `struct` for type references. The `kind` column in the result is the differentiator.',
     'Use `nameContains` (case-insensitive substring) to narrow down on big files. For example, `nameContains: "Init"` on a 500-symbol controller file returns just the initialization-related declarations.',
     'Symbols are listed in source order with a `depth` indicator and a `container` path (e.g. `Core.Inner`) so nested types and members read cleanly. Do not try to reconstruct the hierarchy from indentation in your `read` output — use `container` and `depth` here instead.',

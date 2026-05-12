@@ -307,6 +307,57 @@ function stripMarkdownCode(text: string): string {
 }
 
 /**
+ * Render the full hover payload for the agent. Unlike
+ * `probeResolvedSymbol` (which extracts only the first signature line
+ * for the resolved-symbol header), this preserves the language
+ * server's full markdown — code fences, multi-paragraph docs, inferred
+ * types — because that's what makes hover the most info-dense tool the
+ * agent has.
+ *
+ * Multiple Hover entries are joined with a separator. Empty sections
+ * are dropped. The final string is the agent-facing tool output.
+ */
+export async function fetchHoverContent(
+    uri: vscode.Uri,
+    pos: vscode.Position,
+): Promise<string> {
+    try {
+        const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+            'vscode.executeHoverProvider',
+            uri,
+            pos,
+        );
+        if (!hovers || hovers.length === 0) return '';
+        const sections: string[] = [];
+        for (const h of hovers) {
+            const section = renderHover(h).trim();
+            if (section.length > 0) sections.push(section);
+        }
+        return sections.join('\n\n---\n\n');
+    } catch {
+        return '';
+    }
+}
+
+function renderHover(hover: vscode.Hover): string {
+    const contents = hover.contents ?? [];
+    const parts: string[] = [];
+    for (const c of contents) {
+        if (typeof c === 'string') {
+            parts.push(c);
+        } else if ('language' in c) {
+            // Old-style MarkedString: { language, value } → code block.
+            const block = c as { language: string; value: string };
+            parts.push(`\`\`\`${block.language}\n${block.value}\n\`\`\``);
+        } else if ('value' in c) {
+            // MarkdownString: keep as-is.
+            parts.push((c as { value: string }).value);
+        }
+    }
+    return parts.join('\n\n');
+}
+
+/**
  * Resolve an explicit `(file, line, column)` triple to a (uri, Position).
  * Accepts both workspace-relative and absolute paths. Throws a
  * user-readable error if the file cannot be resolved.

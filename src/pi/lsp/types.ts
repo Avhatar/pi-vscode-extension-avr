@@ -11,6 +11,10 @@ export const TOOL_FIND_REFERENCES = 'find_references';
 export const LABEL_FIND_REFERENCES = 'Find References';
 export const TOOL_DOCUMENT_SYMBOLS = 'document_symbols';
 export const LABEL_DOCUMENT_SYMBOLS = 'Document Symbols';
+export const TOOL_GOTO_DEFINITION = 'goto_definition';
+export const LABEL_GOTO_DEFINITION = 'Go to Definition';
+export const TOOL_HOVER = 'hover';
+export const LABEL_HOVER = 'Hover';
 
 // Provider-status signal. VS Code silently returns `[]` when no language
 // extension is registered for the active document — the agent would read
@@ -178,4 +182,97 @@ export interface DocumentSymbolsDetails {
     totalCount: number;
     truncated: boolean;
     symbols: NormalizedSymbol[];
+}
+
+// `goto_definition` parameter schema. Same addressing modes as
+// `find_references` (explicit position or symbol name with ambiguity
+// fallback). Default `contextLines` is intentionally higher than
+// references — when asking "where is X defined", the agent usually
+// wants the signature + a few lines of body, not just the identifier.
+export const GotoDefinitionParamsSchema = Type.Object({
+    file: Type.Optional(
+        Type.String({
+            description:
+                'Workspace-relative or absolute path to the file containing the symbol. Required together with line and column.',
+        }),
+    ),
+    line: Type.Optional(
+        Type.Number({
+            description: '1-based line number of the symbol position.',
+        }),
+    ),
+    column: Type.Optional(
+        Type.Number({
+            description: '1-based column number of the symbol position.',
+        }),
+    ),
+    symbol: Type.Optional(
+        Type.String({
+            description:
+                'Symbol name to jump to the definition of. Alternative to file/line/column. If multiple symbols match, the tool returns the candidate list and asks for an explicit position.',
+        }),
+    ),
+    contextLines: Type.Optional(
+        Type.Number({
+            description:
+                'Lines of surrounding context to include around the definition (default 4 — enough for a signature plus the start of the body in most cases).',
+        }),
+    ),
+});
+
+export type GotoDefinitionParams = Static<typeof GotoDefinitionParamsSchema>;
+
+export interface GotoDefinitionDetails {
+    providerStatus: ProviderStatus;
+    totalCount: number;
+    results: NormalizedLocation[];
+    languageId: string;
+    /** Hover-derived signature of the symbol at the requested position. */
+    resolvedSymbol?: string;
+    queryFile?: string;
+    queryLine?: number;
+    queryColumn?: number;
+    queryLineText?: string;
+}
+
+// `hover` parameter schema. Same two addressing modes as the rest of
+// the LSP tools. No extra options — hover is intentionally minimal:
+// you give a position, you get back signature + docs + inferred type
+// in whatever markdown the language server produces.
+export const HoverParamsSchema = Type.Object({
+    file: Type.Optional(
+        Type.String({
+            description:
+                'Workspace-relative or absolute path to the file containing the symbol. Required together with line and column.',
+        }),
+    ),
+    line: Type.Optional(
+        Type.Number({
+            description: '1-based line number of the symbol position.',
+        }),
+    ),
+    column: Type.Optional(
+        Type.Number({
+            description: '1-based column number of the symbol position.',
+        }),
+    ),
+    symbol: Type.Optional(
+        Type.String({
+            description:
+                'Symbol name to look up. Alternative to file/line/column. If multiple symbols match, the tool returns the candidate list and asks for an explicit position.',
+        }),
+    ),
+});
+
+export type HoverParams = Static<typeof HoverParamsSchema>;
+
+export interface HoverDetails {
+    providerStatus: ProviderStatus;
+    languageId: string;
+    /** Full hover content, as returned by the language server (markdown). */
+    content: string;
+    queryFile?: string;
+    queryLine?: number;
+    queryColumn?: number;
+    queryLineText?: string;
 }
