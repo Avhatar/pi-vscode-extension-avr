@@ -1471,7 +1471,7 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
 
     card.innerHTML = `
         <div class="diff-file-header" data-filepath="${escHtml(change.filePath)}" data-toolcallid="${escHtml(change.toolCallId)}">
-            <span class="tool-icon">${getToolIcon(change.toolName)}</span>
+            ${getToolIconHtml(change.toolName)}
             <span class="diff-file-name">${actionLabel} ${escHtml(fileName)}</span>
             ${dirPath ? `<span class="diff-file-dir">${escHtml(dirPath)}</span>` : ''}
             ${statsHtml}
@@ -1904,14 +1904,19 @@ function removePreparingPlaceholder(): void {
 function showPreparingPlaceholder(labelText = 'Preparing next moves...'): void {
     const container = document.getElementById('streaming-message');
     if (!container) return;
+    const placeholderTitle = labelText === 'Compacting...'
+        ? 'Compacting the conversation — summarising earlier turns to free up context.'
+        : 'The agent is preparing its next move — choosing a tool, drafting an edit, or planning the next step.';
     const existing = document.getElementById('preparing-placeholder');
     if (existing) {
         const label = existing.querySelector('.preparing-label');
         if (label) label.textContent = labelText;
+        existing.title = placeholderTitle;
         return;
     }
     const ph = el('div', 'preparing-placeholder');
     ph.id = 'preparing-placeholder';
+    ph.title = placeholderTitle;
     const spinner = el('span', 'preparing-spinner');
     spinner.setAttribute('aria-hidden', 'true');
     const label = el('span', 'preparing-label');
@@ -1943,7 +1948,7 @@ function renderStreamingContent(): void {
             <div class="message message-assistant">
                 <details class="thinking-block active" id="streaming-thinking" style="display:none">
                     <summary class="thinking-summary">
-                        <span class="thinking-indicator" aria-hidden="true"><img class="thinking-indicator-icon" src="${iconsBaseUri}/thinking.png" alt=""></span>
+                        <span class="thinking-indicator" aria-hidden="true" title="The agent is reasoning before its next move. Click the row to expand the thought."><img class="thinking-indicator-icon" src="${iconsBaseUri}/thinking.png" alt=""></span>
                         <span class="thinking-label">Thinking...</span>
                         <span class="thinking-preview"></span>
                         <span class="thinking-chevron">&#9656;</span>
@@ -2021,6 +2026,63 @@ function getToolIcon(name: string): string {
     };
     const file = iconFiles[name.toLowerCase()] ?? 'bolt.png';
     return `<img class="tool-icon-img" src="${iconsBaseUri}/${file}" alt="${escHtml(name)}">`;
+}
+
+function getToolDescription(name: string): string {
+    switch (name.toLowerCase()) {
+        case 'bash':
+            return 'Bash — runs a shell command in your workspace and captures stdout/stderr. Non-zero exit codes are reported back to the agent.';
+        case 'python':
+            return 'Python — executes a short Python snippet and captures stdout/stderr.';
+        case 'read':
+            return 'Read — opens a file from your workspace so the agent can see its current contents.';
+        case 'write':
+            return 'Write — creates a new file or overwrites an existing one with fresh contents.';
+        case 'edit':
+            return 'Edit — makes a targeted search-and-replace inside a single file.';
+        case 'find':
+            return 'Find — lists files in the workspace by name pattern.';
+        case 'glob':
+            return 'Glob — lists files matching a glob pattern (e.g. src/**/*.ts).';
+        case 'grep':
+            return 'Grep — searches file contents across the workspace for a regex or substring.';
+        case 'list':
+            return 'List — lists the contents of a directory.';
+        case 'todo':
+            return 'Todo — updates the agent\'s task list: adds, completes, or reorders the items it is tracking for this turn. The list survives /compact.';
+        case 'web_search':
+            return 'Web search — runs a public web search and returns result titles, snippets, and URLs.';
+        case 'fetch_content':
+            return 'Fetch content — downloads the contents of a specific URL.';
+        case 'get_search_content':
+            return 'Get search content — extracts the body of a previously found web result.';
+        case 'code_search':
+            return 'Code search — searches public code repositories on the web.';
+        case 'find_references':
+            return 'LSP find references — lists every place this symbol is referenced across the workspace.';
+        case 'find_implementations':
+            return 'LSP find implementations — jumps to the implementations of an interface or abstract symbol.';
+        case 'goto_definition':
+            return 'LSP go to definition — jumps to where a symbol is defined.';
+        case 'document_symbols':
+            return 'LSP document symbols — lists the symbols (functions, classes, …) defined in one file.';
+        case 'hover':
+            return 'LSP hover — asks the language server for the hover blurb on a symbol (signature, docs, type).';
+        case 'type_definition':
+            return 'LSP type definition — jumps to the type declaration of a symbol.';
+        case 'workspace_symbols':
+            return 'LSP workspace symbols — searches symbols by name across the entire workspace.';
+        case 'call_hierarchy_incoming':
+            return 'LSP call hierarchy (incoming) — lists the call sites of this function.';
+        case 'call_hierarchy_outgoing':
+            return 'LSP call hierarchy (outgoing) — lists the functions this function calls.';
+        default:
+            return `Tool call: ${name} — the agent invoked this tool.`;
+    }
+}
+
+function getToolIconHtml(name: string): string {
+    return `<span class="tool-icon" title="${escHtml(getToolDescription(name))}">${getToolIcon(name)}</span>`;
 }
 
 function getToolLabel(name: string, args: any): string {
@@ -2282,6 +2344,7 @@ function buildTodoToolResultElement(source: any, text: string): HTMLElement | nu
         const statusClass = row.status ? ` todo-tool-row-${row.status}` : '';
         const item = el('div', `todo-tool-row${statusClass}`);
         const icon = el('span', 'todo-tool-icon');
+        icon.title = 'Todo item — tracked by the agent in its task list for this conversation.';
         icon.innerHTML = `<img class="todo-tool-icon-img" src="${iconsBaseUri}/todo.png" alt="Todo">`;
         item.appendChild(icon);
         if (row.id !== undefined) item.appendChild(el('span', 'todo-tool-id', `#${row.id}`));
@@ -2319,7 +2382,7 @@ function buildToolCard(tc: any): HTMLElement {
 
     card.innerHTML = `
         <div class="tool-header">
-            <span class="tool-icon">${getToolIcon(name)}</span>
+            ${getToolIconHtml(name)}
             <span class="tool-name">${escHtml(getToolLabel(name, parsedArgs))}</span>
             ${buildStatusHtml(statusClass)}
         </div>
@@ -2371,7 +2434,7 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
     const args = matchingCall?.arguments ?? matchingCall?.args ?? matchingCall?.input ?? matchingCall?.function?.arguments ?? {};
     const parsedArgs = typeof args === 'string' ? tryParseJSON(args) : args;
     const label = toolName ? getToolLabel(toolName, parsedArgs) : 'Tool Result';
-    const icon = getToolIcon(toolName ?? '');
+    const iconHtml = getToolIconHtml(toolName ?? '');
     const isRead = nameLower === 'read';
     const isCommandLike = isCommandLikeTool(toolName, parsedArgs);
     const filePath = parsedArgs?.path ?? parsedArgs?.file_path ?? '';
@@ -2386,7 +2449,7 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
 
         if (isCommandLike) {
             const headerHtml = `
-                <span class="tool-icon">${icon}</span>
+                ${iconHtml}
                 <span class="tool-name">${escHtml(label)}</span>
                 ${buildStatusHtml(isError ? 'error' : 'done')}
             `;
@@ -2398,7 +2461,7 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
 
             details.innerHTML = `
                 <summary class="tool-header">
-                    <span class="tool-icon">${icon}</span>
+                    ${iconHtml}
                     <span class="tool-name">${escHtml(label)}</span>
                     ${buildStatusHtml(isError ? 'error' : 'done')}
                     <span class="tool-expand-arrow">&#9656;</span>
@@ -2422,7 +2485,7 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
 
     card.innerHTML = `
         <div class="tool-header">
-            <span class="tool-icon">${icon}</span>
+            ${iconHtml}
             <span class="tool-name">${escHtml(label)}</span>
             ${buildStatusHtml(isError ? 'error' : 'done')}
         </div>
@@ -2458,7 +2521,7 @@ function renderToolStart(event: any): void {
         const actionLabel = event.toolName === 'write' ? 'Write' : 'Edit';
         card.innerHTML = `
             <div class="diff-file-header">
-                <span class="tool-icon">${getToolIcon(event.toolName)}</span>
+                ${getToolIconHtml(event.toolName)}
                 <span class="diff-file-name">${actionLabel} ${escHtml(fileName)}</span>
                 <span class="tool-status running">running</span>
             </div>
@@ -2477,7 +2540,7 @@ function renderToolStart(event: any): void {
     if (isCommandLike) {
         const input = getCommandInputText(parsedArgs);
         const headerHtml = `
-            <span class="tool-icon">${getToolIcon(event.toolName)}</span>
+            ${getToolIconHtml(event.toolName)}
             <span class="tool-name">${escHtml(getToolLabel(event.toolName, parsedArgs))}</span>
             <span class="tool-status running">running</span>
         `;
@@ -2498,7 +2561,7 @@ function renderToolStart(event: any): void {
 
     card.innerHTML = `
         <div class="tool-header">
-            <span class="tool-icon">${getToolIcon(event.toolName)}</span>
+            ${getToolIconHtml(event.toolName)}
             <span class="tool-name">${escHtml(getToolLabel(event.toolName, parsedArgs))}</span>
             <span class="tool-status running">running</span>
         </div>
@@ -2621,9 +2684,12 @@ function buildThinkingBlock(text: string, active: boolean, durationSec?: number)
     } else {
         label = 'Thought';
     }
+    const thinkingTooltip = active
+        ? 'The agent is reasoning before its next move. Click the row to expand the thought.'
+        : 'The agent\'s reasoning before this action. Click to expand.';
     details.innerHTML = `
         <summary class="thinking-summary">
-            <span class="thinking-indicator" aria-hidden="true"><img class="thinking-indicator-icon" src="${iconsBaseUri}/thinking.png" alt=""></span>
+            <span class="thinking-indicator" aria-hidden="true" title="${escHtml(thinkingTooltip)}"><img class="thinking-indicator-icon" src="${iconsBaseUri}/thinking.png" alt=""></span>
             <span class="thinking-label">${label}</span>
             <span class="thinking-preview">${escHtml(getThinkingPreview(text))}</span>
             <span class="thinking-chevron">&#9656;</span>

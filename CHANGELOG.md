@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Hover-tooltips on every icon next to the chat timeline rail. Each tool icon now explains what the tool does (Bash, Read, Edit, Grep, the LSP family, Todo, web tools, …), the thinking indicator describes itself, and the busy placeholder distinguishes "preparing next move" from "compacting". Useful while you're still learning what each icon means; uses native `title` so it follows the OS tooltip style and stays out of the way once you know them.
+
 ### Removed
 - Removed the tool-approval feature entirely (the `pi-code.autoApproveTools` setting, the "Auto-approve tool calls" toggle in Settings, and the inline approval cards in chat). The toggle was non-functional anyway — Pi SDK has a fast path that bypassed our approval hook unless a Pi extension explicitly listens for `tool_call` events, which none of ours did, so disabling auto-approve silently ran tools as if it were on. We're embracing the upstream Pi YOLO model for now: the agent runs every tool without confirmation.
 
