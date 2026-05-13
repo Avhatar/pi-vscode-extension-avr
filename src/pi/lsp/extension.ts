@@ -13,6 +13,7 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { registerDocumentSymbolsTool } from './tools/document-symbols';
+import { registerFindImplementationsTool } from './tools/find-implementations';
 import { registerFindReferencesTool } from './tools/find-references';
 import { registerGotoDefinitionTool } from './tools/goto-definition';
 import { registerHoverTool } from './tools/hover';
@@ -24,5 +25,6 @@ export function createLspExtension(opts: { enabled: boolean }): (pi: ExtensionAP
         registerDocumentSymbolsTool(pi);
         registerGotoDefinitionTool(pi);
         registerHoverTool(pi);
+        registerFindImplementationsTool(pi);
     };
 }

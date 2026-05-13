@@ -2014,6 +2014,12 @@ function getToolIcon(name: string): string {
         fetch_content: 'web.png',
         get_search_content: 'web.png',
         code_search: 'web.png',
+        // LSP toolset — share a single icon so the chat groups them visually.
+        find_references: 'links.png',
+        find_implementations: 'links.png',
+        goto_definition: 'links.png',
+        document_symbols: 'links.png',
+        hover: 'links.png',
     };
     const file = iconFiles[name.toLowerCase()] ?? 'bolt.png';
     return `<img class="tool-icon-img" src="${iconsBaseUri}/${file}" alt="${escHtml(name)}">`;
@@ -2044,6 +2050,15 @@ function getToolLabel(name: string, args: any): string {
             return 'Get search results';
         case 'code_search':
             return args?.query ? `Code search: ${truncate(args.query, 50)}` : 'Code search';
+        // LSP toolset — uniform "LSP: <tool_name>" header so the chat
+        // shows what kind of LSP operation ran without the agent's
+        // input dressing.
+        case 'find_references':
+        case 'find_implementations':
+        case 'goto_definition':
+        case 'document_symbols':
+        case 'hover':
+            return `LSP: ${name.toLowerCase()}`;
         default:
             return name;
     }

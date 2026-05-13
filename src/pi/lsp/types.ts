@@ -15,6 +15,8 @@ export const TOOL_GOTO_DEFINITION = 'goto_definition';
 export const LABEL_GOTO_DEFINITION = 'Go to Definition';
 export const TOOL_HOVER = 'hover';
 export const LABEL_HOVER = 'Hover';
+export const TOOL_FIND_IMPLEMENTATIONS = 'find_implementations';
+export const LABEL_FIND_IMPLEMENTATIONS = 'Find Implementations';
 
 // Provider-status signal. VS Code silently returns `[]` when no language
 // extension is registered for the active document — the agent would read
@@ -271,6 +273,65 @@ export interface HoverDetails {
     languageId: string;
     /** Full hover content, as returned by the language server (markdown). */
     content: string;
+    queryFile?: string;
+    queryLine?: number;
+    queryColumn?: number;
+    queryLineText?: string;
+}
+
+// `find_implementations` parameter schema. Same addressing modes as
+// `find_references` / `goto_definition`. Default `contextLines` is
+// generous because multi-site is the COMMON case here (every class
+// implementing an interface returns its own line), and the agent
+// usually needs to identify each implementation by its surrounding
+// class context.
+export const FindImplementationsParamsSchema = Type.Object({
+    file: Type.Optional(
+        Type.String({
+            description:
+                'Workspace-relative or absolute path to the file containing the symbol. Required together with line and column.',
+        }),
+    ),
+    line: Type.Optional(
+        Type.Number({
+            description: '1-based line number of the symbol position.',
+        }),
+    ),
+    column: Type.Optional(
+        Type.Number({
+            description: '1-based column number of the symbol position.',
+        }),
+    ),
+    symbol: Type.Optional(
+        Type.String({
+            description:
+                'Symbol name to find implementations of. Alternative to file/line/column. Ambiguous resolutions return the candidate list.',
+        }),
+    ),
+    contextLines: Type.Optional(
+        Type.Number({
+            description:
+                'Lines of surrounding context to include around each implementation (default 3 — enough to identify the implementing type without overwhelming the payload when there are many).',
+        }),
+    ),
+    maxResults: Type.Optional(
+        Type.Number({
+            description:
+                'Maximum number of implementations to return (default 100). When exceeded, `truncated: true` is set.',
+        }),
+    ),
+});
+
+export type FindImplementationsParams = Static<typeof FindImplementationsParamsSchema>;
+
+export interface FindImplementationsDetails {
+    providerStatus: ProviderStatus;
+    totalCount: number;
+    truncated: boolean;
+    results: NormalizedLocation[];
+    languageId: string;
+    /** Hover-derived signature of the symbol at the requested position. */
+    resolvedSymbol?: string;
     queryFile?: string;
     queryLine?: number;
     queryColumn?: number;
