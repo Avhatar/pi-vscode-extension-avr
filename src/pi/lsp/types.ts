@@ -19,6 +19,8 @@ export const TOOL_FIND_IMPLEMENTATIONS = 'find_implementations';
 export const LABEL_FIND_IMPLEMENTATIONS = 'Find Implementations';
 export const TOOL_TYPE_DEFINITION = 'type_definition';
 export const LABEL_TYPE_DEFINITION = 'Type Definition';
+export const TOOL_WORKSPACE_SYMBOLS = 'workspace_symbols';
+export const LABEL_WORKSPACE_SYMBOLS = 'Workspace Symbols';
 
 // Provider-status signal. VS Code silently returns `[]` when no language
 // extension is registered for the active document — the agent would read
@@ -390,4 +392,40 @@ export interface TypeDefinitionDetails {
     queryLine?: number;
     queryColumn?: number;
     queryLineText?: string;
+}
+
+// `workspace_symbols` parameter schema. Unlike the positional LSP
+// tools, this one takes a free-form query string — the language
+// server decides how to match (Roslyn uses CamelCase-segment matching;
+// rust-analyzer uses substring; tsserver uses fuzzy). Optional
+// `kindFilter` narrows by SymbolKind ("class", "method", "struct",
+// "interface", ...) — useful when a short query like "Card" returns
+// thousands of matches across kinds.
+export const WorkspaceSymbolsParamsSchema = Type.Object({
+    query: Type.String({
+        description:
+            'Search query. Server-specific matching rules apply: Roslyn favors CamelCase-segment matches (e.g. "PC" matches "PlayerController"); rust-analyzer / tsserver / Pylance use substring or fuzzy matching. Short queries can return thousands of results — combine with `kindFilter` to narrow by kind, or use a longer / more specific query.',
+    }),
+    kindFilter: Type.Optional(
+        Type.Array(Type.String(), {
+            description:
+                'Restrict results to specific symbol kinds. Accepted values (case-insensitive): "class", "struct", "interface", "enum", "method", "function", "field", "property", "namespace", "module", "variable", "constant", "constructor", "event", "type-parameter". Empty / omitted means all kinds.',
+        }),
+    ),
+    maxResults: Type.Optional(
+        Type.Number({
+            description:
+                'Maximum number of symbols to return (default 50). Short queries on large projects can return hundreds; truncation is normal.',
+        }),
+    ),
+});
+
+export type WorkspaceSymbolsParams = Static<typeof WorkspaceSymbolsParamsSchema>;
+
+export interface WorkspaceSymbolsDetails {
+    providerStatus: ProviderStatus;
+    query: string;
+    totalCount: number;
+    truncated: boolean;
+    symbols: NormalizedSymbol[];
 }

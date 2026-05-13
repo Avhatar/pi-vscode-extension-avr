@@ -494,6 +494,34 @@ export function normalizeDocumentSymbols(raw: unknown, uri: vscode.Uri): Normali
     return out;
 }
 
+/**
+ * Normalize a `vscode.executeWorkspaceSymbolProvider` result. The
+ * provider always returns flat `SymbolInformation[]`, each item with
+ * its OWN `.location.uri` (unlike `document_symbols` where every result
+ * lives in the file we asked about). Always depth 0, container is the
+ * server-reported containerName.
+ */
+export function normalizeWorkspaceSymbols(raw: unknown): NormalizedSymbol[] {
+    if (!raw) return [];
+    const items = Array.isArray(raw) ? raw : [raw];
+    const out: NormalizedSymbol[] = [];
+    for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        const si = item as vscode.SymbolInformation;
+        if (!si.location) continue;
+        out.push({
+            name: String(si.name ?? ''),
+            kind: symbolKindToString(si.kind ?? 0),
+            container: String(si.containerName ?? ''),
+            file: displayPath(si.location.uri),
+            line: (si.location.range?.start?.line ?? 0) + 1,
+            column: (si.location.range?.start?.character ?? 0) + 1,
+            depth: 0,
+        });
+    }
+    return out;
+}
+
 function walkDocumentSymbol(
     sym: vscode.DocumentSymbol,
     parentPath: string,

@@ -18,6 +18,7 @@ import { registerFindReferencesTool } from './tools/find-references';
 import { registerGotoDefinitionTool } from './tools/goto-definition';
 import { registerHoverTool } from './tools/hover';
 import { registerTypeDefinitionTool } from './tools/type-definition';
+import { registerWorkspaceSymbolsTool } from './tools/workspace-symbols';
 
 export function createLspExtension(opts: { enabled: boolean }): (pi: ExtensionAPI) => void {
     return (pi) => {
@@ -28,5 +29,6 @@ export function createLspExtension(opts: { enabled: boolean }): (pi: ExtensionAP
         registerHoverTool(pi);
         registerFindImplementationsTool(pi);
         registerTypeDefinitionTool(pi);
+        registerWorkspaceSymbolsTool(pi);
     };
 }
