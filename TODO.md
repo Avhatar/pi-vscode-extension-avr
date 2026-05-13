@@ -56,3 +56,15 @@ Two compounding effects:
 **Status:** open
 **Notes:** The settings page exposes a number of options that look suspicious — likely leftovers from the implementation we forked from, never wired up to anything on our side. Need to walk through every setting in the settings UI and the `contributes.configuration` block, check whether it's actually read anywhere (extension host + webview + Pi SDK bridge), and either delete or document each one. Removing dead settings cleans up the UI and avoids users twiddling switches that do nothing.
 **Investigation:** _empty — to be filled when we dig in._
+
+## Tooltips for tool and agent-action icons in the chat
+
+**Status:** open
+**Notes:** Add a hover-tooltip system for the tool icons and agent-action icons rendered in the chat timeline, so the user can hover an icon and see a short description of what the tool/action is and what it does. Should cover every icon that appears next to the rail (read/edit/write file, find, todo, web, plan-mode actions, thinking, busy placeholder, etc.). Open questions for the investigation phase: where the tooltip copy lives (per-tool metadata in the SDK vs. a local map in the webview), styling (native `title` attribute vs. a custom themed popover consistent with the launcher section tooltips added in commit `1cea3a3`), and whether tooltips should also show the tool's argument summary or stay purely descriptive.
+**Investigation:** _empty — to be filled when we dig in._
+
+## Turn duration sometimes missing at the end of a turn
+
+**Status:** open
+**Notes:** In some situations the elapsed time for a turn is not shown when the turn ends — usually it appears in the footer/stats area at the bottom of the assistant turn, but occasionally it's absent. Need to figure out which code paths fail to stamp/render the duration: candidates to check include early-aborted turns (cancel button, stream errors), turns ending via Plan Mode `<plan-complete/>`, turns ending right after tool-approval rejection, compaction turns, and resumed/replayed turns loaded from a checkpoint. Turn durations were added in commit `ca560b9` ("Add turn durations; update ToDo sidebar markers") — that's the place to start.
+**Investigation:** _empty — to be filled when we dig in._
