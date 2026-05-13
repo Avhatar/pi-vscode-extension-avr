@@ -12,6 +12,8 @@
 // system prompt at all.
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import { registerCallHierarchyIncomingTool } from './tools/call-hierarchy-incoming';
+import { registerCallHierarchyOutgoingTool } from './tools/call-hierarchy-outgoing';
 import { registerDocumentSymbolsTool } from './tools/document-symbols';
 import { registerFindImplementationsTool } from './tools/find-implementations';
 import { registerFindReferencesTool } from './tools/find-references';
@@ -30,5 +32,7 @@ export function createLspExtension(opts: { enabled: boolean }): (pi: ExtensionAP
         registerFindImplementationsTool(pi);
         registerTypeDefinitionTool(pi);
         registerWorkspaceSymbolsTool(pi);
+        registerCallHierarchyIncomingTool(pi);
+        registerCallHierarchyOutgoingTool(pi);
     };
 }

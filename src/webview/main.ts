@@ -2022,6 +2022,8 @@ function getToolIcon(name: string): string {
         hover: 'links.png',
         type_definition: 'links.png',
         workspace_symbols: 'links.png',
+        call_hierarchy_incoming: 'links.png',
+        call_hierarchy_outgoing: 'links.png',
     };
     const file = iconFiles[name.toLowerCase()] ?? 'bolt.png';
     return `<img class="tool-icon-img" src="${iconsBaseUri}/${file}" alt="${escHtml(name)}">`;
@@ -2062,6 +2064,8 @@ function getToolLabel(name: string, args: any): string {
         case 'hover':
         case 'type_definition':
         case 'workspace_symbols':
+        case 'call_hierarchy_incoming':
+        case 'call_hierarchy_outgoing':
             return `LSP: ${name.toLowerCase()}`;
         default:
             return name;

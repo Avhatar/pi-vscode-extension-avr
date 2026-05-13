@@ -203,17 +203,33 @@ async function loadLines(
     uri: vscode.Uri,
     cache: Map<string, string[]>,
 ): Promise<string[]> {
+    return loadFileLines(uri, cache);
+}
+
+/**
+ * Public version of `loadLines`. Reads the document text via VS Code's
+ * workspace API (uses the in-memory copy when the file is open in the
+ * editor, otherwise falls back to disk). Lines are split on `\r?\n` and
+ * cached so repeated lookups in the same call don't re-tokenize. Used
+ * by call-hierarchy tools to render snippets at fromRanges across many
+ * caller files without re-opening each file per range.
+ */
+export async function loadFileLines(
+    uri: vscode.Uri,
+    cache?: Map<string, string[]>,
+): Promise<string[]> {
+    const map = cache ?? new Map<string, string[]>();
     const key = uri.toString();
-    const hit = cache.get(key);
+    const hit = map.get(key);
     if (hit) return hit;
     try {
         const doc = await vscode.workspace.openTextDocument(uri);
         const text = doc.getText();
         const lines = text.split(/\r?\n/);
-        cache.set(key, lines);
+        map.set(key, lines);
         return lines;
     } catch {
-        cache.set(key, []);
+        map.set(key, []);
         return [];
     }
 }
@@ -232,6 +248,21 @@ function extractSnippet(
     line: number,
     contextLines: number,
 ): string {
+    return formatSnippetBlock(lines, line, contextLines);
+}
+
+/**
+ * Public version of `extractSnippet`. Renders `[contextLines]` lines
+ * around a 0-based source line with a `>` marker on the match line and
+ * absolute line numbers. Shared between `normalizeLocations` (reference /
+ * implementation / definition snippets) and the call-hierarchy tools
+ * (one snippet per fromRange of an incoming/outgoing call).
+ */
+export function formatSnippetBlock(
+    lines: string[],
+    line: number,
+    contextLines: number,
+): string {
     if (lines.length === 0) return '';
     const start = Math.max(0, line - contextLines);
     const end = Math.min(lines.length, line + contextLines + 1);
@@ -245,11 +276,11 @@ function extractSnippet(
     return out.join('\n');
 }
 
-function classifySource(uri: vscode.Uri): 'workspace' | 'external' {
+export function classifySource(uri: vscode.Uri): 'workspace' | 'external' {
     return vscode.workspace.getWorkspaceFolder(uri) ? 'workspace' : 'external';
 }
 
-function displayPath(uri: vscode.Uri): string {
+export function displayPath(uri: vscode.Uri): string {
     const ws = vscode.workspace.getWorkspaceFolder(uri);
     if (ws) return vscode.workspace.asRelativePath(uri, false);
     return uri.fsPath ?? uri.toString();
@@ -553,6 +584,41 @@ function walkDocumentSymbol(
  * agent-facing output self-explanatory and avoids the agent having to
  * memorize numeric kinds (which we saw vary in meaning across servers).
  */
+/**
+ * Bootstrap a call-hierarchy session at `(uri, pos)`. The LSP requires
+ * a two-step protocol: `prepareCallHierarchy` first to identify the
+ * callable anchor (a method / function / constructor under the cursor),
+ * then `provideIncomingCalls` / `provideOutgoingCalls` on that anchor.
+ *
+ * Returns the first anchor when the language server returns multiple
+ * (rare — happens at positions that span more than one callable, e.g.
+ * the closing brace of an overload set). Returns `undefined` for:
+ *
+ *   - language servers without a call-hierarchy provider (base
+ *     `ms-dotnettools.csharp` is one; users need C# Dev Kit instead);
+ *   - positions that are not on a callable symbol;
+ *   - servers that returned `null` / `[]`.
+ *
+ * Caller decides how to surface the undefined case (typically:
+ * `providerStatus: detectProviderStatus(languageId)` so we distinguish
+ * "wrong cursor position" from "no language extension").
+ */
+export async function prepareCallHierarchyItem(
+    uri: vscode.Uri,
+    pos: vscode.Position,
+): Promise<vscode.CallHierarchyItem | undefined> {
+    try {
+        const result = await vscode.commands.executeCommand<
+            vscode.CallHierarchyItem | vscode.CallHierarchyItem[] | undefined
+        >('vscode.prepareCallHierarchy', uri, pos);
+        if (!result) return undefined;
+        if (Array.isArray(result)) return result[0];
+        return result;
+    } catch {
+        return undefined;
+    }
+}
+
 export function symbolKindToString(kind: vscode.SymbolKind | number): string {
     switch (kind as vscode.SymbolKind) {
         case vscode.SymbolKind.File: return 'file';

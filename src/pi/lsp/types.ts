@@ -21,6 +21,10 @@ export const TOOL_TYPE_DEFINITION = 'type_definition';
 export const LABEL_TYPE_DEFINITION = 'Type Definition';
 export const TOOL_WORKSPACE_SYMBOLS = 'workspace_symbols';
 export const LABEL_WORKSPACE_SYMBOLS = 'Workspace Symbols';
+export const TOOL_CALL_HIERARCHY_INCOMING = 'call_hierarchy_incoming';
+export const LABEL_CALL_HIERARCHY_INCOMING = 'Incoming Calls';
+export const TOOL_CALL_HIERARCHY_OUTGOING = 'call_hierarchy_outgoing';
+export const LABEL_CALL_HIERARCHY_OUTGOING = 'Outgoing Calls';
 
 // Provider-status signal. VS Code silently returns `[]` when no language
 // extension is registered for the active document — the agent would read
@@ -428,4 +432,137 @@ export interface WorkspaceSymbolsDetails {
     totalCount: number;
     truncated: boolean;
     symbols: NormalizedSymbol[];
+}
+
+// `call_hierarchy_*` parameter schemas. Two tools (incoming + outgoing)
+// share the exact same parameter shape — both anchor on a single
+// callable position (the function whose callers / callees you want).
+// Same two addressing modes as the other positional LSP tools: explicit
+// (file, line, column) preferred when you have one, or `symbol` name
+// with workspace-symbol resolution and ambiguity fallback.
+//
+// LSP itself splits these into two calls:
+//
+//   1. `prepareCallHierarchy(uri, pos)` → CallHierarchyItem (anchor)
+//   2. `provideIncomingCalls(anchor)` → who calls anchor
+//   2. `provideOutgoingCalls(anchor)` → what anchor calls
+//
+// Surface them as two tools because (a) the user/agent intent is
+// genuinely different ("who calls me" vs "what do I call"), and (b) the
+// LSP cost is paid per direction, so combining them would double the
+// latency for the common case where only one direction is needed.
+const callHierarchyBase = {
+    file: Type.Optional(
+        Type.String({
+            description:
+                'Workspace-relative or absolute path to the file containing the callable. Required together with line and column.',
+        }),
+    ),
+    line: Type.Optional(
+        Type.Number({
+            description: '1-based line number of the callable\'s position.',
+        }),
+    ),
+    column: Type.Optional(
+        Type.Number({
+            description: '1-based column number of the callable\'s position.',
+        }),
+    ),
+    symbol: Type.Optional(
+        Type.String({
+            description:
+                'Callable name (method / function / constructor). Alternative to file/line/column. Ambiguous resolutions return the candidate list.',
+        }),
+    ),
+    contextLines: Type.Optional(
+        Type.Number({
+            description:
+                'Lines of surrounding context to include around each call site (default 2).',
+        }),
+    ),
+    maxResults: Type.Optional(
+        Type.Number({
+            description:
+                'Maximum number of caller / callee entries to return (default 100). Hot functions can have hundreds of callers; tune down if the payload is overwhelming.',
+        }),
+    ),
+};
+
+export const CallHierarchyIncomingParamsSchema = Type.Object(callHierarchyBase);
+export type CallHierarchyIncomingParams = Static<typeof CallHierarchyIncomingParamsSchema>;
+
+export const CallHierarchyOutgoingParamsSchema = Type.Object(callHierarchyBase);
+export type CallHierarchyOutgoingParams = Static<typeof CallHierarchyOutgoingParamsSchema>;
+
+/**
+ * One call site inside a caller (incoming) or inside the anchor function
+ * (outgoing). Always points at the line where the call expression
+ * occurs, with `contextLines` of surrounding code. 1-based line/column.
+ */
+export interface CallSite {
+    line: number;
+    column: number;
+    snippet: string;
+}
+
+/**
+ * One entry in a call-hierarchy result. For incoming calls, this is a
+ * CALLER (the function that invokes the anchor); `callSites` are the
+ * line(s) inside the caller's body where the call appears, and
+ * `file/line/column` point at the caller's own declaration. For
+ * outgoing calls, this is a CALLEE (a function invoked by the anchor);
+ * `callSites` are the line(s) inside the ANCHOR's body where the
+ * callee is invoked, and `file/line/column` point at the callee's
+ * declaration.
+ *
+ * Either way, `file/line/column` is a position you can feed directly
+ * into the next LSP tool (find_references, hover, document_symbols).
+ */
+export interface CallHierarchyEntry {
+    name: string;
+    kind: string;
+    detail: string;     // signature line when the server provides one, otherwise ""
+    file: string;       // declaration file, workspace-relative when possible
+    line: number;       // 1-based, declaration position (selectionRange.start)
+    column: number;
+    source: 'workspace' | 'external';
+    callSites: CallSite[];
+}
+
+export interface CallHierarchyIncomingDetails {
+    providerStatus: ProviderStatus;
+    languageId: string;
+    totalCount: number;
+    truncated: boolean;
+    /** Each entry is a function that CALLS the anchor. */
+    callers: CallHierarchyEntry[];
+    /** Hover-derived signature of the symbol at the requested position. */
+    resolvedSymbol?: string;
+    /** Anchor identified by prepareCallHierarchy (echoed for transparency). */
+    anchorName?: string;
+    anchorKind?: string;
+    anchorDetail?: string;
+    queryFile?: string;
+    queryLine?: number;
+    queryColumn?: number;
+    queryLineText?: string;
+}
+
+export interface CallHierarchyOutgoingDetails {
+    providerStatus: ProviderStatus;
+    languageId: string;
+    totalCount: number;
+    truncated: boolean;
+    /** Each entry is a function CALLED BY the anchor. */
+    callees: CallHierarchyEntry[];
+    /** Hover-derived signature of the symbol at the requested position. */
+    resolvedSymbol?: string;
+    /** Anchor identified by prepareCallHierarchy (echoed for transparency). */
+    anchorName?: string;
+    anchorKind?: string;
+    anchorDetail?: string;
+    queryFile?: string;
+    queryLine?: number;
+    queryColumn?: number;
+    queryLineText?: string;
 }
