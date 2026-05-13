@@ -17,8 +17,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - Chat: tool, diff and thinking rows now sit on a vertical timeline rail — action icons line up in a column on the left, a faint connecting line runs through them top-to-bottom, and labels and bodies are shifted right of the icon column for clearer separation. User prompt bubbles are unchanged.
+- Chat: replaced the rotating blue "Preparing next moves..." spinner with a filled dot that pulses between the icon color and the blue accent. The dot is sized to match other tool-row icons and aligns with the timeline rail, so the "agent busy, no tool yet" state no longer clashes with the surrounding tool style.
+- Prompt input: `@` file-mention chips now render with a subtle tinted background instead of bold text. Bold made the mention glyphs wider than what the textarea above measured, so the caret drifted right of the typed character on every subsequent column.
 
 ### Fixed
+- Prompt input: caret and typed characters no longer drift apart after an `@` file mention in a narrow / non-maximized window. The textarea now uses the same `overflow-wrap: anywhere` rule as the highlight layer beneath it, so a long mention wraps at the same column in both layers and the caret stays under the next typed glyph.
 - Sidebar launcher: aligned the Plan Mode heading with the ToDo and History rows so the title and toggle line up uniformly.
 
 ## [0.19.2] - 2026-05-11
