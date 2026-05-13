@@ -2020,6 +2020,7 @@ function getToolIcon(name: string): string {
         goto_definition: 'links.png',
         document_symbols: 'links.png',
         hover: 'links.png',
+        type_definition: 'links.png',
     };
     const file = iconFiles[name.toLowerCase()] ?? 'bolt.png';
     return `<img class="tool-icon-img" src="${iconsBaseUri}/${file}" alt="${escHtml(name)}">`;
@@ -2058,6 +2059,7 @@ function getToolLabel(name: string, args: any): string {
         case 'goto_definition':
         case 'document_symbols':
         case 'hover':
+        case 'type_definition':
             return `LSP: ${name.toLowerCase()}`;
         default:
             return name;

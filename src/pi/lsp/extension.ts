@@ -17,6 +17,7 @@ import { registerFindImplementationsTool } from './tools/find-implementations';
 import { registerFindReferencesTool } from './tools/find-references';
 import { registerGotoDefinitionTool } from './tools/goto-definition';
 import { registerHoverTool } from './tools/hover';
+import { registerTypeDefinitionTool } from './tools/type-definition';
 
 export function createLspExtension(opts: { enabled: boolean }): (pi: ExtensionAPI) => void {
     return (pi) => {
@@ -26,5 +27,6 @@ export function createLspExtension(opts: { enabled: boolean }): (pi: ExtensionAP
         registerGotoDefinitionTool(pi);
         registerHoverTool(pi);
         registerFindImplementationsTool(pi);
+        registerTypeDefinitionTool(pi);
     };
 }

@@ -17,6 +17,8 @@ export const TOOL_HOVER = 'hover';
 export const LABEL_HOVER = 'Hover';
 export const TOOL_FIND_IMPLEMENTATIONS = 'find_implementations';
 export const LABEL_FIND_IMPLEMENTATIONS = 'Find Implementations';
+export const TOOL_TYPE_DEFINITION = 'type_definition';
+export const LABEL_TYPE_DEFINITION = 'Type Definition';
 
 // Provider-status signal. VS Code silently returns `[]` when no language
 // extension is registered for the active document — the agent would read
@@ -328,6 +330,58 @@ export interface FindImplementationsDetails {
     providerStatus: ProviderStatus;
     totalCount: number;
     truncated: boolean;
+    results: NormalizedLocation[];
+    languageId: string;
+    /** Hover-derived signature of the symbol at the requested position. */
+    resolvedSymbol?: string;
+    queryFile?: string;
+    queryLine?: number;
+    queryColumn?: number;
+    queryLineText?: string;
+}
+
+// `type_definition` parameter schema. Same addressing modes as the
+// rest. Use case: agent has a variable / property / parameter and
+// wants to navigate to its TYPE's declaration (the class / struct /
+// interface), not the variable's own declaration. Common shortcut
+// for "show me what type X has" without first reading hover and then
+// looking up the type by name in a second call.
+export const TypeDefinitionParamsSchema = Type.Object({
+    file: Type.Optional(
+        Type.String({
+            description:
+                'Workspace-relative or absolute path to the file containing the symbol. Required together with line and column.',
+        }),
+    ),
+    line: Type.Optional(
+        Type.Number({
+            description: '1-based line number of the symbol position.',
+        }),
+    ),
+    column: Type.Optional(
+        Type.Number({
+            description: '1-based column number of the symbol position.',
+        }),
+    ),
+    symbol: Type.Optional(
+        Type.String({
+            description:
+                'Symbol name to look up the type of. Alternative to file/line/column. Ambiguous resolutions return the candidate list.',
+        }),
+    ),
+    contextLines: Type.Optional(
+        Type.Number({
+            description:
+                'Lines of surrounding context to include around the type definition (default 4 — enough for a class / struct / interface declaration line plus the start of the body).',
+        }),
+    ),
+});
+
+export type TypeDefinitionParams = Static<typeof TypeDefinitionParamsSchema>;
+
+export interface TypeDefinitionDetails {
+    providerStatus: ProviderStatus;
+    totalCount: number;
     results: NormalizedLocation[];
     languageId: string;
     /** Hover-derived signature of the symbol at the requested position. */
