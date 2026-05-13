@@ -60,17 +60,12 @@ export interface OAuthProviderInfo {
 
 export interface SettingsData {
     apiProvider: string;
-    apiBaseUrl: string;
     apiKeySet: boolean;
     configuredProviders: string[];
     authMethod: 'env' | 'pi-login' | 'manual' | 'none';
     defaultModel: string;
     thinkingLevel: string;
-    autoApproveTools: boolean;
     allowedTools: string[];
-    autoSaveSessions: boolean;
-    sessionStoragePath: string;
-    contextUsageWarningThreshold: number;
     todoPromptGuidelines: string;
     lspEnabled: boolean;
     userMessageGlowColor: string;
@@ -85,12 +80,6 @@ export type OAuthFlowState =
     | { kind: 'progress'; message: string }
     | { kind: 'success' }
     | { kind: 'error'; message: string };
-
-export interface ToolCallPendingInfo {
-    toolCallId: string;
-    toolName: string;
-    args: any;
-}
 
 export interface FileChangeInfo {
     filePath: string;
@@ -206,8 +195,6 @@ export type ClientMessage =
     | { type: 'loadSession'; sessionPath: string }
     | { type: 'getSessions' }
     | { type: 'getState' }
-    | { type: 'approveToolCall'; toolCallId: string }
-    | { type: 'rejectToolCall'; toolCallId: string }
     | { type: 'openFile'; filePath: string }
     | { type: 'openDiff'; filePath: string; toolCallId: string }
     | { type: 'undoFileChange'; filePath: string; toolCallId: string }
@@ -340,8 +327,6 @@ export type ServerMessage =
     | { type: 'sessionChanged'; sessionId: string }
     | { type: 'fileChange'; change: FileChangeInfo }
     | { type: 'confirmResult'; action: string; confirmed: boolean; payload?: any }
-    | { type: 'toolCallPending'; pending: ToolCallPendingInfo }
-    | { type: 'toolCallResolved'; toolCallId: string }
     | { type: 'skills'; skills: SkillInfo[] }
     | { type: 'workspaceFileSuggestions'; requestId: number; query: string; isIndexing?: boolean; items: WorkspaceFileSuggestion[] }
     | { type: 'codexUsage'; usage: CodexUsageSnapshot | null }

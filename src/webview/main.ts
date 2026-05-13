@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, ToolCallPendingInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 
 declare function acquireVsCodeApi(): {
@@ -203,12 +203,6 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'confirmResult':
             handleConfirmResult(msg.action, msg.confirmed, msg.payload);
-            break;
-        case 'toolCallPending':
-            renderToolApprovalCard(msg.pending);
-            break;
-        case 'toolCallResolved':
-            removeToolApprovalCard(msg.toolCallId);
             break;
         case 'skills':
             state.skills = msg.skills;
@@ -2612,62 +2606,6 @@ function renderToolEnd(event: any): void {
             }
         }
     }
-}
-
-// ── Tool approval cards ──
-
-function renderToolApprovalCard(pending: ToolCallPendingInfo): void {
-    const container = document.getElementById('streaming-message');
-    if (!container) return;
-
-    removePreparingPlaceholder();
-
-    const existing = document.getElementById(`approval-${pending.toolCallId}`);
-    if (existing) return;
-
-    const card = el('div', 'tool-approval-card');
-    card.id = `approval-${pending.toolCallId}`;
-
-    const parsedArgs = typeof pending.args === 'string' ? tryParseJSON(pending.args) : pending.args;
-    const label = getToolLabel(pending.toolName, parsedArgs);
-
-    card.innerHTML = `
-        <div class="tool-header">
-            <span class="tool-icon">${getToolIcon(pending.toolName)}</span>
-            <span class="tool-name">${escHtml(label)}</span>
-            <span class="tool-status pending">awaiting approval</span>
-        </div>
-        <div class="approval-args">${escHtml(formatToolArgs(parsedArgs))}</div>
-        <div class="approval-actions">
-            <button class="approval-btn approve" data-toolcallid="${escHtml(pending.toolCallId)}">Approve</button>
-            <button class="approval-btn reject" data-toolcallid="${escHtml(pending.toolCallId)}">Reject</button>
-        </div>
-    `;
-
-    container.appendChild(card);
-    bindApprovalButtons();
-    scrollToBottom();
-}
-
-function removeToolApprovalCard(toolCallId: string): void {
-    document.getElementById(`approval-${toolCallId}`)?.remove();
-}
-
-function bindApprovalButtons(): void {
-    document.querySelectorAll('.approval-btn:not([data-bound])').forEach((btn) => {
-        btn.setAttribute('data-bound', '1');
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const toolCallId = (btn as HTMLElement).dataset.toolcallid;
-            if (!toolCallId) return;
-            if (btn.classList.contains('approve')) {
-                vscode.postMessage({ type: 'approveToolCall', toolCallId });
-            } else {
-                vscode.postMessage({ type: 'rejectToolCall', toolCallId });
-            }
-            removeToolApprovalCard(toolCallId);
-        });
-    });
 }
 
 // ── Thinking block ──

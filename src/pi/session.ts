@@ -14,15 +14,12 @@ import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
 import { createLspExtension } from './lsp/extension';
 
-export type ToolApprovalHandler = (toolCallId: string, toolName: string, args: any) => Promise<boolean>;
-
 export class PiSessionManager {
     private _session: AgentSession | undefined;
     private _sessionManager: SessionManager | undefined;
     private _modelRegistry: ModelRegistry | undefined;
     private _unsubscribe: (() => void) | undefined;
     private _outputChannel: vscode.OutputChannel;
-    private _toolApprovalHandler: ToolApprovalHandler | undefined;
     private _secrets: vscode.SecretStorage | undefined;
     readonly events = new EventRouter();
     readonly todoStore = new TodoStore();
@@ -87,7 +84,6 @@ export class PiSessionManager {
         }
 
         await this._applyDefaultSettings(session);
-        this._installToolApprovalHook(session);
 
         // Initial todo visibility is decided by the controller from the
         // per-session persisted toggle (see ChatController._subscribeTab
@@ -402,7 +398,6 @@ export class PiSessionManager {
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
         await this._applyDefaultSettings(session);
-        this._installToolApprovalHook(session);
     }
 
     get sessionPath(): string | undefined {
@@ -447,7 +442,6 @@ export class PiSessionManager {
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
         await this._applyDefaultSettings(session);
-        this._installToolApprovalHook(session);
 
         const model = session.model;
         this._outputChannel.appendLine(
@@ -503,7 +497,6 @@ export class PiSessionManager {
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
-        this._installToolApprovalHook(session);
     }
 
     getModels(): ModelInfo[] {
@@ -524,43 +517,6 @@ export class PiSessionManager {
 
     getThinkingLevel(): string | undefined {
         return this._session?.thinkingLevel;
-    }
-
-    getAutoApproveTools(): boolean {
-        return vscode.workspace.getConfiguration('pi-code').get<boolean>('autoApproveTools', false);
-    }
-
-    setToolApprovalHandler(handler: ToolApprovalHandler | undefined): void {
-        this._toolApprovalHandler = handler;
-    }
-
-    private _installToolApprovalHook(session: AgentSession): void {
-        try {
-            const runner = session.extensionRunner;
-            if (!runner) return;
-
-            const origEmitToolCall = runner.emitToolCall.bind(runner);
-            const self = this;
-
-            runner.emitToolCall = async (event: any) => {
-                const origResult = await origEmitToolCall(event);
-                if (origResult?.block) return origResult;
-                if (self.getAutoApproveTools()) return origResult;
-                if (!self._toolApprovalHandler) return origResult;
-
-                const approved = await self._toolApprovalHandler(
-                    event.toolCallId,
-                    event.toolName,
-                    event.input,
-                );
-                if (!approved) {
-                    return { block: true, reason: 'User rejected tool call' };
-                }
-                return origResult;
-            };
-        } catch {
-            this._outputChannel.appendLine('Tool approval hook: extension runner not available, skipping');
-        }
     }
 
     getSkills(): SkillInfo[] {

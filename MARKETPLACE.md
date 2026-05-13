@@ -113,15 +113,10 @@ Settings can be configured through the dedicated settings page (gear icon in the
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| `pi-code.apiProvider` | `string` | `""` | Preferred AI provider. Leave empty for auto-detect. |
-| `pi-code.apiBaseUrl` | `string` | `""` | Custom API base URL for proxies or self-hosted endpoints |
+| `pi-code.apiProvider` | `string` | `""` | Provider whose API key the Settings page is currently managing. Runtime provider is chosen by the selected model — this only picks the key slot to edit. |
 | `pi-code.defaultModel` | `string` | `""` | Default model ID for new sessions |
 | `pi-code.thinkingLevel` | `string` | `off` | Default thinking level (`off`, `minimal`, `low`, `medium`, `high`) |
-| `pi-code.autoApproveTools` | `boolean` | `false` | Auto-approve tool executions without confirmation |
 | `pi-code.allowedTools` | `string[]` | `[]` | Restrict which tools the agent can use. Empty = allow all. |
-| `pi-code.autoSaveSessions` | `boolean` | `true` | Automatically persist sessions |
-| `pi-code.sessionStoragePath` | `string` | `""` | Custom session storage path. Empty = workspace `.pi/`. |
-| `pi-code.contextUsageWarningThreshold` | `number` | `80` | Warn when context usage exceeds this percentage |
 | `pi-code.fileMentions.enabled` | `boolean` | `true` | Enable `@` file mentions in chat input |
 | `pi-code.fileMentions.useDefaultExcludes` | `boolean` | `true` | Use built-in exclude patterns for `@` mention indexing |
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Extra glob patterns to exclude from `@` mention suggestions |

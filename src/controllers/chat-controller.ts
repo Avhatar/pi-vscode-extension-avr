@@ -22,10 +22,6 @@ interface MessageMeta {
     totalTurnDurationMs?: number;
 }
 
-interface PendingApproval {
-    resolve: (approved: boolean) => void;
-}
-
 /** Plan Mode phase for the current tab. */
 type PlanModePhase = 'idle' | 'plan' | 'exec';
 
@@ -47,7 +43,6 @@ interface TabState {
     totalTurnDurationMs: number;
     messageMeta: Map<number, MessageMeta>;
     hasNotification: boolean;
-    pendingApprovals: Map<string, PendingApproval>;
     queuedMessages: string[];
     /** Locally tracked streaming flag – the SDK's isStreaming lags behind agent_end. */
     isStreamingLocal: boolean;
@@ -118,7 +113,6 @@ function makeTabState(
         totalTurnDurationMs: 0,
         messageMeta: new Map(),
         hasNotification: false,
-        pendingApprovals: new Map(),
         queuedMessages: [],
         isStreamingLocal: false,
         isCompacting: false,
@@ -704,10 +698,6 @@ export class ChatController implements vscode.Disposable {
         // toggle gates the feature; when OFF the agent has full tools
         // immediately on every prompt.
         this._applyPersistedPlanMode(tab);
-
-        tab.session.setToolApprovalHandler(async (toolCallId, toolName, args) => {
-            return this._requestToolApproval(tab, toolCallId, toolName, args);
-        });
 
         this._tabSubscriptions.set(tab.id, unsubs);
     }
@@ -1472,12 +1462,6 @@ export class ChatController implements vscode.Disposable {
                     });
                     break;
                 }
-                case 'approveToolCall':
-                    this._resolveToolApproval(tab, msg.toolCallId, true);
-                    break;
-                case 'rejectToolCall':
-                    this._resolveToolApproval(tab, msg.toolCallId, false);
-                    break;
                 case 'openFile': {
                     const fileUri = vscode.Uri.file(msg.filePath);
                     try {
@@ -1600,25 +1584,6 @@ export class ChatController implements vscode.Disposable {
         }
         for (const line of lines) {
             this._outputChannel.appendLine(line);
-        }
-    }
-
-    private _requestToolApproval(tab: TabState, toolCallId: string, toolName: string, args: any): Promise<boolean> {
-        return new Promise<boolean>((resolve) => {
-            tab.pendingApprovals.set(toolCallId, { resolve });
-            this._postForTab(tab.id, {
-                type: 'toolCallPending',
-                pending: { toolCallId, toolName, args: safeSerialize(args) },
-            });
-        });
-    }
-
-    private _resolveToolApproval(tab: TabState, toolCallId: string, approved: boolean): void {
-        const pending = tab.pendingApprovals.get(toolCallId);
-        if (pending) {
-            tab.pendingApprovals.delete(toolCallId);
-            pending.resolve(approved);
-            this._postForTab(tab.id, { type: 'toolCallResolved', toolCallId });
         }
     }
 

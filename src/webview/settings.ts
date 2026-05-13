@@ -64,13 +64,11 @@ function render(data: SettingsData): void {
         })),
     ];
 
-    container.appendChild(buildSection('API Connection', [
+    container.appendChild(buildSection('API Keys', [
         buildSelect('apiProvider', 'Provider', data.apiProvider, providerOptions,
-            'Select which AI provider to use. Leave on Auto-detect for automatic resolution. A leading ✓ means an API key is already saved for that provider.'),
+            'Selects which provider\'s API key the form below manages. The runtime provider is decided by the chosen model — this dropdown only changes which key slot you are editing. A leading ✓ means a key is already saved for that provider.'),
         buildConfiguredProvidersChips(data.configuredProviders ?? []),
         buildApiKeyField(data),
-        buildTextInput('apiBaseUrl', 'API Base URL', data.apiBaseUrl,
-            'Custom endpoint URL for proxies or self-hosted models. Leave empty for default.'),
         buildAuthIndicator(data.authMethod),
     ]));
 
@@ -91,8 +89,6 @@ function render(data: SettingsData): void {
     ]));
 
     container.appendChild(buildSection('Tool Execution', [
-        buildToggle('autoApproveTools', 'Auto-approve tool calls', data.autoApproveTools,
-            'When enabled, the agent executes tools without asking for confirmation. When disabled, each tool call shows an inline approval card.'),
         buildTextarea('allowedTools', 'Allowed Tools', data.allowedTools.join(', '),
             'Comma-separated list of tool names to allow (e.g. read, grep, bash). Leave empty to allow all.'),
         buildToggle('lsp.enabled', 'Language Server tools', data.lspEnabled,
@@ -107,15 +103,6 @@ function render(data: SettingsData): void {
             'Instructions injected into the system prompt for the ToDo tool. One guideline per line. Changes apply to new chat sessions — open a new chat or reload the window for them to take effect. Clear the field (or click Reset) to restore the built-in default.',
             12,
         ),
-    ]));
-
-    container.appendChild(buildSection('Session Behavior', [
-        buildToggle('autoSaveSessions', 'Auto-save sessions', data.autoSaveSessions,
-            'Automatically persist sessions after each turn.'),
-        buildTextInput('sessionStoragePath', 'Session Storage Path', data.sessionStoragePath,
-            'Custom path for session data. Leave empty for the default workspace .pi/ directory.'),
-        buildRange('contextUsageWarningThreshold', 'Context Usage Warning', data.contextUsageWarningThreshold, 0, 100,
-            `Warn when context usage exceeds ${data.contextUsageWarningThreshold}% of the context window.`),
     ]));
 
     const skillsSection = buildSection('Skills', [buildSkillsPlaceholder()]);

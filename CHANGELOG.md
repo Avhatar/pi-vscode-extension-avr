@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+- Removed the tool-approval feature entirely (the `pi-code.autoApproveTools` setting, the "Auto-approve tool calls" toggle in Settings, and the inline approval cards in chat). The toggle was non-functional anyway — Pi SDK has a fast path that bypassed our approval hook unless a Pi extension explicitly listens for `tool_call` events, which none of ours did, so disabling auto-approve silently ran tools as if it were on. We're embracing the upstream Pi YOLO model for now: the agent runs every tool without confirmation.
+
+## [0.20.1] - 2026-05-13
+
+### Changed
+- Settings page: clarified the **Provider** dropdown description. It only selects which provider's API key the form below edits — the runtime provider is decided by the selected model. Previous wording ("Preferred AI provider … Leave empty for automatic detection") suggested the dropdown constrained model selection, which it never did. Renamed the section from "API Connection" to "API Keys" to match what it actually does.
+
+### Removed
+- Removed four settings that did nothing: `pi-code.apiBaseUrl`, `pi-code.autoSaveSessions`, `pi-code.sessionStoragePath`, `pi-code.contextUsageWarningThreshold`. They were rendered in the Settings UI and read back from `settings.json`, but no other code path consumed them — Pi SDK handles session persistence on its own and the context-usage warning threshold was never checked anywhere. The "Session Behavior" section is gone with them.
+
+## [0.20.0] - 2026-05-13
+
 ### Added
 - New `find_references` tool: the agent can now ask the active language extension (C#, rust-analyzer, Pylance, TypeScript, etc.) for all references to a symbol — addressed either by file/line/column or by symbol name. Results include matches in external dependency sources (cargo registry, NuGet, node_modules) annotated as `external`. Toggle with the new `pi-code.lsp.enabled` setting (default **off**, opt-in); when off, the tool is not registered and adds nothing to the system prompt.
 - New `document_symbols` tool: lists every declaration in a file (classes, methods, fields, properties, etc.) with authoritative LSP positions, parent container, and kind. Use it before `find_references` to avoid hand-counting columns from a `read` output — particularly important on declarations like `public Player Player;` where the type and the field share a name. Supports an optional `nameContains` substring filter for large files.

@@ -125,17 +125,12 @@ export class SettingsPanel {
 
         const data: SettingsData = {
             apiProvider: provider,
-            apiBaseUrl: config.get<string>('apiBaseUrl', ''),
             apiKeySet,
             configuredProviders,
             authMethod,
             defaultModel: config.get<string>('defaultModel', ''),
             thinkingLevel: config.get<string>('thinkingLevel', 'off'),
-            autoApproveTools: config.get<boolean>('autoApproveTools', false),
             allowedTools: config.get<string[]>('allowedTools', []),
-            autoSaveSessions: config.get<boolean>('autoSaveSessions', true),
-            sessionStoragePath: config.get<string>('sessionStoragePath', ''),
-            contextUsageWarningThreshold: config.get<number>('contextUsageWarningThreshold', 80),
             todoPromptGuidelines: config.get<string>('todo.promptGuidelines', ''),
             lspEnabled: config.get<boolean>('lsp.enabled', false),
             userMessageGlowColor: config.get<string>('userMessageGlowColor', '#00aaff'),

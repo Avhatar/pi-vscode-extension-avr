@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.19.2",
+  "version": "0.20.1",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -99,12 +99,7 @@
         "pi-code.apiProvider": {
           "type": "string",
           "default": "",
-          "description": "Preferred AI provider (e.g. anthropic, openai, google, deepseek, qwen, openrouter, groq, cerebras, xai, mistral, fireworks). Leave empty for automatic detection."
-        },
-        "pi-code.apiBaseUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Custom API base URL for self-hosted or proxy endpoints. Leave empty to use the provider default."
+          "description": "Provider whose API key the Settings page is currently managing. The actual provider used at runtime is determined by the selected model; this setting only chooses which provider's stored key the Settings form shows for editing."
         },
         "pi-code.defaultModel": {
           "type": "string",
@@ -123,11 +118,6 @@
           ],
           "description": "Default thinking level for Pi Code responses"
         },
-        "pi-code.autoApproveTools": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically approve tool executions without confirmation"
-        },
         "pi-code.allowedTools": {
           "type": "array",
           "items": {
@@ -135,23 +125,6 @@
           },
           "default": [],
           "description": "Restrict which tools the agent can use. Leave empty to allow all tools."
-        },
-        "pi-code.autoSaveSessions": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically persist sessions"
-        },
-        "pi-code.sessionStoragePath": {
-          "type": "string",
-          "default": "",
-          "description": "Custom path for session storage. Leave empty to use the default workspace .pi/ directory."
-        },
-        "pi-code.contextUsageWarningThreshold": {
-          "type": "number",
-          "default": 80,
-          "minimum": 0,
-          "maximum": 100,
-          "description": "Show a warning when context usage exceeds this percentage of the context window"
         },
         "pi-code.fileMentions.enabled": {
           "type": "boolean",

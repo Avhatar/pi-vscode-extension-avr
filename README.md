@@ -212,15 +212,10 @@ Settings can be configured through the dedicated settings page (gear icon in the
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| `pi-code.apiProvider` | `string` | `""` | Preferred AI provider (anthropic, openai, google, deepseek). Leave empty for auto-detect. |
-| `pi-code.apiBaseUrl` | `string` | `""` | Custom API base URL for proxies or self-hosted endpoints |
+| `pi-code.apiProvider` | `string` | `""` | Provider whose API key the Settings page is currently managing. The runtime provider is chosen by the selected model — this only picks which provider's key slot the Settings form edits. |
 | `pi-code.defaultModel` | `string` | `""` | Default model ID for new sessions (e.g. `claude-sonnet-4-20250514`) |
 | `pi-code.thinkingLevel` | `string` | `off` | Default thinking level (`off`, `minimal`, `low`, `medium`, `high`) |
-| `pi-code.autoApproveTools` | `boolean` | `false` | Auto-approve tool executions without confirmation |
 | `pi-code.allowedTools` | `string[]` | `[]` | Restrict which tools the agent can use. Empty = allow all. |
-| `pi-code.autoSaveSessions` | `boolean` | `true` | Automatically persist sessions |
-| `pi-code.sessionStoragePath` | `string` | `""` | Custom session storage path. Empty = workspace `.pi/` directory. |
-| `pi-code.contextUsageWarningThreshold` | `number` | `80` | Warn when context usage exceeds this percentage |
 | `pi-code.fileMentions.enabled` | `boolean` | `true` | Enable `@` file mentions in chat input for files in the opened workspace |
 | `pi-code.fileMentions.useDefaultExcludes` | `boolean` | `true` | Use built-in exclude patterns when indexing workspace files for `@` mentions |
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Additional glob patterns to exclude from `@` file mention suggestions |
