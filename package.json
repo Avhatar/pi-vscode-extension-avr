@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -169,7 +169,7 @@
         "pi-code.lsp.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Expose Language Server tools (find_references, document_symbols) to the agent. When disabled (default), the tools are not registered and add nothing to the system prompt — the agent works with grep / read / etc. as usual. Enable for projects where semantic accuracy is worth the extra system-prompt footprint (e.g. large Unity / Rust / TS codebases with name collisions). Tools require a language extension to be installed for each file's language (e.g. C#, rust-analyzer, Pylance). Changes apply on new sessions or window reload."
+          "description": "Expose Language Server tools (find_references, document_symbols, goto_definition, hover, find_implementations, type_definition, workspace_symbols, call_hierarchy_incoming, call_hierarchy_outgoing) to the agent. When disabled (default), the tools are not registered and add nothing to the system prompt — the agent works with grep / read / etc. as usual. Enable for projects where semantic accuracy is worth the extra system-prompt footprint (e.g. large Unity / Rust / TS codebases with name collisions). Tools require a language extension to be installed for each file's language (e.g. C# Dev Kit, rust-analyzer, Pylance). Changes apply on new sessions or window reload."
         },
         "pi-code.todo.promptGuidelines": {
           "type": "string",

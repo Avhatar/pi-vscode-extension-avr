@@ -12,7 +12,9 @@ A visual VS Code wrapper around the [Pi coding agent](https://pi.dev/) — built
 - **Claude Code-style ergonomics.** Chats are normal editor tabs — split, drag into another editor group, move into a separate window, restore across `Reload Window`. Multiple chats run in parallel, each with its own history, file changes, and checkpoints.
 - **Bring your own model.** Works with the major AI providers via API key, or sign in with your existing subscription — no separate setup, no second invoice.
 - **Web access and MCP servers out of the box.** Web search, page/PDF/YouTube fetch, and any MCP server you declare in `.mcp.json` work immediately after install. No CLI step, no global `~/.pi/` writes.
-- **Made for non-engineers too.** Inline diffs, per-turn checkpoints, tool approval cards, image attachments, and a per-chat ToDo make the agent legible — you can see exactly what it's doing and undo any step.
+- **Plan-before-execute.** Optional Plan Mode toggle has the agent study the task with read-only tools and propose a plan before any file changes — useful for unfamiliar codebases or risky refactors.
+- **Semantic code navigation.** Opt-in Language Server tools let the agent ask your existing language extension (C#, rust-analyzer, Pylance, TypeScript, gopls, clangd) for references, definitions, implementations, call hierarchy, and workspace symbols instead of guessing from grep.
+- **Made for non-engineers too.** Inline diffs, per-turn checkpoints, image attachments, per-turn timing, and a per-chat ToDo make the agent legible — you can see exactly what it's doing and undo any step.
 
 ## Features
 
@@ -23,7 +25,7 @@ Each chat opens as a normal editor-area webview panel. Split the editor, drag th
 Run several agent sessions in parallel. Conversation history, tracked file changes, and checkpoint state are isolated per tab.
 
 ### Tool visibility
-Every tool call (file reads/writes/edits, shell, glob/grep, web search, fetch) renders as an expandable card with arguments and results, streamed in real time.
+Every tool call (file reads/writes/edits, shell, glob/grep/find, web search, fetch, LSP semantic queries) renders as an expandable card with arguments and results, streamed in real time. A vertical timeline rail connects the icons on the left so it's easy to follow what the agent did across a long turn; hover any icon for a tooltip describing what the tool does.
 
 ### Inline diffs and rollback
 File modifications are tracked automatically. Review unified diffs inline or open them in VS Code's native diff editor. Undo a single file or every change at once.
@@ -31,11 +33,17 @@ File modifications are tracked automatically. Review unified diffs inline or ope
 ### Checkpoints
 Every user message creates a checkpoint. Roll the workspace back to any earlier turn, then redo to bring changes back. The conversation history is preserved so you can branch from any point.
 
-### Tool approval
-By default each tool call pauses for an inline approval card with the tool name and arguments preview. Approve, reject, or enable auto-approve to let the agent run uninterrupted.
+### Plan Mode
+Per-chat toggle in the launcher sidebar (above ToDo) that makes the agent study the task with read-only tools and propose a plan before making any changes. The first message of a task is sent with only `read`, `grep`, `find`, `ls`, and the web/search tools active — the agent analyses the codebase, asks clarifying questions, and presents an approach. Your next reply unlocks the full tool set for execution. After execution, the next prompt restarts the planning cycle. Disabled by default for new chats; flip on with the `pi-code.planMode.defaultEnabled` setting.
+
+### Language Server tools (opt-in)
+Eight semantic-navigation tools that ask your active language extension instead of guessing from grep: `find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, and `call_hierarchy_incoming` / `call_hierarchy_outgoing`. Each tool returns authoritative `(file, line, column)` positions plus surrounding context, annotates results in external dependency sources (NuGet, cargo registry, `node_modules`) as `[external]`, and accepts either positional or symbol-name addressing. Off by default — enable with `pi-code.lsp.enabled` for projects where semantic accuracy is worth the extra system-prompt footprint (large Unity / Rust / TS codebases with name collisions, partial classes, overloaded methods). Requires a language extension for each file's language; for C# call hierarchy specifically, install **C# Dev Kit** (the OmniSharp-only extension does not implement it).
 
 ### Streaming with thinking
 Watch the agent reason in real time with collapsible thinking blocks. Cycle through `off`, `minimal`, `low`, `medium`, `high` to control verbosity.
+
+### Per-turn and cumulative timing
+Each assistant message footer shows the elapsed wall-clock time for that turn plus the cumulative active time across the chat (idle gaps excluded), alongside token usage.
 
 ### Image attachments
 Paste, drop, or pick images via the paperclip button. Previews stay in chat history; image-capable models receive them inline.
@@ -62,7 +70,7 @@ When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer 
 A `cache: …` chip in the footer chooses `short` / `long` / provider-aware `auto` so cached prefixes are kept around exactly as long as you need them.
 
 ### Settings page with OAuth login
-A dedicated settings panel handles API connection, default model, thinking level, tool execution behaviour, and session management. API keys are stored via VS Code's `SecretStorage` — never in `settings.json`. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Gemini CLI, and Antigravity, with a manual paste-the-code fallback when the local OAuth callback can't be reached.
+A dedicated settings panel handles API keys, default model, thinking level, ToDo behaviour, file-mention indexing, and chat appearance. API keys are stored via VS Code's `SecretStorage` — never in `settings.json`. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Gemini CLI, and Antigravity, with a manual paste-the-code fallback when the local OAuth callback can't be reached.
 
 ### Bundled web access and MCP
 Web search, code search, content fetching (web pages, GitHub, YouTube transcripts, PDFs, local videos), and an MCP adapter that picks up servers from `.mcp.json` / `.pi/mcp.json` ship inside the extension and load automatically. Uses Exa MCP by default with no API keys; optionally reads `~/.pi/web-search.json` to switch backends.
@@ -76,8 +84,9 @@ Web search, code search, content fetching (web pages, GitHub, YouTube transcript
    - click the **Sign in** button next to your subscription provider (Claude Pro/Max, ChatGPT Plus/Pro/Codex, GitHub Copilot, Gemini CLI, Antigravity) to authenticate via your browser.
 4. **Click + New chat** (`Ctrl+Shift+N`). The chat opens as a regular editor tab — split, drag, or move it wherever you like.
 5. **Pick a model** with the picker at the bottom of the chat, then type your prompt and press Enter.
-6. **While the agent works:** review tool calls inline, approve/reject as needed, queue follow-ups (Enter), or steer mid-stream (`Ctrl+Enter`).
+6. **While the agent works:** review tool calls inline, queue follow-ups (Enter), or steer mid-stream (`Ctrl+Enter`).
 7. **Review and roll back:** click *Review* on a diff to open VS Code's diff editor, or use the per-message checkpoint button to roll the workspace back to that turn.
+8. **Optional:** toggle **Plan Mode** above ToDo in the sidebar for unfamiliar codebases or risky refactors — the agent will plan first and only execute after you confirm.
 
 ## Supported Providers
 
@@ -122,8 +131,10 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Extra glob patterns to exclude from `@` mention suggestions |
 | `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum `@` mention suggestions to show |
 | `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative config file for `@` mention indexing |
+| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable Plan Mode for new chats by default |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat ToDo for new chats by default |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines for the ToDo tool |
+| `pi-code.lsp.enabled` | `boolean` | `false` | Expose Language Server tools (find_references, goto_definition, hover, etc.) to the agent. Opt-in; requires a language extension per file's language. |
 | `pi-code.userMessageGlowColor` | `string` | `#00aaff` | Glow colour around user messages in the chat |
 | `pi-code.userMessageGlowOpacity` | `number` | `40` | Glow opacity, 0–100 |
 

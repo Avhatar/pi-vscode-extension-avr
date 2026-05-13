@@ -28,6 +28,9 @@ In addition to those two structural changes, the fork has accumulated a number o
 - Workspace `@` file mentions in the chat input, with cached suggestions, configurable excludes, and inline highlighting of mentioned paths.
 - Auto-loaded `CLAUDE.md` / `AGENTS.md` instructions from the workspace, including per-folder rules surfaced when the agent touches that subtree.
 - Bundled MCP adapter that picks up servers from `.mcp.json` / `.pi/mcp.json` automatically, with no `pi install` step.
+- Per-chat **Plan Mode**: the agent plans the task with read-only tools and waits for confirmation before any file changes.
+- Opt-in **Language Server tools** (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) that pull semantic information from the active VS Code language extension instead of relying on grep heuristics.
+- Per-chat persistent **ToDo** that the agent maintains across `/compact` and across reloads, with per-tab enable/disable.
 - The launcher persists a session history on disk and lets you delete entries individually; opening an old entry reopens it as a fresh editor panel.
 
 The fork tracks the upstream `@mariozechner/pi-coding-agent` SDK as a regular npm dependency and stays in sync with its API.
@@ -41,7 +44,7 @@ Each chat opens as its own editor-area webview panel — splittable, draggable i
 Run multiple independent agent sessions in parallel — each chat panel has its own conversation history, file change tracking, and checkpoint state. Nothing is shared between tabs.
 
 ### Tool Visibility
-Every tool the agent invokes (file reads, writes, edits, shell commands, glob/grep searches) is rendered as an expandable card showing arguments and results in real time.
+Every tool the agent invokes (file reads, writes, edits, shell commands, glob/grep/find searches, web tools, LSP semantic queries) is rendered as an expandable card showing arguments and results in real time. Tool rows sit on a vertical timeline rail that connects the icons on the left, with hover tooltips on every icon describing what the tool does.
 
 ### Inline Diffs & File Change Tracking
 File modifications made by the agent are tracked automatically. Review unified diffs inline in the chat or open them in VS Code's native diff editor. Undo individual file changes or all changes at once.
@@ -56,7 +59,7 @@ Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle
 Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
 
 ### Settings Page with OAuth Login
-A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API connection, default model and thinking level, tool execution behavior, and session management. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
+A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API keys, default model and thinking level, ToDo behaviour, file-mention indexing, and chat appearance. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
 
 ### Bundled Pi Extensions
 Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Uses Exa MCP by default with no API keys required; optionally reads `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys to switch to a different backend. The bundled `pi-mcp-adapter` package wires up MCP servers declared in `.mcp.json` or `.pi/mcp.json` so their tools appear automatically in the agent's tool list. No `pi install` step required.
@@ -73,8 +76,25 @@ Paste images directly into the chat input, drop them onto the chat panel, or pic
 ### Codex Subscription Usage Indicator
 When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer shows percent used in the 5-hour and weekly windows with colour cues at 50% and 90%. A tooltip details the plan, exact reset times, and remaining credit balance. Each assistant message footer also shows the per-turn delta (`5h +1.2% · week +0.3%`) so you can see how much each turn cost. Hidden for non-Codex models and for token-billed API key accounts.
 
-### Tool Approval
-When auto-approve is disabled (the default), each tool call pauses execution and shows an inline approval card in the chat with the tool name, arguments preview, and Approve/Reject buttons, so you can review or block each tool call before it runs.
+### Plan Mode
+A per-chat toggle in the launcher sidebar (above ToDo) that makes the agent study the task with read-only tools and propose a plan before making any changes. When enabled, the first message of a task is sent with only diagnostic/read tools active (`read`, `grep`, `find`, `ls`, `web_search`, `code_search`, `fetch_content`, `get_search_content`) — the agent analyses the code, asks clarifying questions, and presents an approach. Your next reply unlocks the full tool set for execution. After execution, the next prompt restarts the planning cycle. Minor follow-ups (short messages, confirmations) keep execution tools so the flow stays natural. Plan-phase completion is agent-driven via a `<plan-complete/>` control marker, with a 10-minute idle reset as a safety net. Disabled by default for new chats; toggle in the sidebar or set `pi-code.planMode.defaultEnabled` for the default state.
+
+### Language Server Tools (opt-in)
+Eight semantic-navigation tools backed by the active VS Code language extension instead of grep heuristics, gated by `pi-code.lsp.enabled` (default **off**):
+
+- `find_references` — every reference to a symbol, with optional `includeAccessKind` for read/write/text classification (uses document-highlight provider).
+- `document_symbols` — every declaration in a file (class / method / field / property / …) with authoritative LSP positions, parent container, and kind. Supports a `nameContains` substring filter.
+- `goto_definition` — jumps to definition site(s), handles partial classes and overloaded methods, surfaces external dependency sources annotated `[external]`.
+- `hover` — the language server's full hover payload (signature, inferred type, xml-doc / rustdoc / jsdoc) at a position.
+- `find_implementations` — every concrete implementation / override (e.g. "who implements `IFoo`", "all overrides of `X`").
+- `type_definition` — jumps to the declaration of a variable's TYPE rather than the variable itself.
+- `workspace_symbols` — cross-file symbol discovery via free-form query, with optional `kindFilter`.
+- `call_hierarchy_incoming` / `call_hierarchy_outgoing` — "who calls X" / "what does X call" at the callable level (cleaner than `find_references` for graph walks). Server support: rust-analyzer, tsserver, Pylance, **C# Dev Kit** (`ms-dotnettools.csdevkit`), gopls, clangd. The OmniSharp-only `ms-dotnettools.csharp` does NOT implement call hierarchy.
+
+Each tool accepts either positional addressing (`file`, `line`, `column`) or by-name lookup, returns context snippets around each location, and annotates results from external dependency sources (NuGet, cargo registry, `node_modules`) as `[external]`. Enable when semantic accuracy is worth the extra system-prompt footprint — large Unity / Rust / TS codebases with name collisions, partial classes, or heavy overloading benefit most. Changes apply on new sessions or window reload.
+
+### Per-Turn and Cumulative Timing
+Each assistant message footer shows the elapsed wall-clock time for that turn plus the cumulative active time across the chat (idle gaps excluded), alongside token usage.
 
 ### Message Queuing & Steering
 While the agent is streaming, you can **queue** follow-up messages that will be sent automatically once the current generation finishes. Queued messages appear in a collapsible list above the input with inline edit and delete controls. You can also **steer** the agent mid-generation (Ctrl+Enter) to inject guidance into the current response without waiting.
@@ -221,8 +241,10 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Additional glob patterns to exclude from `@` file mention suggestions |
 | `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum number of `@` file mention suggestions to show |
 | `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative JSON config file for `@` file mention indexing |
+| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable Plan Mode for new chats by default. When on, the agent studies the task and proposes a plan with read-only tools before making any changes. |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat persistent ToDo for new chats by default |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines injected into the system prompt for the ToDo tool |
+| `pi-code.lsp.enabled` | `boolean` | `false` | Expose Language Server tools (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) to the agent. Off by default — the tools are not registered and add nothing to the system prompt. Requires a language extension for each file's language (C#, rust-analyzer, Pylance, etc.). |
 | `pi-code.userMessageGlowColor` | `string` | `#00aaff` | Color of the subtle glow outline around user messages in the chat |
 | `pi-code.userMessageGlowOpacity` | `number` | `40` | Opacity of the glow around user messages, as a percentage (0–100) |
 
@@ -239,8 +261,9 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 │  │   LauncherView     │   │  ChatPanel  ChatPanel  ...     │   │
 │  │ (WebviewView)      │   │ (WebviewPanel per chat)        │   │
 │  │ - new / settings   │   │ - chat UI (main.ts + CSS)       │   │
-│  │ - history          │   │ - tool approval cards           │   │
-│  │ - per-tab ToDo     │   │ - diffs, checkpoints, queue     │   │
+│  │ - history          │   │ - timeline rail + tooltips      │   │
+│  │ - plan mode toggle │   │ - diffs, checkpoints, queue     │   │
+│  │ - per-tab ToDo     │   │                                  │   │
 │  └─────────┬──────────┘   └──────────────┬──────────────────┘   │
 │            │                              │                      │
 │            └──────────────┬───────────────┘                      │
@@ -277,8 +300,8 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 - **LauncherView** ([src/providers/launcher-view.ts](src/providers/launcher-view.ts)) is the `WebviewViewProvider` mounted in the activity bar. It renders quick actions and closed-session history, then asks the controller to open or focus a panel.
 - **ChatPanel** ([src/providers/chat-panel.ts](src/providers/chat-panel.ts)) is one editor-area `WebviewPanel` per chat, hosting the actual chat UI. **ChatPanelSerializer** ([src/providers/chat-panel-serializer.ts](src/providers/chat-panel-serializer.ts)) restores these panels across `Reload Window` by replaying the bound tab id.
 - **SettingsPanel** ([src/providers/settings-panel.ts](src/providers/settings-panel.ts)) opens a `WebviewPanel` in the editor area for the settings page, backed by VS Code's configuration API and `SecretStorage`. Hosts API-key entry and the OAuth subscription-login flow.
-- **Webview** ([src/webview/main.ts](src/webview/main.ts)) renders the chat UI, inline tool approval cards, slash-command menu, and image attachment previews, and communicates with the extension host via typed messages defined in [src/shared/protocol.ts](src/shared/protocol.ts).
-- **PiSessionManager** ([src/pi/session.ts](src/pi/session.ts)) wraps `createAgentSession` from `@mariozechner/pi-coding-agent`, handling the prompt / steer / follow-up / abort lifecycle. Reads configuration on session creation, installs tool approval hooks via the SDK's extension runner, and feeds Pi's resource loader the bundled-extension paths from [src/pi/bundled-packages.ts](src/pi/bundled-packages.ts). Provider-specific logic (e.g. Qwen in [src/pi/providers/qwen.ts](src/pi/providers/qwen.ts)) is loaded per session.
+- **Webview** ([src/webview/main.ts](src/webview/main.ts)) renders the chat UI, timeline-rail tool rows, slash-command menu, and image attachment previews, and communicates with the extension host via typed messages defined in [src/shared/protocol.ts](src/shared/protocol.ts).
+- **PiSessionManager** ([src/pi/session.ts](src/pi/session.ts)) wraps `createAgentSession` from `@mariozechner/pi-coding-agent`, handling the prompt / steer / follow-up / abort lifecycle. Reads configuration on session creation and feeds Pi's resource loader the bundled-extension paths from [src/pi/bundled-packages.ts](src/pi/bundled-packages.ts). Provider-specific logic (e.g. Qwen in [src/pi/providers/qwen.ts](src/pi/providers/qwen.ts)) is loaded per session.
 - **DiffManager** ([src/providers/diff.ts](src/providers/diff.ts)) tracks file changes from `edit`/`write` tool calls and provides unified diffs via a `pi-diff:` virtual document scheme.
 - **CheckpointManager** ([src/providers/checkpoint.ts](src/providers/checkpoint.ts)) snapshots file state per turn for rollback and redo.
 - **Codex usage plumbing** ([src/pi/codex-monitor.ts](src/pi/codex-monitor.ts) + [src/pi/codex-usage-store.ts](src/pi/codex-usage-store.ts)) captures subscription windows from Codex response headers and exposes them to the chat footer.

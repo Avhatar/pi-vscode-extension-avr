@@ -7,11 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-05-13
+
 ### Added
 - Hover-tooltips on every icon next to the chat timeline rail. Each tool icon now explains what the tool does (Bash, Read, Edit, Grep, the LSP family, Todo, web tools, …), the thinking indicator describes itself, and the busy placeholder distinguishes "preparing next move" from "compacting". Useful while you're still learning what each icon means; uses native `title` so it follows the OS tooltip style and stays out of the way once you know them.
 
+### Changed
+- Marketplace README (`MARKETPLACE.md`) refreshed: dropped the tool-approval feature description, added Plan Mode, Language Server tools, per-turn timing, and timeline-rail tooltips, and refreshed the Settings table with `pi-code.planMode.defaultEnabled` and `pi-code.lsp.enabled`. The GitHub `README.md` got the same updates plus an updated architecture diagram and project-structure listing.
+
 ### Removed
 - Removed the tool-approval feature entirely (the `pi-code.autoApproveTools` setting, the "Auto-approve tool calls" toggle in Settings, and the inline approval cards in chat). The toggle was non-functional anyway — Pi SDK has a fast path that bypassed our approval hook unless a Pi extension explicitly listens for `tool_call` events, which none of ours did, so disabling auto-approve silently ran tools as if it were on. We're embracing the upstream Pi YOLO model for now: the agent runs every tool without confirmation.
+
+### Fixed
+- `CHANGELOG.md` is now shipped inside the VSIX, so the **Changelog** tab on the VS Code Marketplace listing is populated. Previously the file was listed in `.vscodeignore`, which meant every release back to 0.17.6 published an empty changelog tab on the marketplace.
 
 ## [0.20.1] - 2026-05-13
 
