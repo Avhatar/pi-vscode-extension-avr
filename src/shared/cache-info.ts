@@ -23,6 +23,10 @@ export type CacheFamily =
     | 'openai'
     /** Backend caches automatically by prefix; cacheRetention option is largely cosmetic, but writes are free. */
     | 'auto'
+    /** Provider has cache support, but the upstream API exposes only a fixed short retention. */
+    | 'fixed-short'
+    /** Provider manages prompt caching automatically and exposes no selectable retention. */
+    | 'provider-managed'
     /** Provider has no caching wired in Pi (or in the upstream API). The chip is informational. */
     | 'unsupported'
     /** Unknown/heterogeneous (e.g. OpenRouter — depends on the routed backend). */
@@ -38,6 +42,10 @@ export interface CacheCapability {
     writeFree: boolean;
     /** True when the chip currently has a real on-the-wire effect for this provider. */
     chipActive: boolean;
+    /** Fixed effective retention when the upstream API does not allow this to be selected. */
+    forcedEffective?: 'short' | 'long';
+    /** Optional chip label for forced/provider-managed cache modes. */
+    chipLabel?: string;
     /** Short note shown in the tooltip. */
     note: string;
 }
@@ -53,10 +61,18 @@ const OPENAI_PROVIDERS = new Set([
     'openai-codex',
 ]);
 
+const QWEN_PROVIDERS = new Set([
+    'qwen',
+    'qwen-cn',
+]);
+
+const PROVIDER_MANAGED_CACHE_PROVIDERS = new Set([
+    'deepseek',
+]);
+
 // Backends that auto-cache by prefix on their own; sending Pi's prompt_cache_*
 // fields is harmless but rarely changes behaviour. Writes are typically free.
 const AUTO_CACHE_PROVIDERS = new Set([
-    'deepseek',
     'zai',
     'cerebras',
     'opencode',
@@ -139,6 +155,31 @@ export function getCacheCapability(provider: string | undefined, modelId?: strin
             writeFree: true,
             chipActive: true,
             note: 'OpenAI-style prompt_cache_key + retention. Writes are free, so long is always at least as cheap as short.',
+        };
+    }
+
+    if (QWEN_PROVIDERS.has(provider)) {
+        return {
+            family: 'fixed-short',
+            shortLabel: '5 min',
+            longLabel: 'not supported',
+            writeFree: false,
+            chipActive: false,
+            forcedEffective: 'short',
+            note: 'Qwen/DashScope does not expose selectable cache duration. Explicit context cache is ephemeral with a fixed 5 min TTL, while implicit prefix cache is managed by DashScope automatically.',
+        };
+    }
+
+    if (PROVIDER_MANAGED_CACHE_PROVIDERS.has(provider)) {
+        return {
+            family: 'provider-managed',
+            shortLabel: 'provider-managed',
+            longLabel: 'not supported',
+            writeFree: false,
+            chipActive: false,
+            forcedEffective: 'short',
+            chipLabel: 'provider',
+            note: 'DeepSeek manages context caching automatically on the provider side. Pi Code cannot choose cache duration; DeepSeek persists reusable prompt prefixes on disk and clears unused cache automatically, usually within hours to days.',
         };
     }
 

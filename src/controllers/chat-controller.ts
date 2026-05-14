@@ -605,7 +605,7 @@ export class ChatController implements vscode.Disposable {
      *
      * In `auto`, the decision is provider-aware:
      *
-     * - For backends where cache writes are free (OpenAI, DeepSeek, Z.AI, …),
+     * - For backends where cache writes are free (OpenAI, Z.AI, …),
      *   `long` strictly dominates `short` cost-wise, so we always pick `long`.
      * - For backends with a real write surcharge (Anthropic / Bedrock-Claude /
      *   kimi-coding), we only pay the higher write cost when the session has
@@ -617,11 +617,14 @@ export class ChatController implements vscode.Disposable {
      * composing the next prompt after a break, not only after they send it).
      */
     private _computeEffectiveCache(tab: TabState): CacheEffective {
+        const model = tab.session.getCurrentModel();
+        const cap = getCacheCapability(model?.provider, model?.id);
+        if (cap.forcedEffective) {
+            return cap.forcedEffective;
+        }
         if (this._cacheMode === 'short' || this._cacheMode === 'long') {
             return this._cacheMode;
         }
-        const model = tab.session.getCurrentModel();
-        const cap = getCacheCapability(model?.provider, model?.id);
         if (cap.writeFree) {
             return 'long';
         }

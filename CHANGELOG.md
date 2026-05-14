@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Qwen/DashScope models now show the cache selector as fixed to short retention with an explanatory tooltip instead of implying that long cache duration can be selected.
+- DeepSeek models now show the cache selector as provider-managed and no longer imply that Pi Code can choose a short or long cache duration.
+
+### Removed
+- Stale "Icons by Royyan Wijaya on Flaticon" attribution. The current icon set is no longer derived from those Flaticon authors, so the credit line is dropped from `MARKETPLACE.md`, `README.md`, and the Settings page (the now-empty Credits section is removed from Settings too).
+
 ## [0.21.0] - 2026-05-13
 
 ### Added

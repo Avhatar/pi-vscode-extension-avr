@@ -910,7 +910,10 @@ function renderCacheChip(): string {
     const cap = getCacheCapability(state.model?.provider, state.model?.id);
     let label: string;
     let cls = 'footer-cache';
-    if (mode === 'auto') {
+    if (cap.forcedEffective) {
+        label = `cache: ${cap.chipLabel ?? cap.forcedEffective}`;
+        cls += ` footer-cache--${cap.forcedEffective}`;
+    } else if (mode === 'auto') {
         label = `cache: auto&middot;${eff}`;
         cls += ` footer-cache--auto footer-cache--${eff}`;
     } else {
@@ -925,10 +928,16 @@ function renderCacheChip(): string {
 function cacheChipTooltip(mode: 'short' | 'long' | 'auto', eff: 'short' | 'long'): string {
     const cap = getCacheCapability(state.model?.provider, state.model?.id);
     const lines: string[] = [];
-    lines.push(`Prompt cache retention: ${mode}${mode === 'auto' ? ` (currently ${eff})` : ''}`);
+    if (cap.family === 'provider-managed') {
+        lines.push(`Prompt cache retention: provider-managed (selected ${mode} is ignored for this provider)`);
+    } else if (cap.forcedEffective) {
+        lines.push(`Prompt cache retention: ${cap.forcedEffective} (fixed; selected ${mode} is ignored for this provider)`);
+    } else {
+        lines.push(`Prompt cache retention: ${mode}${mode === 'auto' ? ` (currently ${eff})` : ''}`);
+    }
     lines.push(`Provider: ${state.model?.provider ?? '-'} — short: ${cap.shortLabel}, long: ${cap.longLabel}`);
     lines.push(cap.note);
-    if (mode === 'auto') {
+    if (mode === 'auto' && !cap.forcedEffective) {
         if (cap.family === 'openai' || cap.family === 'auto') {
             lines.push('Auto picks long here because cache writes are free on this provider.');
         } else if (cap.family === 'anthropic') {
@@ -937,10 +946,12 @@ function cacheChipTooltip(mode: 'short' | 'long' | 'auto', eff: 'short' | 'long'
             lines.push('Auto picks long after a >2 min idle gap or a >20k-token prefix.');
         }
     }
-    if (!cap.chipActive) {
+    if (cap.forcedEffective) {
+        lines.push('Note: this provider does not allow Pi Code to change cache duration; requests follow the provider behavior shown above.');
+    } else if (!cap.chipActive) {
         lines.push('Note: this provider does not act on the chip; setting is informational.');
     }
-    lines.push('Click to change.');
+    lines.push(cap.forcedEffective ? 'Click to view details.' : 'Click to change.');
     return lines.join('\n');
 }
 
@@ -964,36 +975,50 @@ function toggleCacheModePicker(): void {
             ? `Always picks long for this provider (free cache writes)`
             : cap.family === 'anthropic'
                 ? `Picks long after a >2 min idle gap or a >20k-token prefix`
-                : cap.family === 'unsupported'
-                    ? `Heuristic runs, but ${state.model?.provider ?? 'this provider'} ignores the setting`
-                    : `Picks based on idle gaps & context size`;
+                : cap.family === 'fixed-short'
+                    ? `${state.model?.provider ?? 'This provider'} does not expose selectable retention; effective cache stays short`
+                    : cap.family === 'provider-managed'
+                        ? `${state.model?.provider ?? 'This provider'} manages cache retention automatically; Pi Code does not send a duration setting`
+                        : cap.family === 'unsupported'
+                            ? `Heuristic runs, but ${state.model?.provider ?? 'this provider'} ignores the setting`
+                            : `Picks based on idle gaps & context size`;
 
     const shortDesc =
         cap.family === 'openai'
             ? `5 min TTL — provider auto-caches, writes are free either way`
             : cap.family === 'auto'
                 ? `Provider auto-caches by prefix; setting has little effect`
-                : cap.family === 'unsupported'
-                    ? `No caching wired for this provider`
-                    : `5 min TTL — cheap writes, lost on long pauses`;
+                : cap.family === 'fixed-short'
+                    ? `Fixed effective retention for this provider`
+                    : cap.family === 'provider-managed'
+                        ? `Does not change provider-managed cache retention`
+                        : cap.family === 'unsupported'
+                            ? `No caching wired for this provider`
+                            : `5 min TTL — cheap writes, lost on long pauses`;
 
     const longDesc =
         cap.family === 'openai'
             ? `24 h TTL — writes free, survives long breaks`
             : cap.family === 'auto'
                 ? `Provider auto-caches by prefix; setting has little effect`
-                : cap.family === 'unsupported'
-                    ? `No caching wired for this provider`
-                    : `1 h TTL — pricier writes (~2× input), survives breaks`;
+                : cap.family === 'fixed-short'
+                    ? `Not supported by this provider; requests still use short retention`
+                    : cap.family === 'provider-managed'
+                        ? `Not supported by this provider; DeepSeek decides cache retention automatically`
+                        : cap.family === 'unsupported'
+                            ? `No caching wired for this provider`
+                            : `1 h TTL — pricier writes (~2× input), survives breaks`;
 
+    const showTtlLabel = cap.family !== 'unsupported' && cap.family !== 'auto' && cap.family !== 'provider-managed';
     const options: Array<{ value: 'short' | 'long' | 'auto'; title: string; desc: string }> = [
         { value: 'auto', title: 'Auto', desc: autoDesc },
-        { value: 'short', title: `Short${cap.family !== 'unsupported' && cap.family !== 'auto' ? ` (${cap.shortLabel})` : ''}`, desc: shortDesc },
-        { value: 'long', title: `Long${cap.family !== 'unsupported' && cap.family !== 'auto' ? ` (${cap.longLabel})` : ''}`, desc: longDesc },
+        { value: 'short', title: `Short${showTtlLabel ? ` (${cap.shortLabel})` : ''}`, desc: shortDesc },
+        { value: 'long', title: `Long${showTtlLabel ? ` (${cap.longLabel})` : ''}`, desc: longDesc },
     ];
     for (const opt of options) {
-        const isActive = state.cacheMode === opt.value;
-        const item = el('div', `cache-mode-item${isActive ? ' active' : ''}`);
+        const isActive = cap.forcedEffective ? opt.value === cap.forcedEffective : state.cacheMode === opt.value;
+        const isDisabled = !!cap.forcedEffective && opt.value !== cap.forcedEffective;
+        const item = el('div', `cache-mode-item${isActive ? ' active' : ''}${isDisabled ? ' disabled' : ''}`);
         item.dataset.mode = opt.value;
         const effHint = opt.value === 'auto' ? ` <span class="cache-mode-eff">(now ${state.cacheEffective})</span>` : '';
         item.innerHTML = `
@@ -1011,7 +1036,7 @@ function toggleCacheModePicker(): void {
         const item = (e.target as HTMLElement).closest('.cache-mode-item') as HTMLElement | null;
         if (!item) return;
         const mode = item.dataset.mode as 'short' | 'long' | 'auto' | undefined;
-        if (!mode) return;
+        if (!mode || cap.forcedEffective) return;
         state.cacheMode = mode;
         vscode.postMessage({ type: 'setCacheMode', mode });
         closeCacheModePicker();

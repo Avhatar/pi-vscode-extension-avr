@@ -1510,6 +1510,13 @@ body[data-mode="panel"] .tab-strip,
 .cache-mode-item:hover {
     background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
 }
+.cache-mode-item.disabled {
+    cursor: default;
+    opacity: 0.55;
+}
+.cache-mode-item.disabled:hover {
+    background: transparent;
+}
 .cache-mode-item.active {
     background: var(--vscode-list-activeSelectionBackground, rgba(110, 196, 110, 0.12));
 }
