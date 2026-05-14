@@ -147,7 +147,6 @@ API keys and OAuth tokens are stored exclusively in VS Code's `SecretStorage` â€
 ## Credits
 
 Pi Code embeds [Mario Zechner's Pi coding agent SDK](https://github.com/badlogic/pi-mono).
-Icons by [Royyan Wijaya](https://www.flaticon.com/authors/royyan-wijaya) on Flaticon.
 
 ## License
 

@@ -120,10 +120,6 @@ function render(data: SettingsData): void {
         buildShortcutsInfo(),
     ]));
 
-    container.appendChild(buildSection('Credits', [
-        buildCredits(),
-    ]));
-
     app.appendChild(container);
     bindEvents();
     renderSkillsSection();
@@ -342,12 +338,6 @@ function buildShortcutsInfo(): HTMLElement {
             <a href="#" id="btn-open-keybindings">Open Keyboard Shortcuts editor</a> to customize.
         </p>
     `;
-    return row;
-}
-
-function buildCredits(): HTMLElement {
-    const row = el('div', 'setting-row');
-    row.innerHTML = `<p class="setting-description">Icons by <a href="https://www.flaticon.com/authors/royyan-wijaya">Royyan Wijaya</a> on Flaticon.</p>`;
     return row;
 }
 

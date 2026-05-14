@@ -394,10 +394,6 @@ npm run test:all
 
 Use the **Run Extension** launch configuration (F5) to open an Extension Development Host with the extension loaded and debuggable.
 
-## Credits
-
-Icons by [Royyan Wijaya](https://www.flaticon.com/authors/royyan-wijaya) on Flaticon.
-
 ## License
 
 MIT
