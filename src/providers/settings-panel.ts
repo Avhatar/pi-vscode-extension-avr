@@ -265,7 +265,7 @@ export class SettingsPanel {
 
     private async _sendSkills(): Promise<void> {
         try {
-            const { loadSkills } = await import('@mariozechner/pi-coding-agent');
+            const { loadSkills } = await import('@earendil-works/pi-coding-agent');
             const path = require('path');
             const os = require('os');
             const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();

@@ -11,7 +11,7 @@
 // factory returns a no-op handler so the tools do not appear in the
 // system prompt at all.
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { registerCallHierarchyIncomingTool } from './tools/call-hierarchy-incoming';
 import { registerCallHierarchyOutgoingTool } from './tools/call-hierarchy-outgoing';
 import { registerDocumentSymbolsTool } from './tools/document-symbols';

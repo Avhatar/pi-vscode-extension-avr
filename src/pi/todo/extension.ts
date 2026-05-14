@@ -13,7 +13,7 @@
 // (inside the tool's `execute`). Subscribers get one notification per
 // commit — that drives the sidebar update path in PR3.
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { replayFromBranch } from './replay';
 import type { TodoStore } from './store';
 import { registerTodoTool } from './tool';

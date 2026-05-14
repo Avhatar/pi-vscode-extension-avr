@@ -11,7 +11,7 @@
 // which is read in `_buildResourceLoader` and forwarded into
 // `createTodoExtension` → `registerTodoTool`.
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { applyTaskMutation } from './reducer';
 import { buildToolResult } from './response-envelope';
 import type { TodoStore } from './store';

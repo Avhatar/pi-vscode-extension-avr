@@ -10,7 +10,7 @@
 // on both tools and can transfer its mental model 1:1 between them.
 
 import * as vscode from 'vscode';
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
     detectProviderStatus,
     normalizeLocations,

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { EventRouter } from '../../../pi/events';
 import { createTestSession } from '../../setup';
-import type { AgentSession, AgentSessionEvent } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent';
 
 describe('EventRouter', () => {
     it('dispatches events to global handlers', () => {

@@ -7,7 +7,7 @@ const extensionConfig = {
     entryPoints: ['src/extension.ts'],
     bundle: true,
     outfile: 'out/extension.js',
-    external: ['vscode', '@mariozechner/pi-coding-agent', '@mariozechner/pi-agent-core', '@mariozechner/pi-ai'],
+    external: ['vscode', '@earendil-works/pi-coding-agent', '@earendil-works/pi-agent-core', '@earendil-works/pi-ai'],
     format: 'cjs',
     platform: 'node',
     target: 'node22',

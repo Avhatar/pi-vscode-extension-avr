@@ -1,4 +1,4 @@
-import type { ModelRegistry } from '@mariozechner/pi-coding-agent';
+import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 
 const DASHSCOPE_INTL_BASE_URL = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
 const DASHSCOPE_CN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';

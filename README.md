@@ -33,7 +33,7 @@ In addition to those two structural changes, the fork has accumulated a number o
 - Per-chat persistent **ToDo** that the agent maintains across `/compact` and across reloads, with per-tab enable/disable.
 - The launcher persists a session history on disk and lets you delete entries individually; opening an old entry reopens it as a fresh editor panel.
 
-The fork tracks the upstream `@mariozechner/pi-coding-agent` SDK as a regular npm dependency and stays in sync with its API.
+The fork tracks the upstream `@earendil-works/pi-coding-agent` SDK as a regular npm dependency and stays in sync with its API.
 
 ## Features
 
@@ -282,7 +282,7 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 │  └─────┼─────┘                       └───────────────┘          │
 │        ▼                                                         │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │ Pi Coding Agent SDK (@mariozechner/pi-coding-agent)     │    │
+│  │ Pi Coding Agent SDK (@earendil-works/pi-coding-agent)   │    │
 │  │   + bundled Pi extensions (e.g. pi-web-access),          │    │
 │  │     loaded via DefaultResourceLoader.additionalExtensionPaths │
 │  └─────────────────────────────────────────────────────────┘    │
@@ -301,7 +301,7 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 - **ChatPanel** ([src/providers/chat-panel.ts](src/providers/chat-panel.ts)) is one editor-area `WebviewPanel` per chat, hosting the actual chat UI. **ChatPanelSerializer** ([src/providers/chat-panel-serializer.ts](src/providers/chat-panel-serializer.ts)) restores these panels across `Reload Window` by replaying the bound tab id.
 - **SettingsPanel** ([src/providers/settings-panel.ts](src/providers/settings-panel.ts)) opens a `WebviewPanel` in the editor area for the settings page, backed by VS Code's configuration API and `SecretStorage`. Hosts API-key entry and the OAuth subscription-login flow.
 - **Webview** ([src/webview/main.ts](src/webview/main.ts)) renders the chat UI, timeline-rail tool rows, slash-command menu, and image attachment previews, and communicates with the extension host via typed messages defined in [src/shared/protocol.ts](src/shared/protocol.ts).
-- **PiSessionManager** ([src/pi/session.ts](src/pi/session.ts)) wraps `createAgentSession` from `@mariozechner/pi-coding-agent`, handling the prompt / steer / follow-up / abort lifecycle. Reads configuration on session creation and feeds Pi's resource loader the bundled-extension paths from [src/pi/bundled-packages.ts](src/pi/bundled-packages.ts). Provider-specific logic (e.g. Qwen in [src/pi/providers/qwen.ts](src/pi/providers/qwen.ts)) is loaded per session.
+- **PiSessionManager** ([src/pi/session.ts](src/pi/session.ts)) wraps `createAgentSession` from `@earendil-works/pi-coding-agent`, handling the prompt / steer / follow-up / abort lifecycle. Reads configuration on session creation and feeds Pi's resource loader the bundled-extension paths from [src/pi/bundled-packages.ts](src/pi/bundled-packages.ts). Provider-specific logic (e.g. Qwen in [src/pi/providers/qwen.ts](src/pi/providers/qwen.ts)) is loaded per session.
 - **DiffManager** ([src/providers/diff.ts](src/providers/diff.ts)) tracks file changes from `edit`/`write` tool calls and provides unified diffs via a `pi-diff:` virtual document scheme.
 - **CheckpointManager** ([src/providers/checkpoint.ts](src/providers/checkpoint.ts)) snapshots file state per turn for rollback and redo.
 - **Codex usage plumbing** ([src/pi/codex-monitor.ts](src/pi/codex-monitor.ts) + [src/pi/codex-usage-store.ts](src/pi/codex-usage-store.ts)) captures subscription windows from Codex response headers and exposes them to the chat footer.

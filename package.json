@@ -210,10 +210,10 @@
     "deploy:major": "npm run version:major && npm run deploy"
   },
   "dependencies": {
-    "@mariozechner/pi-agent-core": "^0.70.2",
-    "@mariozechner/pi-coding-agent": "^0.70.2",
+    "@earendil-works/pi-agent-core": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
     "marked": "^18.0.2",
-    "pi-mcp-adapter": "^2.5.4",
+    "pi-mcp-adapter": "^2.6.1",
     "pi-web-access": "^0.10.7",
     "typebox": "^1.1.33"
   },

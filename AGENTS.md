@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Pi Code is a VS Code extension providing editor-tab chat panels (with an activity-bar launcher sidebar) for the Pi coding agent SDK (`@mariozechner/pi-coding-agent`). It supports multi-tab sessions, inline diffs, checkpoints/rollback, a dedicated settings page, message queuing during streaming, mid-stream steering, slash-command skills, per-chat ToDo, Plan Mode, and opt-in LSP tools.
+Pi Code is a VS Code extension providing editor-tab chat panels (with an activity-bar launcher sidebar) for the Pi coding agent SDK (`@earendil-works/pi-coding-agent`). It supports multi-tab sessions, inline diffs, checkpoints/rollback, a dedicated settings page, message queuing during streaming, mid-stream steering, slash-command skills, per-chat ToDo, Plan Mode, and opt-in LSP tools.
 
 ## Language
 
@@ -41,7 +41,7 @@ Install the resulting `.vsix` with `code --install-extension <file>
 and `settings-panel.ts` load CSS via `vscode.Uri.joinPath(extensionUri,
 'src', 'webview', 'styles', ...)` at runtime. Do not add a
 `node_modules/**` ignore rule
-with a `!node_modules/@mariozechner/**` exception -- that strips the
+with a `!node_modules/@earendil-works/**` exception -- that strips the
 hoisted transitive deps (`proper-lockfile`, `undici`, `glob`, ...) and
 breaks activation with `Cannot find package 'proper-lockfile'`.
 
@@ -52,7 +52,7 @@ There are two separate bundle targets (configured in `esbuild.js`):
 1. **Extension host** (Node.js, CJS) -- `src/extension.ts` entry point, output to `out/extension.js`. Has access to the `vscode` API and the Pi SDK (both externalized, not bundled).
 2. **Webview bundles** (browser, IIFE) -- `src/webview/main.ts` and `src/webview/settings.ts`, output to `out/webview/`. These run inside VS Code webview iframes with no Node.js or vscode API access. They communicate with the extension host via `postMessage`.
 
-The Pi SDK packages (`@mariozechner/pi-coding-agent`, `@mariozechner/pi-agent-core`, `@mariozechner/pi-ai`) are externalized in esbuild and loaded at runtime by the extension host.
+The Pi SDK packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`) are externalized in esbuild and loaded at runtime by the extension host.
 
 ## Key Conventions
 

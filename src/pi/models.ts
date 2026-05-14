@@ -1,4 +1,4 @@
-import type { ModelRegistry } from '@mariozechner/pi-coding-agent';
+import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { ModelInfo } from '../shared/protocol';
 import { getAuthStorage } from './auth';
 import { registerQwenCnProvider, registerQwenProvider } from './providers/qwen';
@@ -9,7 +9,7 @@ export async function getModelRegistry(): Promise<ModelRegistry> {
     if (cached) {
         return cached;
     }
-    const { ModelRegistry: MR } = await import('@mariozechner/pi-coding-agent');
+    const { ModelRegistry: MR } = await import('@earendil-works/pi-coding-agent');
     const authStorage = await getAuthStorage();
     cached = MR.create(authStorage);
     await syncCustomProviders();

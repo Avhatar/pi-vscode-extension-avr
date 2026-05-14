@@ -11,7 +11,7 @@
 // just the first line) for direct queries.
 
 import * as vscode from 'vscode';
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
     detectProviderStatus,
     fetchHoverContent,

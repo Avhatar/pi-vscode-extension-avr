@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { AuthStorage } from '@mariozechner/pi-coding-agent';
+import type { AuthStorage } from '@earendil-works/pi-coding-agent';
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
 
@@ -31,7 +31,7 @@ export async function getAuthStorage(secrets?: vscode.SecretStorage): Promise<Au
         }
         return cached;
     }
-    const { AuthStorage: AS } = await import('@mariozechner/pi-coding-agent');
+    const { AuthStorage: AS } = await import('@earendil-works/pi-coding-agent');
     cached = AS.create();
     if (secrets) {
         cachedSecrets = secrets;

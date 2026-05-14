@@ -1,5 +1,5 @@
 import { beforeAll, afterAll } from 'vitest';
-import type { AgentSession, ModelRegistry } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
 
 export const TEST_MODEL_PROVIDER = 'ollama';
 export const TEST_MODEL_ID = 'local/Qwen3.6-27B-Coding';
@@ -23,7 +23,7 @@ let _initialized = false;
 export async function initTestInfra() {
     if (_initialized) { return { authStorage: _authStorage, modelRegistry: _modelRegistry }; }
 
-    const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
+    const { AuthStorage, ModelRegistry } = await import('@earendil-works/pi-coding-agent');
     _authStorage = AuthStorage.create();
     _modelRegistry = ModelRegistry.create(_authStorage);
     _initialized = true;
@@ -31,7 +31,7 @@ export async function initTestInfra() {
 }
 
 export async function createTestSession(cwd?: string): Promise<AgentSession> {
-    const { createAgentSession, SessionManager } = await import('@mariozechner/pi-coding-agent');
+    const { createAgentSession, SessionManager } = await import('@earendil-works/pi-coding-agent');
     const { authStorage, modelRegistry } = await initTestInfra();
 
     const fs = await import('fs');

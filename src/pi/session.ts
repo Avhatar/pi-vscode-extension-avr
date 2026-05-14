@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as process from 'node:process';
-import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@mariozechner/pi-coding-agent';
+import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@earendil-works/pi-coding-agent';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
@@ -43,7 +43,7 @@ export class PiSessionManager {
 
     async initialize(): Promise<void> {
         this._outputChannel.appendLine('Initializing Pi session...');
-        const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
 
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
@@ -204,7 +204,7 @@ export class PiSessionManager {
     }
 
     private async _buildResourceLoader(cwd: string): Promise<ResourceLoader> {
-        const { DefaultResourceLoader, getAgentDir, SettingsManager } = await import('@mariozechner/pi-coding-agent');
+        const { DefaultResourceLoader, getAgentDir, SettingsManager } = await import('@earendil-works/pi-coding-agent');
         const agentDir = getAgentDir();
         const settingsManager = SettingsManager.create(cwd, agentDir);
         const usageStore = getCodexUsageStore();
@@ -365,14 +365,14 @@ export class PiSessionManager {
         this._planModeActive = false;
         this._savedToolNames = [];
 
-        const { createAgentSession } = await import('@mariozechner/pi-coding-agent');
+        const { createAgentSession } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
         // typically the VS Code install directory, not the workspace, so those configs are missed.
         // Chdir to the workspace folder so adapters resolve project files correctly.
         try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
-        const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         this._sessionManager = SM.create(cwd);
 
         const config = vscode.workspace.getConfiguration('pi-code');
@@ -408,7 +408,7 @@ export class PiSessionManager {
         this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
         this._planModeActive = false;
         this._savedToolNames = [];
-        const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
@@ -450,7 +450,7 @@ export class PiSessionManager {
     }
 
     async getSessions(): Promise<SessionInfo[]> {
-        const { SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
@@ -474,7 +474,7 @@ export class PiSessionManager {
         this._planModeActive = false;
         this._savedToolNames = [];
 
-        const { createAgentSession, SessionManager: SM } = await import('@mariozechner/pi-coding-agent');
+        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is

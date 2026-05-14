@@ -4,7 +4,7 @@
 // `source: "external"`) so the agent can decide whether to follow them.
 
 import * as vscode from 'vscode';
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
     detectProviderStatus,
     normalizeLocations,

@@ -1,4 +1,4 @@
-import type { AgentSessionEvent, AgentSessionEventListener } from '@mariozechner/pi-coding-agent';
+import type { AgentSessionEvent, AgentSessionEventListener } from '@earendil-works/pi-coding-agent';
 
 export type EventHandler = (event: AgentSessionEvent) => void;
 
