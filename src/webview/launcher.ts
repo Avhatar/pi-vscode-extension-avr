@@ -11,6 +11,8 @@ declare function acquireVsCodeApi(): {
 
 const vscode = acquireVsCodeApi();
 
+const iconsBaseUri = document.getElementById('launcher')?.dataset.iconsUri ?? '';
+
 let currentState: LauncherState = {
     tabs: [],
     recentSessions: [],
@@ -87,7 +89,7 @@ function renderToolbar(): HTMLElement {
 
     const settingsBtn = el('button', 'toolbar-btn icon-only');
     settingsBtn.title = 'Settings';
-    settingsBtn.innerHTML = '<span class="toolbar-icon">⚙</span>';
+    settingsBtn.innerHTML = `<img class="toolbar-icon-img" src="${iconsBaseUri}/settings.png" alt="Settings">`;
     settingsBtn.addEventListener('click', () => {
         vscode.postMessage({ type: 'openSettings' });
     });

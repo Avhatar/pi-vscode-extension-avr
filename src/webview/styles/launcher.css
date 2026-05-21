@@ -62,6 +62,16 @@ body {
     font-size: 14px;
     line-height: 1;
 }
+.toolbar-icon-img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    filter: brightness(0) invert(0.8);
+    display: block;
+}
+.toolbar-btn:hover .toolbar-icon-img {
+    filter: brightness(0) invert(1);
+}
 
 /* ── Sections ── */
 

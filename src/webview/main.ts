@@ -62,7 +62,7 @@ type SlashMenuItem = {
     displayName: string;
     description: string;
     insertText: string;
-    action?: 'openSettings';
+    action?: 'openSettings' | 'newChat' | 'showModelPicker' | 'openKeybindings' | 'openChangelog';
 };
 
 const BUILTIN_SLASH_COMMANDS: SlashMenuItem[] = [
@@ -75,11 +75,43 @@ const BUILTIN_SLASH_COMMANDS: SlashMenuItem[] = [
     },
     {
         kind: 'builtin',
+        name: 'model',
+        displayName: '/model',
+        description: 'Open the model picker to switch the model used for this chat.',
+        insertText: '/model',
+        action: 'showModelPicker',
+    },
+    {
+        kind: 'builtin',
+        name: 'new',
+        displayName: '/new',
+        description: 'Start a new chat in a fresh editor tab.',
+        insertText: '/new',
+        action: 'newChat',
+    },
+    {
+        kind: 'builtin',
         name: 'settings',
         displayName: '/settings',
         description: 'Open the Pi Code settings page.',
         insertText: '/settings',
         action: 'openSettings',
+    },
+    {
+        kind: 'builtin',
+        name: 'hotkeys',
+        displayName: '/hotkeys',
+        description: 'Open the VS Code Keyboard Shortcuts editor filtered to Pi Code commands.',
+        insertText: '/hotkeys',
+        action: 'openKeybindings',
+    },
+    {
+        kind: 'builtin',
+        name: 'changelog',
+        displayName: '/changelog',
+        description: 'Open the Pi Code changelog in a rendered Markdown preview.',
+        insertText: '/changelog',
+        action: 'openChangelog',
     },
 ];
 
@@ -3634,12 +3666,19 @@ function sendMessage(): void {
     const images = currentImageAttachments.length > 0 ? [...currentImageAttachments] : undefined;
     const files = currentFileAttachments.length > 0 ? [...currentFileAttachments] : undefined;
     if (!typedText && !images?.length && !files?.length) return;
-    if (typedText === '/settings') {
+    const slashAction =
+        typedText === '/settings' ? 'openSettings' :
+        typedText === '/new' ? 'newChat' :
+        typedText === '/model' ? 'showModelPicker' :
+        typedText === '/hotkeys' ? 'openKeybindings' :
+        typedText === '/changelog' ? 'openChangelog' :
+        null;
+    if (slashAction) {
         input.value = '';
         input.style.height = 'auto';
         updateInputHighlights(input);
         draftTexts.delete(state.activeTabId);
-        vscode.postMessage({ type: 'openSettings' });
+        runSlashAction(slashAction);
         return;
     }
     if (isCompactSlashCommand(typedText) && (images?.length || files?.length)) {
@@ -3988,6 +4027,14 @@ function selectSlashItem(index: number): void {
 function runSlashAction(action: NonNullable<SlashMenuItem['action']>): void {
     if (action === 'openSettings') {
         vscode.postMessage({ type: 'openSettings' });
+    } else if (action === 'newChat') {
+        vscode.postMessage({ type: 'createTab' });
+    } else if (action === 'showModelPicker') {
+        toggleModelPicker();
+    } else if (action === 'openKeybindings') {
+        vscode.postMessage({ type: 'openKeybindings' });
+    } else if (action === 'openChangelog') {
+        vscode.postMessage({ type: 'openChangelog' });
     }
 }
 

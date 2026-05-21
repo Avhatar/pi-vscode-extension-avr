@@ -205,6 +205,8 @@ export type ClientMessage =
     | { type: 'closeTab'; tabId: string }
     | { type: 'switchTab'; tabId: string }
     | { type: 'openSettings' }
+    | { type: 'openKeybindings' }
+    | { type: 'openChangelog' }
     | { type: 'getSkills' }
     | { type: 'searchWorkspaceFiles'; query: string; requestId: number }
     | { type: 'queueMessage'; text: string }

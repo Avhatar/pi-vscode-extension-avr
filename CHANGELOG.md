@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-05-21
+
+### Added
+- `/new` slash command in the chat input. Starts a fresh chat in a new editor tab — same action as the `+` button in the chat toolbar and **New chat** in the launcher sidebar, just surfaced through `/` for keyboard-driven discovery.
+- `/model` slash command. Opens the inline model picker (same one as clicking the model name in the chat footer) without having to leave the keyboard.
+- `/hotkeys` slash command. Opens VS Code's Keyboard Shortcuts editor pre-filtered to Pi Code commands (`@ext:Avhatar.pi-code`), so the full list of bindings — including ones you've remapped — is one keystroke away.
+- `/changelog` slash command. Opens the bundled `CHANGELOG.md` in a rendered Markdown preview so you can scan release notes without leaving the editor.
+
+### Changed
+- Settings button in the launcher sidebar now uses the `settings.png` cog icon instead of the unicode `⚙` glyph. The PNG renders more visibly, matches the rest of the icon set, and inverts on hover like the other toolbar icons.
+
 ## [0.22.0] - 2026-05-21
 
 ### Added

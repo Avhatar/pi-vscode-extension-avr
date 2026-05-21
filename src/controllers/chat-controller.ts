@@ -1543,6 +1543,18 @@ export class ChatController implements vscode.Disposable {
                 case 'openSettings':
                     vscode.commands.executeCommand('pi-code.openSettings');
                     break;
+                case 'openKeybindings':
+                    vscode.commands.executeCommand(
+                        'workbench.action.openGlobalKeybindings',
+                        '@ext:Avhatar.pi-code',
+                    );
+                    break;
+                case 'openChangelog':
+                    vscode.commands.executeCommand(
+                        'markdown.showPreview',
+                        vscode.Uri.joinPath(this._context.extensionUri, 'CHANGELOG.md'),
+                    );
+                    break;
             }
         } catch (err: any) {
             // Errors from a panel-bound message route back to that panel; for sidebar
