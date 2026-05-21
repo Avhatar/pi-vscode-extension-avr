@@ -62,6 +62,7 @@ type SlashMenuItem = {
     displayName: string;
     description: string;
     insertText: string;
+    action?: 'openSettings';
 };
 
 const BUILTIN_SLASH_COMMANDS: SlashMenuItem[] = [
@@ -71,6 +72,14 @@ const BUILTIN_SLASH_COMMANDS: SlashMenuItem[] = [
         displayName: '/compact',
         description: 'Summarize older conversation context while keeping recent work available.',
         insertText: '/compact ',
+    },
+    {
+        kind: 'builtin',
+        name: 'settings',
+        displayName: '/settings',
+        description: 'Open the Pi Code settings page.',
+        insertText: '/settings',
+        action: 'openSettings',
     },
 ];
 
@@ -3625,6 +3634,14 @@ function sendMessage(): void {
     const images = currentImageAttachments.length > 0 ? [...currentImageAttachments] : undefined;
     const files = currentFileAttachments.length > 0 ? [...currentFileAttachments] : undefined;
     if (!typedText && !images?.length && !files?.length) return;
+    if (typedText === '/settings') {
+        input.value = '';
+        input.style.height = 'auto';
+        updateInputHighlights(input);
+        draftTexts.delete(state.activeTabId);
+        vscode.postMessage({ type: 'openSettings' });
+        return;
+    }
     if (isCompactSlashCommand(typedText) && (images?.length || files?.length)) {
         showError('Slash commands cannot include attachments. Remove attachments before running /compact.');
         return;
@@ -3941,6 +3958,20 @@ function selectSlashItem(index: number): void {
     const beforeCursor = text.slice(0, cursorPos);
     const slashMatch = beforeCursor.match(/(?:^|\s)(\/\S*)$/);
 
+    if (item.action) {
+        if (slashMatch) {
+            const matchStart = beforeCursor.length - slashMatch[1].length;
+            const leading = text.slice(0, matchStart).replace(/\s+$/, '');
+            input.value = leading + text.slice(cursorPos);
+            input.setSelectionRange(leading.length, leading.length);
+            updateInputHighlights(input);
+        }
+        runSlashAction(item.action);
+        hideSlashMenu();
+        input.focus();
+        return;
+    }
+
     if (slashMatch) {
         const matchStart = beforeCursor.length - slashMatch[1].length;
         const replacement = item.insertText;
@@ -3952,6 +3983,12 @@ function selectSlashItem(index: number): void {
 
     hideSlashMenu();
     input.focus();
+}
+
+function runSlashAction(action: NonNullable<SlashMenuItem['action']>): void {
+    if (action === 'openSettings') {
+        vscode.postMessage({ type: 'openSettings' });
+    }
 }
 
 function hideSlashMenu(): void {

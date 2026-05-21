@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-05-21
+
+### Added
+- `/settings` slash command in the chat input. Opens the Pi Code settings page directly from the slash menu — useful when the gear icon in the launcher sidebar isn't obvious. Works both ways: pick it from the `/` menu (opens immediately) or type `/settings` and press Enter.
+
 ### Changed
 - Pi SDK dependencies migrated from the deprecated `@mariozechner/*` npm scope to its successor `@earendil-works/*` (pi-coding-agent, pi-agent-core, pi-ai). Mario marked the `@mariozechner` packages as deprecated at 0.73.1 and continues development under `@earendil-works`; we are now on 0.74.x. `pi-mcp-adapter` bumped to `^2.6.1` so its transitive `@mariozechner/pi-ai` is also dropped. No user-visible API or behaviour change — esbuild externals and ~25 import paths are updated in lockstep.
 - CLAUDE.md injector rewritten to match the upstream reference implementation. It now also detects a root-level `CLAUDE.md` (not just `.claude/CLAUDE.md`), respects the compaction boundary when deciding which instruction files are still unread, tracks reads through dedicated session entries (so subsequent reads via `tool_batch` are recognised), and only nudges the agent to read the files it hasn't already pulled in via `read`/`tool_batch` or that Pi pre-loaded via `contextFiles`. A new `/claude-md-injector` slash command prints a status report: applicable `CLAUDE.md` files, their `@`-imports, which are read vs unread, and an optional path-scoped breakdown (`/claude-md-injector src/foo`).
