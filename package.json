@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -210,8 +210,8 @@
     "deploy:major": "npm run version:major && npm run deploy"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-agent-core": "^0.74.2",
+    "@earendil-works/pi-coding-agent": "^0.74.2",
     "marked": "^18.0.2",
     "pi-mcp-adapter": "^2.6.1",
     "pi-web-access": "^0.10.7",

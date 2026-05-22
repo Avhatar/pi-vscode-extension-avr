@@ -291,8 +291,19 @@ body[data-mode="panel"] .tab-strip,
 }
 
 .model-item-name {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.model-item-id {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 8px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -320,41 +331,11 @@ body[data-mode="panel"] .tab-strip,
     user-select: none;
 }
 
-.thinking-chips {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    border-top: 1px solid var(--border);
-    user-select: none;
-}
-
 .thinking-label {
     font-size: 11px;
     color: var(--muted);
     flex-shrink: 0;
     margin-right: 2px;
-}
-
-.thinking-chip {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--muted);
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 11px;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
-    font-family: inherit;
-}
-.thinking-chip:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--fg);
-}
-.thinking-chip.active {
-    background: var(--btn-bg);
-    color: var(--btn-fg);
-    border-color: var(--btn-bg);
 }
 
 /* ── Messages ── */
@@ -1484,6 +1465,43 @@ body[data-mode="panel"] .tab-strip,
 }
 .footer-cache--inert:hover {
     opacity: 0.8;
+}
+
+.footer-thinking {
+    font-size: 12px;
+    padding: 2px 8px;
+    background: var(--badge-bg);
+    color: var(--badge-fg);
+    border-radius: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+    font-variant-numeric: tabular-nums;
+}
+.footer-thinking:hover {
+    background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+    color: var(--fg);
+}
+.footer-thinking--off {
+    opacity: 0.55;
+    font-style: italic;
+}
+.footer-thinking--off:hover {
+    opacity: 0.8;
+}
+
+.thinking-picker {
+    position: absolute;
+    bottom: 100%;
+    left: 12px;
+    margin-bottom: 6px;
+    background: var(--vscode-editorWidget-background, var(--bg));
+    border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.1));
+    border-radius: 6px;
+    padding: 4px;
+    min-width: 260px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    z-index: 50;
 }
 
 .cache-mode-picker {

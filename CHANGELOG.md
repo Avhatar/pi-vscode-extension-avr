@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-05-22
+
+### Added
+- Thinking-level chip in the chat footer next to the cache chip. Click to pick `off` / `minimal` / `low` / `medium` / `high` — same setting that previously lived only inside the model picker, now visible at all times and one click away.
+- Model picker rows now show the technical model ID next to the friendly name (e.g. `Free Models Router` · `openrouter/free`), and the search box matches both — so searching for `openrouter/free` finds "Free Models Router" instead of returning empty.
+
+### Changed
+- Pi SDK bumped from 0.74.0 to 0.74.2 (still pinned to `^0.74.x` — 0.75.x is intentionally avoided because it raises the minimum Node.js to 22.19.0, which not all supported VS Code versions ship with). The 0.74.2 catalogue adds `deepseek/deepseek-v4-flash:free` (via OpenRouter) and a direct `deepseek-v4-flash-free` provider model, plus image-generation support and the Together AI provider from 0.74.1.
+- Thinking-level chips are removed from the model picker now that the footer chip is the canonical place to change it.
+
 ## [0.23.0] - 2026-05-21
 
 ### Added

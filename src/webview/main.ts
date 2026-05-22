@@ -885,11 +885,13 @@ function updateInputArea(): void {
     const actionAlt = state.isStreaming ? 'Stop' : 'Send';
 
     const cacheChipHtml = renderCacheChip();
+    const thinkingChipHtml = renderThinkingChip();
 
     footer.innerHTML = `
         <button id="btn-attach-file" class="attach-btn" title="Attach file or image"><img class="attach-icon-img" src="${iconsBaseUri}/folder.png" alt="Attach file or image"></button>
         <span class="footer-model">${escHtml(modelName)}</span>
         ${cacheChipHtml}
+        ${thinkingChipHtml}
         <span class="footer-spacer"></span>
         ${attachmentHtml}
         ${codexUsageHtml}
@@ -922,7 +924,16 @@ function updateInputArea(): void {
     document.querySelector('.footer-cache')?.addEventListener('click', (e) => {
         e.stopPropagation();
         closeContextActionPicker();
+        closeThinkingPicker();
         toggleCacheModePicker();
+    });
+
+    document.querySelector('.footer-thinking')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeContextActionPicker();
+        closeCacheModePicker();
+        closeModelPicker();
+        toggleThinkingPicker();
     });
 
     const contextChip = document.querySelector('.footer-context-usage') as HTMLElement | null;
@@ -930,6 +941,7 @@ function updateInputArea(): void {
         e.stopPropagation();
         closeCacheModePicker();
         closeModelPicker();
+        closeThinkingPicker();
         toggleContextActionPicker(contextChip);
     });
     contextChip?.addEventListener('keydown', (e) => {
@@ -938,6 +950,7 @@ function updateInputArea(): void {
             e.stopPropagation();
             closeCacheModePicker();
             closeModelPicker();
+            closeThinkingPicker();
             toggleContextActionPicker(contextChip);
         }
     });
@@ -998,6 +1011,7 @@ function cacheChipTooltip(mode: 'short' | 'long' | 'auto', eff: 'short' | 'long'
 
 function toggleCacheModePicker(): void {
     closeContextActionPicker();
+    closeThinkingPicker();
     const existing = document.getElementById('cache-mode-picker');
     if (existing) {
         existing.remove();
@@ -1101,9 +1115,84 @@ function closeCacheModePicker(): void {
     document.removeEventListener('click', onClickOutsideCachePicker);
 }
 
+function renderThinkingChip(): string {
+    const level = state.thinkingLevel ?? 'medium';
+    const cls = `footer-thinking${level === 'off' ? ' footer-thinking--off' : ''}`;
+    const tooltip = `Thinking level: ${level}\nHow much chain-of-thought the agent uses. Click to change.`;
+    return `<span class="${cls}" title="${escAttr(tooltip)}">thinking: ${escHtml(level)}</span>`;
+}
+
+const THINKING_LEVELS: Array<{ value: string; label: string; desc: string }> = [
+    { value: 'off', label: 'Off', desc: 'No chain-of-thought.' },
+    { value: 'minimal', label: 'Minimal', desc: 'Shortest possible reasoning, fastest responses.' },
+    { value: 'low', label: 'Low', desc: 'Brief reasoning before each action.' },
+    { value: 'medium', label: 'Medium', desc: 'Balanced reasoning depth.' },
+    { value: 'high', label: 'High', desc: 'Deepest reasoning, slowest but most thorough.' },
+];
+
+function toggleThinkingPicker(): void {
+    closeContextActionPicker();
+    closeCacheModePicker();
+    closeModelPicker();
+    const existing = document.getElementById('thinking-picker');
+    if (existing) {
+        existing.remove();
+        document.removeEventListener('click', onClickOutsideThinkingPicker);
+        return;
+    }
+    const container = document.querySelector('.input-container');
+    if (!container) return;
+
+    const picker = el('div', 'thinking-picker');
+    picker.id = 'thinking-picker';
+    const current = state.thinkingLevel ?? 'medium';
+    for (const opt of THINKING_LEVELS) {
+        const isActive = opt.value === current;
+        const item = el('div', `cache-mode-item${isActive ? ' active' : ''}`);
+        item.dataset.level = opt.value;
+        item.innerHTML = `
+            <span class="cache-mode-check">${isActive ? '&#10003;' : ''}</span>
+            <span class="cache-mode-text">
+                <span class="cache-mode-title">${escHtml(opt.label)}</span>
+                <span class="cache-mode-desc">${escHtml(opt.desc)}</span>
+            </span>
+        `;
+        picker.appendChild(item);
+    }
+    container.appendChild(picker);
+
+    picker.addEventListener('click', (e) => {
+        const item = (e.target as HTMLElement).closest('.cache-mode-item') as HTMLElement | null;
+        if (!item) return;
+        const level = item.dataset.level;
+        if (!level) return;
+        state.thinkingLevel = level;
+        vscode.postMessage({ type: 'setThinkingLevel', level });
+        closeThinkingPicker();
+        updateInputArea();
+    });
+
+    setTimeout(() => {
+        document.addEventListener('click', onClickOutsideThinkingPicker);
+    }, 0);
+}
+
+function closeThinkingPicker(): void {
+    document.getElementById('thinking-picker')?.remove();
+    document.removeEventListener('click', onClickOutsideThinkingPicker);
+}
+
+function onClickOutsideThinkingPicker(e: MouseEvent): void {
+    const picker = document.getElementById('thinking-picker');
+    if (picker && !picker.contains(e.target as Node)) {
+        closeThinkingPicker();
+    }
+}
+
 function toggleContextActionPicker(anchor: HTMLElement): void {
     closeCacheModePicker();
     closeModelPicker();
+    closeThinkingPicker();
     const existing = document.getElementById('context-action-picker');
     if (existing) {
         closeContextActionPicker();
@@ -2802,13 +2891,17 @@ function buildModelItem(m: any): HTMLElement {
     if (isActive) item.classList.add('active');
     item.dataset.provider = m.provider;
     item.dataset.modelId = m.id;
-    item.dataset.name = (m.name ?? m.id).toLowerCase();
+    const displayName = m.name ?? m.id;
+    const showId = m.name && m.name !== m.id;
+    item.dataset.name = (showId ? `${displayName} ${m.id}` : displayName).toLowerCase();
     const favKey = `${m.provider}:${m.modelId ?? m.id}`;
     const isFav = state.favoriteModels.has(favKey);
     const starIcon = isFav ? 'starfill.png' : 'starline.png';
+    const idHtml = showId ? `<span class="model-item-id">${escHtml(m.id)}</span>` : '';
     item.innerHTML = `
         <span class="model-item-check">${isActive ? '&#10003;' : ''}</span>
-        <span class="model-item-name">${escHtml(m.name ?? m.id)}</span>
+        <span class="model-item-name">${escHtml(displayName)}</span>
+        ${idHtml}
         <img class="model-item-star" src="${iconsBaseUri}/${starIcon}" alt="" data-fav-key="${escAttr(favKey)}">
     `;
     return item;
@@ -2871,19 +2964,6 @@ function showModelPicker(): void {
     }
     picker.appendChild(list);
 
-    const thinkingRow = el('div', 'thinking-chips');
-    const thinkingLabel = el('span', 'thinking-label');
-    thinkingLabel.textContent = 'Thinking:';
-    thinkingRow.appendChild(thinkingLabel);
-    const levels = ['off', 'minimal', 'low', 'medium', 'high'];
-    for (const level of levels) {
-        const chip = el('button', `thinking-chip${level === state.thinkingLevel ? ' active' : ''}`);
-        chip.textContent = level.charAt(0).toUpperCase() + level.slice(1);
-        chip.dataset.level = level;
-        thinkingRow.appendChild(chip);
-    }
-    picker.appendChild(thinkingRow);
-
     container.appendChild(picker);
 
     searchInput.focus();
@@ -2930,15 +3010,6 @@ function showModelPicker(): void {
         }
         updateFooterModel();
         closeModelPicker();
-    });
-
-    thinkingRow.addEventListener('click', (e) => {
-        const chip = (e.target as HTMLElement).closest('.thinking-chip') as HTMLElement | null;
-        if (!chip) return;
-        vscode.postMessage({ type: 'setThinkingLevel', level: chip.dataset.level! });
-        thinkingRow.querySelectorAll('.thinking-chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        state.thinkingLevel = chip.dataset.level;
     });
 
     setTimeout(() => {
