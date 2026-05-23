@@ -16,6 +16,7 @@ MIGRATION_PANELS.md
 PERSISTENT_TODO.md
 WORKSPACE_FILE_MENTIONS.md
 docs/**
+user-reply.txt
 nul
 .claude/**
 scripts/**

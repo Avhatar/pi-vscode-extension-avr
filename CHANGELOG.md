@@ -7,8 +7,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-05-23
+
 ### Changed
-- Internal design docs (`docs/**`) are no longer packaged into the VSIX. The folder holds development-time notes that are irrelevant to end users and was shipping by accident — VSIX is ~250 KB smaller and a class of accidental leakage of internal terminology is closed off.
+- Excluded the `docs/` folder from the VSIX — development notes that aren't needed at runtime. VSIX is ~250 KB smaller.
 
 ## [0.24.0] - 2026-05-22
 
@@ -57,10 +59,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Marketplace README (`MARKETPLACE.md`) refreshed: dropped the tool-approval feature description, added Plan Mode, Language Server tools, per-turn timing, and timeline-rail tooltips, and refreshed the Settings table with `pi-code.planMode.defaultEnabled` and `pi-code.lsp.enabled`. The GitHub `README.md` got the same updates plus an updated architecture diagram and project-structure listing.
 
 ### Removed
-- Removed the tool-approval feature entirely (the `pi-code.autoApproveTools` setting, the "Auto-approve tool calls" toggle in Settings, and the inline approval cards in chat). The toggle was non-functional anyway — Pi SDK has a fast path that bypassed our approval hook unless a Pi extension explicitly listens for `tool_call` events, which none of ours did, so disabling auto-approve silently ran tools as if it were on. We're embracing the upstream Pi YOLO model for now: the agent runs every tool without confirmation.
+- Removed the tool-approval feature: the `pi-code.autoApproveTools` setting, the "Auto-approve tool calls" toggle in Settings, and the inline approval cards in chat. The agent now runs each tool without prompting, matching the upstream Pi behaviour.
 
 ### Fixed
-- `CHANGELOG.md` is now shipped inside the VSIX, so the **Changelog** tab on the VS Code Marketplace listing is populated. Previously the file was listed in `.vscodeignore`, which meant every release back to 0.17.6 published an empty changelog tab on the marketplace.
+- `CHANGELOG.md` is now shipped inside the VSIX so the **Changelog** tab on the Marketplace listing is populated.
 
 ## [0.20.1] - 2026-05-13
 
@@ -137,7 +139,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.17.6] - 2026-05-10
 
 ### Removed
-- VSIX no longer ships internal design docs (`MIGRATION_PANELS.md`, `PERSISTENT_TODO.md`, `WORKSPACE_FILE_MENTIONS.md`) or a stray `nul` artefact left over from a misdirected shell redirect. The docs remain in the GitHub repository for contributors but are excluded from the published package via `.vscodeignore`. Reduces VSIX clutter without changing any runtime behaviour.
+- Trimmed development-only files (`MIGRATION_PANELS.md`, `PERSISTENT_TODO.md`, `WORKSPACE_FILE_MENTIONS.md`, and a stray `nul`) from the VSIX. No runtime impact.
 
 ## [0.17.5] - 2026-05-10
 
