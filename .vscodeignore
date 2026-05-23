@@ -15,6 +15,7 @@ README.md
 MIGRATION_PANELS.md
 PERSISTENT_TODO.md
 WORKSPACE_FILE_MENTIONS.md
+docs/**
 nul
 .claude/**
 scripts/**

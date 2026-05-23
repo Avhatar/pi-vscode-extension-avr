@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Internal design docs (`docs/**`) are no longer packaged into the VSIX. The folder holds development-time notes that are irrelevant to end users and was shipping by accident — VSIX is ~250 KB smaller and a class of accidental leakage of internal terminology is closed off.
+
 ## [0.24.0] - 2026-05-22
 
 ### Added
