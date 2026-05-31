@@ -263,6 +263,10 @@ export class ChatController implements vscode.Disposable {
     /** Persistence for per-tab Plan Mode toggle. Same shape as ToDo. */
     private static readonly PLAN_MODE_KEY_PREFIX = 'pi-code.planModeEnabled.';
 
+    /** Persistence for per-tab File Undo View toggle (the changed-files
+     *  bar above the input). Default for missing entries: `false`. */
+    private static readonly FILE_UNDO_VIEW_KEY_PREFIX = 'pi-code.fileUndoViewEnabled.';
+
     /** Wired by the host (extension.ts) to construct a `ChatPanel` for a tab. */
     private _panelOpener?: (tabId: string) => void;
 
@@ -451,6 +455,7 @@ export class ChatController implements vscode.Disposable {
         let todoToggleDisabled: boolean | undefined;
         let planModeEnabled: boolean | undefined;
         let planModeToggleDisabled: boolean | undefined;
+        let fileUndoViewEnabled: boolean | undefined;
         const activeTab = this._tabs.get(this._activeTabId);
         if (activeTab && this._openPanels.has(activeTab.id)) {
             const state = activeTab.session.todoStore.getState();
@@ -459,9 +464,13 @@ export class ChatController implements vscode.Disposable {
             todoToggleDisabled = this._isTabBusy(activeTab);
             planModeEnabled = this._isPlanModeEnabledFor(activeTab);
             planModeToggleDisabled = this._isTabBusy(activeTab);
+            fileUndoViewEnabled = this._isFileUndoViewEnabledFor(activeTab);
         }
 
-        return { tabs, recentSessions, todos, todoEnabled, todoToggleDisabled, planModeEnabled, planModeToggleDisabled };
+        return {
+            tabs, recentSessions, todos, todoEnabled, todoToggleDisabled,
+            planModeEnabled, planModeToggleDisabled, fileUndoViewEnabled,
+        };
     }
 
     /** Expose the active tab's session for global commands (palette, keybindings). */
@@ -816,6 +825,45 @@ export class ChatController implements vscode.Disposable {
         await this._setPlanModeEnabledFor(tab, enabled);
     }
 
+    // ── File Undo View ──
+
+    private _fileUndoViewKey(sessionPath: string | undefined): string | undefined {
+        if (!sessionPath) return undefined;
+        return `${ChatController.FILE_UNDO_VIEW_KEY_PREFIX}${sessionPath}`;
+    }
+
+    private _fileUndoViewDefaultEnabled(): boolean {
+        return vscode.workspace
+            .getConfiguration('pi-code')
+            .get<boolean>('fileUndoView.defaultEnabled', false);
+    }
+
+    private _isFileUndoViewEnabledFor(tab: TabState): boolean {
+        const key = this._fileUndoViewKey(tab.session.sessionPath);
+        const fallback = this._fileUndoViewDefaultEnabled();
+        if (!key) return fallback;
+        return this._context.workspaceState.get<boolean>(key, fallback);
+    }
+
+    private async _setFileUndoViewEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
+        const key = this._fileUndoViewKey(tab.session.sessionPath);
+        if (key) {
+            await this._context.workspaceState.update(key, enabled);
+        }
+        // Push fresh state to the chat panel so the bar appears/hides
+        // immediately, and to the launcher so the toggle reflects the
+        // new value.
+        this.sendStateSync(tab.id);
+        this._onLauncherStateChanged.fire();
+    }
+
+    /** Public entry for the launcher's File Undo View toggle click. */
+    async setActiveTabFileUndoViewEnabled(enabled: boolean): Promise<void> {
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return;
+        await this._setFileUndoViewEnabledFor(tab, enabled);
+    }
+
     // ── Plan Mode signal: agent-emitted completion marker ──
     //
     // After the agent finishes a turn in EXEC, the next user message might
@@ -1150,6 +1198,7 @@ export class ChatController implements vscode.Disposable {
         // context size without waiting for the next prompt to update the chip.
         state.cacheEffective = this._computeEffectiveCache(tab);
         tab.cacheEffective = state.cacheEffective;
+        state.fileUndoViewEnabled = this._isFileUndoViewEnabledFor(tab);
         let assistantOrdinal = 0;
         for (let i = 0; i < state.messages.length; i++) {
             if (state.messages[i].role === 'assistant') {

@@ -71,6 +71,8 @@ function render(): void {
     root.appendChild(renderToolbar());
     const planMode = renderPlanMode();
     if (planMode) root.appendChild(planMode);
+    const fileUndoView = renderFileUndoView();
+    if (fileUndoView) root.appendChild(fileUndoView);
     const todos = renderTodos();
     if (todos) root.appendChild(todos);
     root.appendChild(renderRecentSessions());
@@ -153,6 +155,59 @@ function renderPlanModeToggle(enabled: boolean, disabled: boolean): HTMLElement 
         currentState = { ...currentState, planModeEnabled: next };
         render();
         vscode.postMessage({ type: 'setPlanModeEnabled', enabled: next });
+    });
+    wrap.appendChild(input);
+
+    const track = el('span', 'todo-toggle-track');
+    const thumb = el('span', 'todo-toggle-thumb');
+    track.appendChild(thumb);
+    wrap.appendChild(track);
+
+    return wrap;
+}
+
+// ── File Undo View section ──
+//
+// A compact toggle row mirroring Plan Mode. When ON, the chat panel
+// shows the changed-files bar (with Undo/Redo/Review buttons) above
+// the prompt input. The toggle is purely cosmetic — agent edits and
+// per-message diffs work the same regardless of this flag.
+
+function renderFileUndoView(): HTMLElement | undefined {
+    if (currentState.fileUndoViewEnabled === undefined) return undefined;
+
+    const enabled = currentState.fileUndoViewEnabled === true;
+
+    const section = el('div', 'section plan-mode-section file-undo-view-section');
+
+    const heading = el('div', 'section-heading plan-mode-heading file-undo-view-heading');
+    heading.title = 'When enabled, the bar above the input lists files the agent changed, with Undo / Redo / Review buttons.';
+    heading.appendChild(el('span', 'section-chevron'));
+    heading.appendChild(el('span', 'section-title', 'File Undo View'));
+
+    const toggleHost = el('span', 'todo-toggle-host');
+    toggleHost.addEventListener('click', (e) => e.stopPropagation());
+    toggleHost.appendChild(renderFileUndoViewToggle(enabled));
+    heading.appendChild(toggleHost);
+
+    section.appendChild(heading);
+    return section;
+}
+
+function renderFileUndoViewToggle(enabled: boolean): HTMLElement {
+    const wrap = el('label', 'todo-toggle');
+    wrap.title = enabled
+        ? 'Hide the changed-files bar above the chat input'
+        : 'Show the changed-files bar above the chat input (Undo / Redo / Review)';
+
+    const input = el('input', 'todo-toggle-input') as HTMLInputElement;
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.addEventListener('change', () => {
+        const next = input.checked;
+        currentState = { ...currentState, fileUndoViewEnabled: next };
+        render();
+        vscode.postMessage({ type: 'setFileUndoViewEnabled', enabled: next });
     });
     wrap.appendChild(input);
 

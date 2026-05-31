@@ -131,6 +131,7 @@ const state: {
     streamingThinkingDuration: number;
     contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null; estimated?: boolean };
     fileChanges: FileChangeInfo[];
+    fileUndoViewEnabled: boolean;
     rollbackPoint: number | null;
     availableModels: any[];
     modelsLoaded: boolean;
@@ -158,6 +159,7 @@ const state: {
     recentModels: [],
     favoriteModels: new Set(),
     fileChanges: [],
+    fileUndoViewEnabled: false,
     rollbackPoint: null,
     tabs: [],
     activeTabId: '',
@@ -311,6 +313,7 @@ function applyStateSync(s: SerializedAgentState): void {
     state.sessionName = s.sessionName;
     state.contextUsage = s.contextUsage;
     state.fileChanges = s.fileChanges ?? [];
+    state.fileUndoViewEnabled = s.fileUndoViewEnabled === true;
     state.rollbackPoint = s.rollbackPoint ?? null;
     state.tabs = s.tabs ?? [];
     state.activeTabId = s.activeTabId ?? '';
@@ -1506,6 +1509,14 @@ function updateChangedFiles(): void {
 
     const existing = document.getElementById('changed-files-bar') as HTMLDetailsElement | null;
     const wasOpen = existing?.open ?? false;
+
+    // The bar is opt-in per chat (toggle lives in the launcher sidebar
+    // under "File Undo View"). Always remove an existing bar when the
+    // feature is off so flipping the toggle hides it immediately.
+    if (!state.fileUndoViewEnabled) {
+        existing?.remove();
+        return;
+    }
 
     if (state.fileChanges.length === 0) {
         existing?.remove();

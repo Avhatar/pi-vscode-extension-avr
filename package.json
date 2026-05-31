@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.24.1",
+  "version": "0.25.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -160,6 +160,11 @@
           "type": "boolean",
           "default": false,
           "description": "Enable Plan Mode for new chats by default. When on, the agent studies the task and proposes a plan before making any changes. Each chat keeps its own toggle state."
+        },
+        "pi-code.fileUndoView.defaultEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the File Undo View — the bar above the prompt input listing files the agent changed, with Undo / Redo / Review buttons — by default for new chats. File edits still happen and can be inspected per-message regardless; this only controls the always-visible bar. Each chat keeps its own toggle state."
         },
         "pi-code.todo.defaultEnabled": {
           "type": "boolean",

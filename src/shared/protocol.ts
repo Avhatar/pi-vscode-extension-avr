@@ -131,6 +131,9 @@ export interface SerializedAgentState {
     cacheMode?: CacheMode;
     /** Effective retention applied to the next request for this tab (computed in `auto`). */
     cacheEffective?: CacheEffective;
+    /** Whether the always-visible File Undo View (changed-files bar with
+     *  Undo / Redo / Review above the input) is enabled for this tab. */
+    fileUndoViewEnabled?: boolean;
 }
 
 export interface ModelInfo {
@@ -288,6 +291,11 @@ export interface LauncherState {
     /** True when the active tab is streaming or compacting and the
      *  Plan Mode toggle should be greyed out. */
     planModeToggleDisabled?: boolean;
+    /** Per-tab File Undo View toggle state for the active tab. Absent
+     *  when there is no active tab. When enabled, the bar listing
+     *  files the agent changed (with Undo/Redo/Review buttons) is
+     *  shown above the chat input. */
+    fileUndoViewEnabled?: boolean;
 }
 
 export type LauncherClientMessage =
@@ -301,6 +309,7 @@ export type LauncherClientMessage =
     | { type: 'setTodoEnabled'; enabled: boolean }
     | { type: 'setTodoCollapsed'; collapsed: boolean }
     | { type: 'setPlanModeEnabled'; enabled: boolean }
+    | { type: 'setFileUndoViewEnabled'; enabled: boolean }
     | { type: 'openSettings' };
 
 export type LauncherServerMessage =

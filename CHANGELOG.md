@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-05-31
+
+### Added
+- **File Undo View** toggle in the launcher sidebar (under Plan Mode). The bar listing files the agent changed (with Undo / Redo / Review) above the chat input is now opt-in per chat — off by default. Flip the toggle to show or hide it without affecting file edits or per-message diffs. The default for new chats can be set via `pi-code.fileUndoView.defaultEnabled`.
+
 ## [0.24.1] - 2026-05-23
 
 ### Changed
