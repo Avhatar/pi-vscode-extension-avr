@@ -576,6 +576,7 @@ function render(): void {
     });
 
     skeletonBuilt = true;
+    setupFooterOverflowObserver();
 
     // Populate all dynamic sections
     updateTabs();
@@ -843,6 +844,79 @@ function formatAge(seconds: number): string {
     return `${hours}h`;
 }
 
+// Priority order in which footer chips/buttons disappear when the input footer
+// no longer fits on one line. Earlier entries are hidden first.
+const FOOTER_HIDE_PRIORITY: ReadonlyArray<string> = [
+    '.footer-cache',
+    '.footer-context-usage',
+    '.footer-thinking',
+    '#btn-attach-file',
+    '#btn-send',
+    '.footer-model',
+];
+
+let footerResizeObserver: ResizeObserver | null = null;
+let footerWindowResizeBound = false;
+let footerAdjustScheduled = false;
+
+function scheduleFooterAdjust(): void {
+    if (footerAdjustScheduled) return;
+    footerAdjustScheduled = true;
+    requestAnimationFrame(() => {
+        footerAdjustScheduled = false;
+        adjustFooterOverflow();
+    });
+}
+
+function setupFooterOverflowObserver(): void {
+    // The chat panel rebuilds its DOM on tab switches via render(), which
+    // destroys the previous .input-container. A persistent observer would be
+    // left observing a detached element and never fire for the new one, so we
+    // disconnect and reattach every time the skeleton is rebuilt.
+    if (footerResizeObserver) {
+        footerResizeObserver.disconnect();
+        footerResizeObserver = null;
+    }
+    const container = document.querySelector('.input-container') as HTMLElement | null;
+    if (container && typeof ResizeObserver !== 'undefined') {
+        footerResizeObserver = new ResizeObserver(() => scheduleFooterAdjust());
+        footerResizeObserver.observe(container);
+    }
+    if (!footerWindowResizeBound) {
+        window.addEventListener('resize', scheduleFooterAdjust);
+        footerWindowResizeBound = true;
+    }
+}
+
+function isFooterWrapped(footer: HTMLElement): boolean {
+    let maxItemH = 0;
+    const items = footer.querySelectorAll<HTMLElement>(
+        '.input-footer-group > *:not(.footer-hidden-overflow)',
+    );
+    for (const el of items) {
+        if (el.offsetHeight > maxItemH) maxItemH = el.offsetHeight;
+    }
+    if (maxItemH === 0) return false;
+    const cs = getComputedStyle(footer);
+    const padding = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    return footer.offsetHeight > maxItemH + padding + 2;
+}
+
+function adjustFooterOverflow(): void {
+    const footer = document.querySelector('.input-footer') as HTMLElement | null;
+    if (!footer) return;
+    for (const sel of FOOTER_HIDE_PRIORITY) {
+        footer.querySelector(sel)?.classList.remove('footer-hidden-overflow');
+    }
+    if (!isFooterWrapped(footer)) return;
+    for (const sel of FOOTER_HIDE_PRIORITY) {
+        const el = footer.querySelector(sel) as HTMLElement | null;
+        if (!el) continue;
+        el.classList.add('footer-hidden-overflow');
+        if (!isFooterWrapped(footer)) return;
+    }
+}
+
 function updateInputArea(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (input) {
@@ -891,15 +965,18 @@ function updateInputArea(): void {
     const thinkingChipHtml = renderThinkingChip();
 
     footer.innerHTML = `
-        <button id="btn-attach-file" class="attach-btn" title="Attach file or image"><img class="attach-icon-img" src="${iconsBaseUri}/folder.png" alt="Attach file or image"></button>
-        <span class="footer-model">${escHtml(modelName)}</span>
-        ${cacheChipHtml}
-        ${thinkingChipHtml}
-        <span class="footer-spacer"></span>
-        ${attachmentHtml}
-        ${codexUsageHtml}
-        ${contextHtml}
-        <button id="btn-send" class="send-btn${state.isStreaming ? ' send-btn--stop' : ''}" title="${actionTitle}"><img class="send-icon-img" src="${iconsBaseUri}/${actionIcon}" alt="${actionAlt}"></button>
+        <div class="input-footer-group input-footer-left">
+            <button id="btn-attach-file" class="attach-btn" title="Attach file or image"><img class="attach-icon-img" src="${iconsBaseUri}/folder.png" alt="Attach file or image"></button>
+            <span class="footer-model">${escHtml(modelName)}</span>
+            ${cacheChipHtml}
+            ${thinkingChipHtml}
+        </div>
+        <div class="input-footer-group input-footer-right">
+            ${attachmentHtml}
+            ${codexUsageHtml}
+            ${contextHtml}
+            <button id="btn-send" class="send-btn${state.isStreaming ? ' send-btn--stop' : ''}" title="${actionTitle}"><img class="send-icon-img" src="${iconsBaseUri}/${actionIcon}" alt="${actionAlt}"></button>
+        </div>
     `;
 
     // Rebind the dynamic footer elements
@@ -959,6 +1036,7 @@ function updateInputArea(): void {
     });
 
     updateQueuedMessageBanner();
+    scheduleFooterAdjust();
 }
 
 function renderCacheChip(): string {

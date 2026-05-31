@@ -1228,12 +1228,10 @@ body[data-mode="panel"] .tab-strip,
     box-shadow: 0 0 0 1px var(--focus-border);
 }
 
-@media (min-width: 700px) {
-    body[data-mode="panel"] .input-container {
-        width: 50%;
-        margin-left: auto;
-        margin-right: auto;
-    }
+body[data-mode="panel"] .input-container {
+    width: min(720px, 90%);
+    margin-left: auto;
+    margin-right: auto;
 }
 
 /* ── Input ── */
@@ -1368,9 +1366,28 @@ body[data-mode="panel"] .tab-strip,
 /* ── Input footer ── */
 .input-footer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 4px 8px;
     padding: 4px 10px 8px;
+    min-width: 0;
+}
+
+.input-footer-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    min-width: 0;
+}
+
+.input-footer-right {
+    margin-left: auto;
+    justify-content: flex-end;
+}
+
+.footer-hidden-overflow {
+    display: none !important;
 }
 
 .attach-btn {
@@ -1634,10 +1651,6 @@ body[data-mode="panel"] .tab-strip,
 .footer-codex--pending {
     opacity: 0.6;
     font-style: italic;
-}
-
-.footer-spacer {
-    flex: 1;
 }
 
 .send-btn {

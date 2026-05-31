@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.3] - 2026-05-31
+
+### Fixed
+- Chat input footer's progressive hiding (cache → tokens → thinking → attach → send → model) now actually fires when the panel is resized: the resize observer is re-attached on every chat-tab switch (it was getting stuck on the previous tab's destroyed container), and a window-resize listener was added as a backup trigger.
+
+## [0.25.2] - 2026-05-31
+
+### Changed
+- In editor-tab chat panels, the input box now keeps a stable preferred width (up to 720px) instead of always being 50% of the panel. On wide panels it stops growing past 720px (so the side gaps grow with the panel); on narrow panels it shrinks just enough to always leave a 5% gap on each side.
+- When the chat input footer is too narrow to fit everything on one line, items are now hidden one at a time by priority (cache chip → context-usage chip → thinking chip → attach button → send button → model name) instead of wrapping onto a second row.
+
+## [0.25.1] - 2026-05-31
+
+### Fixed
+- Chat input footer (model name, cache / thinking chips, context usage, send button) now wraps onto multiple lines when the chat panel is narrow, instead of overflowing past the input box.
+
 ## [0.25.0] - 2026-05-31
 
 ### Added
