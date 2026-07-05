@@ -2256,7 +2256,6 @@ function getToolIcon(name: string): string {
         web_search: 'web.png',
         fetch_content: 'web.png',
         get_search_content: 'web.png',
-        code_search: 'web.png',
         // LSP toolset — share a single icon so the chat groups them visually.
         find_references: 'links.png',
         find_implementations: 'links.png',
@@ -2300,8 +2299,6 @@ function getToolDescription(name: string): string {
             return 'Fetch content — downloads the contents of a specific URL.';
         case 'get_search_content':
             return 'Get search content — extracts the body of a previously found web result.';
-        case 'code_search':
-            return 'Code search — searches public code repositories on the web.';
         case 'find_references':
             return 'LSP find references — lists every place this symbol is referenced across the workspace.';
         case 'find_implementations':
@@ -2352,8 +2349,6 @@ function getToolLabel(name: string, args: any): string {
             return args?.url ? `Fetch: ${truncate(args.url, 50)}` : 'Fetch content';
         case 'get_search_content':
             return 'Get search results';
-        case 'code_search':
-            return args?.query ? `Code search: ${truncate(args.query, 50)}` : 'Code search';
         // LSP toolset — uniform "LSP: <tool_name>" header so the chat
         // shows what kind of LSP operation ran without the agent's
         // input dressing.

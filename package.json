@@ -2,12 +2,12 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.25.3",
+  "version": "0.26.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.110.0"
   },
   "categories": [
     "AI",
@@ -215,17 +215,19 @@
     "deploy:major": "npm run version:major && npm run deploy"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.74.2",
-    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@earendil-works/pi-agent-core": "^0.80.3",
+    "@earendil-works/pi-ai": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@earendil-works/pi-tui": "^0.80.3",
     "marked": "^18.0.2",
-    "pi-mcp-adapter": "^2.6.1",
-    "pi-web-access": "^0.10.7",
-    "typebox": "^1.1.33"
+    "pi-mcp-adapter": "^2.11.0",
+    "pi-web-access": "^0.13.0",
+    "typebox": "^1.1.38"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.0.0",
-    "@types/vscode": "^1.100.0",
+    "@types/vscode": "^1.110.0",
     "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.25.0",
     "mocha": "^11.0.0",

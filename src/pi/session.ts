@@ -69,7 +69,7 @@ export class PiSessionManager {
             resourceLoader,
         };
         if (allowedTools.length > 0) {
-            opts.allowedToolNames = allowedTools;
+            opts.tools = allowedTools;
         }
 
         const { session, modelFallbackMessage } = await createAgentSession(opts);
@@ -141,7 +141,7 @@ export class PiSessionManager {
     /** Tools allowed during Plan Mode's PLAN phase (study/plan only). */
     static readonly PLAN_MODE_READONLY_TOOLS: ReadonlySet<string> = new Set([
         'read', 'grep', 'find', 'ls',           // Pi built-in read-only
-        'web_search', 'code_search',             // pi-web-access
+        'web_search',                            // pi-web-access
         'fetch_content', 'get_search_content',   // pi-web-access
         'todo',                                   // our inline extension
         'mcp',                                    // MCP adapter (diagnostic queries)
@@ -388,7 +388,7 @@ export class PiSessionManager {
             resourceLoader,
         };
         if (allowedTools.length > 0) {
-            opts.allowedToolNames = allowedTools;
+            opts.tools = allowedTools;
         }
 
         const { session } = await createAgentSession(opts);
@@ -432,7 +432,7 @@ export class PiSessionManager {
             resourceLoader,
         };
         if (allowedTools.length > 0) {
-            opts.allowedToolNames = allowedTools;
+            opts.tools = allowedTools;
         }
 
         const { session } = await createAgentSession(opts);

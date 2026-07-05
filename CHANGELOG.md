@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-07-05
+
+### Changed
+- Pi SDK bumped from 0.74.2 to 0.80.3 (`@earendil-works/pi-coding-agent`, `pi-agent-core`, `pi-ai`) — six minor releases including richer `agent_end` events, new project-trust and session-info-changed extension events, and `excludeTools` denylist support. New Claude / Gemini / GPT model IDs and provider registrations are picked up automatically via `ModelRegistry`.
+- `pi-web-access` bumped from 0.10.7 to 0.13.0 — adds Tavily / Parallel / Brave / OpenAI web-search providers, an auto-summary workflow for `web_search`, and SSRF `allowRanges` controls.
+- `pi-mcp-adapter` bumped from 2.6.1 to 2.11.0 — default-on output guarding, MCP elicitation, `structuredContent` rendering, and stdio-server cwd defaults that resolve against the Pi session directory.
+- Bundled `@earendil-works/pi-tui` and refreshed `typebox` — new pi-web-access peer dependencies that must ship inside the VSIX.
+- Minimum required VS Code raised from 1.100 to 1.110 (March 2026). Older VS Code releases still bundle Node 20, but Pi SDK 0.75.0+ requires Node.js ≥ 22.19.0 and 1.110 is the first release with Node 22.22.
+
+### Fixed
+- `pi-code.allowedTools` now actually restricts the agent's toolset. It was a silent no-op in 0.24.x–0.25.x because the SDK option had been renamed from `allowedToolNames` to `tools` and the extension still passed the old key.
+
+### Removed
+- `code_search` tool — removed upstream from `pi-web-access` 0.12+. It is no longer surfaced in the timeline rail or reserved as a Plan-Mode read-only tool.
+
 ## [0.25.3] - 2026-05-31
 
 ### Fixed
