@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.29.2] - 2026-07-09
+
+### Added
+- Small colored language chip on shell/bash tool cards when the command is really a scripting-language one-liner (`python -c`, `python3 file.py`, `node -e`, `node file.js`, `deno eval`, `perl -pi`, `ruby -e`, `php -r`, `sed -i`, `awk -i inplace`, `powershell -c`). Makes it obvious at a glance that the tool call is running code against your files rather than a plain shell pipeline — useful when the model does an inline `python -c "…file.write(…)…"` and the fact that it's a script (not a `ls` / `cd` / `grep`) would otherwise be buried inside the truncated command preview.
+- Python tool icon on shell/bash tool cards when the command runs a Python script — the default terminal glyph is swapped for a dedicated Python icon so the row is scannable at a distance.
+
 ## [0.29.1] - 2026-07-09
 
 ### Added

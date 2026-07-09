@@ -2441,6 +2441,51 @@ function getCommandInputText(args: any): string {
     return '';
 }
 
+// Heuristic: when a shell command is really a script interpreter one-liner
+// or an in-place text munger, surface that fact so the user can tell at a
+// glance that the model ran Python / Node / sed / etc. against their
+// files instead of a plain shell pipeline. Match on well-known invocation
+// shapes only — this is a display hint, not a security check.
+function detectScriptLanguage(command: string): string | null {
+    if (typeof command !== 'string' || !command) return null;
+    const c = command;
+    if (/(^|[\s;&|(])python3?(\.\d+)?\s+-c\s+["']/.test(c)) return 'python';
+    if (/(^|[\s;&|(])python3?(\.\d+)?\s+[^\s]+\.py(\s|$)/.test(c)) return 'python';
+    if (/(^|[\s;&|(])node\s+-[epr]\s+["']/.test(c)) return 'node';
+    if (/(^|[\s;&|(])node\s+[^\s]+\.(m?js|cjs|ts)(\s|$)/.test(c)) return 'node';
+    if (/(^|[\s;&|(])deno\s+(eval|run)\b/.test(c)) return 'deno';
+    if (/(^|[\s;&|(])perl\s+-[epn]?[epn]e?\s+["']/.test(c)) return 'perl';
+    if (/(^|[\s;&|(])ruby\s+-e\s+["']/.test(c)) return 'ruby';
+    if (/(^|[\s;&|(])php\s+-r\s+["']/.test(c)) return 'php';
+    if (/(^|[\s;&|(])sed\s+-[Ei]/.test(c)) return 'sed';
+    if (/(^|[\s;&|(])awk\s+-i\s+inplace/.test(c)) return 'awk';
+    if (/(^|[\s;&|(])(pwsh|powershell)\s+-c(ommand)?\s+/.test(c)) return 'powershell';
+    return null;
+}
+
+function buildScriptLangChipHtml(command: string): string {
+    const lang = detectScriptLanguage(command);
+    if (!lang) return '';
+    return `<span class="script-lang-chip lang-${lang}" title="Command runs a ${lang} script inline">${lang}</span>`;
+}
+
+// Language-specific icons that override the default shell/terminal icon
+// when the bash command is really a scripting-language one-liner. Only
+// languages with a matching PNG in media/icons/ are listed.
+const TOOL_ICON_BY_SCRIPT_LANG: Record<string, string> = {
+    python: 'pythonlang2.png',
+};
+
+function getToolIconHtmlForCommand(toolName: string, command: string): string {
+    const lang = detectScriptLanguage(command);
+    const langIcon = lang ? TOOL_ICON_BY_SCRIPT_LANG[lang] : undefined;
+    if (langIcon) {
+        const description = getToolDescription(toolName);
+        return `<span class="tool-icon" title="${escHtml(description)}"><img class="tool-icon-img" src="${iconsBaseUri}/${langIcon}" alt="${escHtml(lang!)}"></span>`;
+    }
+    return getToolIconHtml(toolName);
+}
+
 function splitToolIoLines(text: string): string[] {
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     while (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
@@ -2809,12 +2854,14 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
         const wrapper = el('div', 'tool-card-wrapper');
 
         if (isCommandLike) {
+            const commandInput = getCommandInputText(parsedArgs);
             const headerHtml = `
-                ${iconHtml}
+                ${getToolIconHtmlForCommand(toolName, commandInput)}
                 <span class="tool-name">${escHtml(label)}</span>
+                ${buildScriptLangChipHtml(commandInput)}
                 ${buildStatusHtml(isError ? 'error' : 'done')}
             `;
-            const details = buildToolIoCard(headerHtml, getCommandInputText(parsedArgs), resultContent);
+            const details = buildToolIoCard(headerHtml, commandInput, resultContent);
             wrapper.appendChild(details);
         } else {
             const details = document.createElement('details');
@@ -2905,8 +2952,9 @@ function renderToolStart(event: any): void {
     if (isCommandLike) {
         const input = getCommandInputText(parsedArgs);
         const headerHtml = `
-            ${getToolIconHtml(event.toolName)}
+            ${getToolIconHtmlForCommand(event.toolName, input)}
             <span class="tool-name">${escHtml(getToolLabel(event.toolName, parsedArgs))}</span>
+            ${buildScriptLangChipHtml(input)}
             <span class="tool-status running">running</span>
         `;
         const details = buildToolIoCard(headerHtml, input, '');

@@ -802,6 +802,27 @@ body[data-mode="panel"] .tab-strip,
     border-radius: var(--radius);
 }
 
+.script-lang-chip {
+    font-size: 10px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+    background: var(--badge-bg);
+    color: var(--badge-fg);
+    flex-shrink: 0;
+}
+.script-lang-chip.lang-python     { background: rgba(53, 114, 165, 0.22);  color: #6ba3d6; }
+.script-lang-chip.lang-node       { background: rgba(104, 160, 99, 0.22);  color: #8fbf82; }
+.script-lang-chip.lang-deno       { background: rgba(104, 160, 99, 0.22);  color: #8fbf82; }
+.script-lang-chip.lang-perl       { background: rgba(160, 105, 60, 0.22);  color: #d69a6b; }
+.script-lang-chip.lang-ruby       { background: rgba(200, 90, 90, 0.22);   color: #e0777c; }
+.script-lang-chip.lang-php        { background: rgba(120, 100, 180, 0.24); color: #a294e0; }
+.script-lang-chip.lang-sed        { background: rgba(200, 160, 60, 0.22);  color: #d6b96b; }
+.script-lang-chip.lang-awk        { background: rgba(200, 160, 60, 0.22);  color: #d6b96b; }
+.script-lang-chip.lang-powershell { background: rgba(60, 120, 200, 0.24);  color: #7aa8e0; }
+
 .tool-intent {
     padding: 4px 16px 4px 48px;
     font-style: italic;
