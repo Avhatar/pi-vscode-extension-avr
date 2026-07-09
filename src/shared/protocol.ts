@@ -341,7 +341,7 @@ export type ServerMessage =
     | { type: 'skills'; skills: SkillInfo[] }
     | { type: 'workspaceFileSuggestions'; requestId: number; query: string; isIndexing?: boolean; items: WorkspaceFileSuggestion[] }
     | { type: 'codexUsage'; usage: CodexUsageSnapshot | null }
-    | { type: 'error'; message: string };
+    | { type: 'error'; message: string; severity?: 'error' | 'warning' | 'info' };
 
 // Extension -> Settings webview messages
 export type SettingsServerMessage =

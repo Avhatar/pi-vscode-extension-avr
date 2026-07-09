@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-07-09
+
+### Added
+- Every agent turn now leaves a one-line summary in the "Pi Code" output channel (`[turn end] provider=… model=… stopReason=… in=… out=… cacheR=… cacheW=…`), so how a turn ended is never hidden — even a clean `stop` leaves a trail you can inspect later.
+- Chat now shows a yellow warning banner when a turn ends with `stopReason === 'length'` — the model was cut off by its per-turn output token cap. Previously such truncated responses stopped mid-sentence with no indication anything was wrong.
+- Chat now shows a blue info banner when a turn ends with a stop reason we do not explicitly recognise (anything other than `stop`, `length`, `error`, `aborted`), so unmapped provider states surface instead of disappearing silently.
+
 ## [0.28.0] - 2026-07-09
 
 ### Changed

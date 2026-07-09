@@ -261,6 +261,7 @@ function handleMessage(msg: ServerMessage): void {
             state.messages.push({
                 role: 'error',
                 content: msg.message,
+                severity: msg.severity ?? 'error',
                 timestamp: Date.now(),
             });
             updateMessages();
@@ -3317,11 +3318,14 @@ function renderSessionList(sessions: any[], currentId?: string): void {
 
 function renderErrorMessage(msg: any): HTMLElement {
     const text = extractText(msg);
+    const severity: 'error' | 'warning' | 'info' = msg?.severity === 'warning' || msg?.severity === 'info'
+        ? msg.severity
+        : 'error';
     const group = el('div', 'message-group-system');
-    const errEl = el('div', 'error-message');
+    const errEl = el('div', `error-message error-message--${severity}`);
     errEl.textContent = text;
 
-    if (looksLikeAuthError(text)) {
+    if (severity === 'error' && looksLikeAuthError(text)) {
         const action = el('button', 'error-action');
         action.textContent = 'Open Settings';
         action.addEventListener('click', () => {

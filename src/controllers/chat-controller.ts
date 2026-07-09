@@ -219,6 +219,14 @@ function buildEmptyResponseMessage(message: any): string {
     );
 }
 
+function findLastAssistantMessage(messages: any[]): any | undefined {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m?.role === 'assistant') return m;
+    }
+    return undefined;
+}
+
 /**
  * Owns all chat tab state and routes messages from views to the appropriate
  * tab. View layers (sidebar, editor panels) attach themselves as a
@@ -984,24 +992,46 @@ export class ChatController implements vscode.Disposable {
         }
 
         if (event.type === 'agent_end') {
-            if (!tab.errorReportedThisRun) {
-                const msgs = tab.session.getMessages();
-                for (let i = msgs.length - 1; i >= 0; i--) {
-                    const m = msgs[i] as any;
-                    if (m?.role === 'assistant') {
-                        if (m.stopReason === 'error') {
-                            this._postAgentError(tab, m.errorMessage, m);
-                        } else if (m.stopReason !== 'aborted' && isEmptyAssistantResponse(m)) {
-                            this._postAgentError(
-                                tab,
-                                buildEmptyResponseMessage(m),
-                                m,
-                            );
-                        }
-                        break;
-                    }
+            const lastAssistant = findLastAssistantMessage(tab.session.getMessages());
+            if (!tab.errorReportedThisRun && lastAssistant) {
+                const stopReason = lastAssistant.stopReason;
+                if (stopReason === 'error') {
+                    this._postAgentError(tab, lastAssistant.errorMessage, lastAssistant);
+                } else if (stopReason !== 'aborted' && isEmptyAssistantResponse(lastAssistant)) {
+                    this._postAgentError(
+                        tab,
+                        buildEmptyResponseMessage(lastAssistant),
+                        lastAssistant,
+                    );
+                } else if (stopReason === 'length') {
+                    // Provider truncated the response because the model hit
+                    // its per-turn output token cap. The message content is
+                    // valid but incomplete — surface this so the user does
+                    // not think the agent silently died mid-sentence.
+                    this._postAgentNotice(
+                        tab,
+                        'Response was cut off — the model hit its output token limit for this turn. Ask it to continue where it left off.',
+                        'warning',
+                        lastAssistant,
+                    );
+                } else if (
+                    stopReason !== 'stop'
+                    && stopReason !== 'aborted'
+                    && stopReason !== undefined
+                ) {
+                    // Any stop reason we do not explicitly recognise
+                    // (e.g. 'toolUse' bubbling up to the outer loop, or a
+                    // provider-specific value the SDK does not map).
+                    // Surface it so nothing gets hidden.
+                    this._postAgentNotice(
+                        tab,
+                        `Turn ended with unexpected stop reason "${String(stopReason)}". The response above may be incomplete.`,
+                        'info',
+                        lastAssistant,
+                    );
                 }
             }
+            this._logTurnEnd(tab, lastAssistant);
             const turnEndAt = Date.now();
             const turnDurationMs = tab.agentStartTime > 0
                 ? Math.max(0, turnEndAt - tab.agentStartTime)
@@ -1630,7 +1660,25 @@ export class ChatController implements vscode.Disposable {
         tab.streamingThinkingDuration = 0;
         const message = formatProviderError(raw);
         this._logProviderError(tab, raw, assistantMessage);
-        this._postForTab(tab.id, { type: 'error', message });
+        this._postForTab(tab.id, { type: 'error', message, severity: 'error' });
+    }
+
+    /**
+     * Post a non-fatal notice about the turn's outcome (e.g. output
+     * truncated by `stopReason === 'length'`, or an unmapped stop
+     * reason). Sets `errorReportedThisRun` so `agent_end` fallbacks
+     * don't stack a second banner on top.
+     */
+    private _postAgentNotice(
+        tab: TabState,
+        message: string,
+        severity: 'warning' | 'info',
+        assistantMessage?: any,
+    ): void {
+        if (tab.errorReportedThisRun) { return; }
+        tab.errorReportedThisRun = true;
+        this._logTurnNotice(tab, message, severity, assistantMessage);
+        this._postForTab(tab.id, { type: 'error', message, severity });
     }
 
     private _logProviderError(tab: TabState, raw: string | undefined, assistantMessage?: any): void {
@@ -1649,6 +1697,59 @@ export class ChatController implements vscode.Disposable {
         for (const line of lines) {
             this._outputChannel.appendLine(line);
         }
+    }
+
+    /**
+     * One-line summary of every turn's outcome. Emitted unconditionally on
+     * every `agent_end` so nothing about how a turn ended is invisible
+     * post-hoc — even successful `stop` turns leave a trail in the
+     * "Pi Code" output channel. Companion of `_logProviderError`, which
+     * fires only when we surface an error banner.
+     */
+    private _logTurnEnd(tab: TabState, assistantMessage: any | undefined): void {
+        const tabLabel = tab.name || tab.id;
+        if (!assistantMessage) {
+            this._outputChannel.appendLine(`[turn end] tab="${tabLabel}" (no assistant message)`);
+            return;
+        }
+        const provider = assistantMessage.provider ? String(assistantMessage.provider) : 'unknown';
+        const model = assistantMessage.model ? String(assistantMessage.model) : 'unknown';
+        const stopReason = assistantMessage.stopReason ?? 'unknown';
+        const usage = assistantMessage.usage ?? {};
+        const input = Number(usage.input ?? 0);
+        const output = Number(usage.output ?? 0);
+        const cacheRead = Number(usage.cacheRead ?? 0);
+        const cacheWrite = Number(usage.cacheWrite ?? 0);
+        const parts = [
+            `[turn end] tab="${tabLabel}"`,
+            `provider=${provider}`,
+            `model=${model}`,
+            `stopReason=${stopReason}`,
+            `in=${input}`,
+            `out=${output}`,
+            `cacheR=${cacheRead}`,
+            `cacheW=${cacheWrite}`,
+        ];
+        this._outputChannel.appendLine(parts.join(' '));
+        const err = assistantMessage.errorMessage;
+        if (err) {
+            this._outputChannel.appendLine(`  errorMessage: ${String(err).replace(/\r?\n/g, ' ')}`);
+        }
+    }
+
+    private _logTurnNotice(
+        tab: TabState,
+        message: string,
+        severity: 'warning' | 'info',
+        assistantMessage?: any,
+    ): void {
+        const provider = assistantMessage?.provider ? String(assistantMessage.provider) : 'unknown';
+        const model = assistantMessage?.model ? String(assistantMessage.model) : 'unknown';
+        const stopReason = assistantMessage?.stopReason ?? 'unknown';
+        const tabLabel = tab.name || tab.id;
+        this._outputChannel.appendLine(
+            `[turn ${severity}] tab="${tabLabel}" provider=${provider} model=${model} stopReason=${stopReason}: ${message.replace(/\r?\n/g, ' ')}`,
+        );
     }
 
     private async _createTab(): Promise<string> {

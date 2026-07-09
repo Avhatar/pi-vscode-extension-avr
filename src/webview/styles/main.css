@@ -2216,7 +2216,7 @@ body[data-mode="panel"] .input-container {
     flex-shrink: 0;
 }
 
-/* ── Error ── */
+/* ── Error / notice banners ── */
 .error-message {
     padding: 8px 12px;
     color: var(--error-fg);
@@ -2224,6 +2224,18 @@ body[data-mode="panel"] .input-container {
     background: rgba(244, 135, 113, 0.08);
     border-left: 3px solid var(--error-fg);
     margin: 4px 0;
+}
+/* Warning: model returned incomplete output (e.g. stopReason === 'length'). */
+.error-message--warning {
+    color: var(--vscode-editorWarning-foreground, #d19a66);
+    background: rgba(209, 154, 102, 0.08);
+    border-left-color: var(--vscode-editorWarning-foreground, #d19a66);
+}
+/* Info: unexpected-but-not-broken conditions (e.g. unmapped stopReason). */
+.error-message--info {
+    color: var(--vscode-editorInfo-foreground, #75beff);
+    background: rgba(117, 190, 255, 0.08);
+    border-left-color: var(--vscode-editorInfo-foreground, #75beff);
 }
 .error-action {
     display: block;
