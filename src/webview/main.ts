@@ -4535,14 +4535,20 @@ function tryParseJSON(s: string): any {
 
 let userHasScrolled = false;
 let isProgrammaticScroll = false;
+let lastScrollTop = 0;
 
 function scrollToBottom(force = false): void {
     if (userHasScrolled && !force) return;
     const messages = document.getElementById('messages');
-    if (messages) {
+    if (!messages) return;
+    const target = messages.scrollHeight;
+    // Only mark the assignment as programmatic if it will actually move the
+    // scrollbar. Otherwise no scroll event fires and the flag would poison
+    // the next real user-initiated scroll.
+    if (messages.scrollTop < target - messages.clientHeight - 1) {
         isProgrammaticScroll = true;
-        messages.scrollTop = messages.scrollHeight;
     }
+    messages.scrollTop = target;
 }
 
 function isNearBottom(): boolean {
@@ -4565,28 +4571,28 @@ function bindScrollListener(): void {
     const messages = document.getElementById('messages');
     if (!messages) return;
 
-    // Detect user-initiated scroll intent immediately
-    messages.addEventListener('wheel', (e) => {
-        if (e.deltaY < 0) {
-            userHasScrolled = true;
-            updateScrollButton();
-        }
-    }, { passive: true });
+    lastScrollTop = messages.scrollTop;
 
-    messages.addEventListener('touchstart', () => {
-        userHasScrolled = true;
-        updateScrollButton();
-    }, { passive: true });
-
-    // The scroll event handles resetting when user reaches bottom
+    // Detect user-initiated scroll intent from the scroll event itself.
+    // This catches every input method — wheel, trackpad, keyboard (PageUp,
+    // arrows, Home), scrollbar drag, click-on-track — because they all
+    // produce a scroll event on the container.
     messages.addEventListener('scroll', () => {
+        const currentScrollTop = messages.scrollTop;
         if (isProgrammaticScroll) {
             isProgrammaticScroll = false;
+            lastScrollTop = currentScrollTop;
+            updateScrollButton();
             return;
         }
-        if (isNearBottom()) {
+        if (currentScrollTop < lastScrollTop - 1) {
+            // User moved the viewport up — pin their position, stop
+            // auto-following streaming updates.
+            userHasScrolled = true;
+        } else if (isNearBottom()) {
             userHasScrolled = false;
         }
+        lastScrollTop = currentScrollTop;
         updateScrollButton();
     });
 }

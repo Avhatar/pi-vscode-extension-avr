@@ -179,6 +179,34 @@ body {
     align-items: center;
 }
 
+/* Copy-to-clipboard button next to the ToDo title. Semi-transparent
+   by default so it does not compete with the heading text; brightens
+   on hover. Flash colour confirms the copy. */
+.todo-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 4px;
+    margin-left: 2px;
+    border-radius: 3px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.45;
+    cursor: pointer;
+    line-height: 0;
+    transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.todo-copy-btn:hover,
+.todo-copy-btn:focus-visible {
+    opacity: 1;
+    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--vscode-foreground);
+    outline: none;
+}
+.todo-copy-btn-flash {
+    opacity: 1;
+    color: var(--vscode-testing-iconPassed, var(--vscode-foreground));
+}
+
 /* ── ToDo toggle switch ── */
 
 .todo-toggle {

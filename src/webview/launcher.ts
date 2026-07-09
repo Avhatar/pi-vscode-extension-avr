@@ -268,6 +268,7 @@ function renderTodos(): HTMLElement | undefined {
         heading.appendChild(
             el('span', 'section-count', `${counts.completed}/${visible.length}`),
         );
+        heading.appendChild(renderTodoCopyButton(visible));
     }
     // Toggle is part of the heading row (right-aligned via CSS) but
     // sits in its own <span> so the heading-wide click-to-collapse
@@ -370,6 +371,57 @@ function renderTodoIcon(status: TaskStatus): HTMLElement {
     const glyph = el('span', 'todo-glyph', STATUS_GLYPH[status]);
     glyph.title = status.replace('_', ' ');
     return glyph;
+}
+
+function renderTodoCopyButton(tasks: TaskInfo[]): HTMLElement {
+    const btn = el('span', 'todo-copy-btn');
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.title = 'Copy ToDo list to clipboard';
+    btn.setAttribute('aria-label', 'Copy ToDo list');
+    btn.innerHTML =
+        '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<rect x="4" y="5" width="9" height="9" rx="1.2"/>'
+        + '<path d="M6.5 5V3.2a1 1 0 0 1 1-1H12a1 1 0 0 1 1 1V10"/>'
+        + '</svg>';
+
+    const copy = (): void => {
+        const text = formatTodosForClipboard(tasks);
+        if (!text) return;
+        navigator.clipboard?.writeText(text).then(
+            () => {
+                btn.classList.add('todo-copy-btn-flash');
+                setTimeout(() => btn.classList.remove('todo-copy-btn-flash'), 900);
+            },
+            () => { /* silent — clipboard denied */ },
+        );
+    };
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        copy();
+    });
+    btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            copy();
+        }
+    });
+    return btn;
+}
+
+function formatTodosForClipboard(tasks: TaskInfo[]): string {
+    // Order oldest → newest so the copied list reads naturally
+    // (creation order), independent of the newest-first UI ordering.
+    const ordered = [...tasks].sort((a, b) => a.id - b.id);
+    return ordered.map((t) => {
+        const box =
+            t.status === 'completed' ? 'x'
+                : t.status === 'in_progress' ? '~'
+                    : ' ';
+        return `- [${box}] ${t.subject}`;
+    }).join('\n');
 }
 
 function renderRecentSessions(): HTMLElement {

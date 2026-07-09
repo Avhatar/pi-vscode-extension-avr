@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-07-08
+
+### Fixed
+- Chat no longer forces you back to the bottom while the agent is streaming if you scrolled up with the keyboard, scrollbar drag, or wheel-down — any input method now pins your position until you scroll back near the bottom yourself.
+
+## [0.27.0] - 2026-07-08
+
+### Added
+- Copy-to-clipboard button next to the ToDo heading in the launcher sidebar. Copies the current task list as a Markdown checklist (`- [ ]` pending, `- [~]` in-progress, `- [x]` completed) in creation order. Semi-transparent by default, brightens on hover.
+
 ## [0.26.0] - 2026-07-05
 
 ### Changed
