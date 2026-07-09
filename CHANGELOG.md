@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-07-09
+
+### Added
+- Preflight normalizer for the `edit` tool that catches the most common malformed argument shapes before the Pi SDK's schema validator sees them. Rescues Anthropic-style `file_path` (renames to `path`), per-edit `path`/`file_path` fields (hoists to top level when consistent across all edits), and edit item variants that use `old_string`/`new_string` / `old`/`new` / `oldStr`/`newStr` (rewrites to `oldText`/`newText` and strips extras). Cuts the "Validation failed for tool edit" retry loop that DeepSeek and similar models were falling into. If a shape cannot be confidently rescued, args pass through unchanged and the original SDK validation error is still reported. Every rewrite is logged to the "Pi Code" output channel.
+
 ## [0.29.0] - 2026-07-09
 
 ### Added

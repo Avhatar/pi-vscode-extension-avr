@@ -13,6 +13,7 @@ import { createTodoExtension } from './todo/extension';
 import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
 import { createLspExtension } from './lsp/extension';
+import { installEditToolPreflight } from './tools/preflight-edit';
 
 export class PiSessionManager {
     private _session: AgentSession | undefined;
@@ -267,6 +268,7 @@ export class PiSessionManager {
             },
         };
         await session.bindExtensions(bindings);
+        installEditToolPreflight(session, this._outputChannel);
     }
 
     private async _applyDefaultSettings(session: AgentSession): Promise<void> {
