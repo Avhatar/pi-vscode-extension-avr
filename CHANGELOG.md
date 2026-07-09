@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-07-09
+
+### Changed
+- Failed tool calls with schema validation errors ("Validation failed for tool ...") now render as a structured, auto-expanded error card: a plain-English explanation that the SDK rejected the call before it ran, a bulleted list of schema errors, and the received arguments pretty-printed. Previously the raw error dump was hidden behind a single collapsed pre-block.
+- When the model retries a failed `edit`/`write` call with corrected arguments, the earlier validation-error card gets a clickable "retried below ↓" chip in its header that scrolls to the successful diff card. Applies both during streaming and after chat reload, so it is obvious a file was actually edited even when the first attempt is on screen.
+
 ## [0.27.1] - 2026-07-08
 
 ### Fixed

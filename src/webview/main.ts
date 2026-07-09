@@ -662,6 +662,14 @@ function updateMessages(): void {
     bindDiffButtons();
     bindDiffPreviewToggles();
     bindToolClickable();
+    markRetriedValidationErrorsForAllChanges();
+}
+
+function markRetriedValidationErrorsForAllChanges(): void {
+    for (const change of state.fileChanges) {
+        if (change.toolName !== 'edit' && change.toolName !== 'write') continue;
+        markRetriedValidationErrors(change.toolName, change.filePath, `diff-${change.toolCallId}`);
+    }
 }
 
 function getDisplayMessageItems(): Array<{ msg: any; sourceIndex: number }> {
@@ -1689,6 +1697,9 @@ function renderInlineFileChange(change: FileChangeInfo): void {
 
     bindDiffButtons();
     bindDiffPreviewToggles();
+    if (change.toolName === 'edit' || change.toolName === 'write') {
+        markRetriedValidationErrors(change.toolName, change.filePath, `diff-${change.toolCallId}`);
+    }
     scrollToBottom();
 }
 
@@ -2597,12 +2608,122 @@ function buildTodoToolResultElement(source: any, text: string): HTMLElement | nu
     return list;
 }
 
+interface ParsedValidationError {
+    toolName: string;
+    errors: string[];
+    receivedArguments: string;
+}
+
+function parseValidationError(text: string): ParsedValidationError | null {
+    if (!text || typeof text !== 'string') return null;
+    const trimmed = text.trim();
+    if (!trimmed.startsWith('Validation failed for tool ')) return null;
+    const headerMatch = /^Validation failed for tool "([^"]+)":\s*\n?/.exec(trimmed);
+    if (!headerMatch) return null;
+    const rest = trimmed.slice(headerMatch[0].length);
+    const receivedIdx = rest.indexOf('\n\nReceived arguments:');
+    const errorsBlock = receivedIdx >= 0 ? rest.slice(0, receivedIdx) : rest;
+    const receivedBlock = receivedIdx >= 0
+        ? rest.slice(receivedIdx + '\n\nReceived arguments:'.length).replace(/^\r?\n/, '')
+        : '';
+    const errors = errorsBlock
+        .split('\n')
+        .map((line) => line.replace(/^\s*-\s*/, '').trim())
+        .filter(Boolean);
+    return {
+        toolName: headerMatch[1],
+        errors,
+        receivedArguments: receivedBlock.trim(),
+    };
+}
+
+function isValidationErrorText(text: string): boolean {
+    return typeof text === 'string' && text.trim().startsWith('Validation failed for tool ');
+}
+
+function attachValidationRetryChip(errorCard: HTMLElement, successCardId: string): void {
+    if (errorCard.dataset.retriedBy) return;
+    errorCard.dataset.retriedBy = successCardId;
+    const header = errorCard.querySelector('.tool-header, .diff-file-header') as HTMLElement | null;
+    if (!header) return;
+    if (header.querySelector('.tool-status.retried')) return;
+    const chip = el('span', 'tool-status retried') as HTMLElement;
+    chip.textContent = 'retried below ↓';
+    chip.title = 'The model retried this call successfully below — click to jump.';
+    chip.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const target = document.getElementById(successCardId);
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target?.classList.add('flash-highlight');
+        setTimeout(() => target?.classList.remove('flash-highlight'), 1200);
+    });
+    const errorPill = header.querySelector('.tool-status.error');
+    if (errorPill) {
+        errorPill.after(chip);
+    } else {
+        header.appendChild(chip);
+    }
+}
+
+function markRetriedValidationErrors(toolName: string, filePath: string, successCardId: string): void {
+    if (!toolName || !filePath) return;
+    const cards = document.querySelectorAll<HTMLElement>('[data-tool-name]');
+    cards.forEach((card) => {
+        if (card.dataset.toolName !== toolName) return;
+        if (card.id === successCardId) return;
+        const argsPre = card.querySelector('.validation-args');
+        if (!argsPre) return;
+        const argsText = argsPre.textContent ?? '';
+        if (!argsText.includes(filePath)) return;
+        attachValidationRetryChip(card, successCardId);
+    });
+}
+
+function buildValidationErrorContent(parsed: ParsedValidationError): HTMLElement {
+    const wrapper = el('div', 'validation-error');
+
+    const summary = el('div', 'validation-summary');
+    summary.textContent = `The model called ${parsed.toolName} with arguments that did not match the tool's schema. The Pi SDK rejected the call before it ran — no files were touched. The model typically retries with corrected arguments in a follow-up call below.`;
+    wrapper.appendChild(summary);
+
+    if (parsed.errors.length) {
+        const heading = el('div', 'validation-heading');
+        heading.textContent = 'Schema errors';
+        wrapper.appendChild(heading);
+        const list = el('ul', 'validation-errors');
+        for (const err of parsed.errors) {
+            const li = el('li');
+            li.textContent = err;
+            list.appendChild(li);
+        }
+        wrapper.appendChild(list);
+    }
+
+    if (parsed.receivedArguments) {
+        const heading = el('div', 'validation-heading');
+        heading.textContent = 'Received arguments';
+        wrapper.appendChild(heading);
+        const pre = el('pre', 'tool-result validation-args');
+        pre.textContent = parsed.receivedArguments;
+        wrapper.appendChild(pre);
+    }
+
+    return wrapper;
+}
+
 function appendToolResultContent(container: HTMLElement, toolName: string, source: any, text: string): void {
     const todoResult = toolName.toLowerCase() === 'todo'
         ? buildTodoToolResultElement(source, text)
         : null;
     if (todoResult) {
         container.appendChild(todoResult);
+        return;
+    }
+
+    const parsedValidation = parseValidationError(text);
+    if (parsedValidation) {
+        container.appendChild(buildValidationErrorContent(parsedValidation));
         return;
     }
 
@@ -2697,6 +2818,7 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
         } else {
             const details = document.createElement('details');
             details.className = 'tool-card tool-expandable';
+            details.dataset.toolName = toolName;
 
             details.innerHTML = `
                 <summary class="tool-header">
@@ -2710,6 +2832,7 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
             const body = el('div', 'tool-body');
             appendToolResultContent(body, toolName, msg, resultContent);
             details.appendChild(body);
+            if (isError && isValidationErrorText(resultContent)) details.open = true;
             wrapper.appendChild(details);
         }
 
@@ -2756,6 +2879,8 @@ function renderToolStart(event: any): void {
     if ((event.toolName === 'edit' || event.toolName === 'write') && editFilePath) {
         const card = el('div', 'diff-card loading');
         card.id = `tool-${event.toolCallId}`;
+        card.dataset.toolName = event.toolName;
+        card.dataset.filepath = editFilePath as string;
         const fileName = (editFilePath as string).split('/').pop() ?? editFilePath;
         const actionLabel = event.toolName === 'write' ? 'Write' : 'Edit';
         card.innerHTML = `
@@ -2841,6 +2966,29 @@ function renderToolEnd(event: any): void {
     if (!card) return;
 
     if (card.classList.contains('diff-card')) {
+        const diffText = extractToolResultText(event.result);
+        if (event.isError && isValidationErrorText(diffText)) {
+            const toolName = event.toolName ?? '';
+            const details = document.createElement('details');
+            details.className = 'tool-card tool-expandable';
+            details.id = card.id;
+            details.dataset.toolName = toolName;
+            details.innerHTML = `
+                <summary class="tool-header">
+                    ${getToolIconHtml(toolName)}
+                    <span class="tool-name">${escHtml(getToolLabel(toolName, event.args ?? {}))}</span>
+                    <span class="tool-status error">error</span>
+                    <span class="tool-expand-arrow">&#9656;</span>
+                </summary>
+            `;
+            const body = el('div', 'tool-body');
+            appendToolResultContent(body, toolName, event.result, diffText);
+            details.appendChild(body);
+            details.open = true;
+            card.replaceWith(details);
+            bindToolClickable();
+            return;
+        }
         const statusEl = card.querySelector('.tool-status');
         if (statusEl) {
             statusEl.textContent = event.isError ? 'error' : 'done';
@@ -2889,6 +3037,7 @@ function renderToolEnd(event: any): void {
             const body = el('div', 'tool-body');
             appendToolResultContent(body, toolName, event.result, text);
             details.appendChild(body);
+            if (event.isError && isValidationErrorText(text)) details.open = true;
         }
 
         details.id = card.id;
