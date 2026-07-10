@@ -4673,6 +4673,11 @@ const PLAN_MODE_BLOCK_RE = /^<plan-mode-instructions>[\s\S]*?<\/plan-mode-instru
  *  optional self-closing slash. */
 const PLAN_COMPLETE_MARKER_RE = /\s*<\s*plan-complete\s*\/?\s*>\s*/gi;
 
+/** Symmetric pattern for the agent's plan-ready signal, emitted at the end of
+ *  the PLAN phase. Stripped from the visible chat bubble on the same principle
+ *  as PLAN_COMPLETE — it's a control signal, not user-facing text. */
+const PLAN_READY_MARKER_RE = /\s*<\s*plan-ready\s*\/?\s*>\s*/gi;
+
 interface StrippedFileInfo {
     cleanText: string;
     fileNames: string[];
@@ -4698,7 +4703,7 @@ function stripPlanModeBlock(text: string): string {
  *  before rendering. The marker is a control signal for the chat controller,
  *  not user-facing content. */
 function stripPlanCompleteMarker(text: string): string {
-    return text.replace(PLAN_COMPLETE_MARKER_RE, '');
+    return text.replace(PLAN_COMPLETE_MARKER_RE, '').replace(PLAN_READY_MARKER_RE, '');
 }
 
 function extractImages(msg: any): ImageAttachment[] {

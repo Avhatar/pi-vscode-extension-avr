@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Plan Mode now supports agent-driven exit from the plan phase. The agent is instructed to end its final plan-phase response with a `<plan-ready/>` marker when the plan is finalised; on detection the extension auto-transitions into the execution phase and dispatches a synthetic "proceed" prompt in the same conversation, so the user no longer has to type "go" manually. The plan itself stays visible in the chat.
+
+### Changed
+- Edit-tool preflight now dumps the raw and final argument shapes to the "Pi Code" output channel on every call (long strings are truncated to `<string len=N>…`), making it possible to diagnose why a specific model's Edit calls are being rewritten and which fields, if any, are being silently stripped.
+
+### Fixed
+- Plan Mode execution-phase instructions now tell the agent that `oldText` must match the file byte-for-byte and that files read only during the plan phase must be re-read before editing. Previously the exec-phase prompt only explained the `<plan-complete/>` marker, so agents (notably DeepSeek) reconstructed `oldText` from the plan they had drafted in prose and Edit failed to match — the same edit that succeeded outside Plan Mode.
+
 ## [0.31.0] - 2026-07-10
 
 ### Added

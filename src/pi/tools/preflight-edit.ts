@@ -70,13 +70,35 @@ function patchEditTools(session: SessionLike, log?: vscode.OutputChannel): void 
         if (tool.__piCodePreflightPatched) continue;
         const upstream = tool.prepareArguments;
         tool.prepareArguments = (input: unknown) => {
-            let args: unknown = input;
+            let postUpstream: unknown = input;
             if (upstream) {
-                try { args = upstream(args); } catch { /* fall through with original */ }
+                try { postUpstream = upstream(postUpstream); } catch { /* fall through with original */ }
             }
-            return normalizeEditArgs(args, log);
+            const final = normalizeEditArgs(postUpstream, log);
+            if (log) {
+                try {
+                    log.appendLine(`[edit preflight] raw:   ${jsonDump(input)}`);
+                    log.appendLine(`[edit preflight] final: ${jsonDump(final)}`);
+                } catch { /* non-fatal */ }
+            }
+            return final;
         };
         tool.__piCodePreflightPatched = true;
+    }
+}
+
+// Serialize args for diagnostic logging. Truncates strings > 200 chars so an
+// oldText block that fills half the file does not blow up the output channel.
+function jsonDump(value: unknown): string {
+    try {
+        return JSON.stringify(value, (_key, val) => {
+            if (typeof val === 'string' && val.length > 200) {
+                return `<string len=${val.length}>${val.slice(0, 60)}…${val.slice(-60)}`;
+            }
+            return val;
+        });
+    } catch {
+        return '<unserializable>';
     }
 }
 
