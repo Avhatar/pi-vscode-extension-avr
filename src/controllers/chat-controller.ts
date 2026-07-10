@@ -64,6 +64,13 @@ interface TabState {
      *  in its last response during the EXEC phase. The next user prompt
      *  then starts a fresh planning cycle instead of continuing execution. */
     planComplete: boolean;
+    /**
+     * `tool_execution_start` events without a matching `tool_execution_end`
+     * yet. Cleared on `tool_execution_end`, on `agent_start`, and swept on
+     * `agent_end` — anything still present at `agent_end` is a tool call
+     * the SDK abandoned mid-turn and should be surfaced to the user.
+     */
+    pendingTools: Map<string, { name: string; startTime: number }>;
 }
 
 interface PersistedTabsState {
@@ -122,6 +129,7 @@ function makeTabState(
         cacheEffective: 'short',
         planModePhase: 'idle',
         planComplete: false,
+        pendingTools: new Map(),
     };
 }
 
@@ -1089,11 +1097,23 @@ export class ChatController implements vscode.Disposable {
             tab.agentStartTime = Date.now();
             tab.isStreamingLocal = true;
             tab.errorReportedThisRun = false;
+            tab.pendingTools.clear();
             tab.codexTurnBaseline = getCodexUsageStore().getCurrent();
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
             }
             this._onLauncherStateChanged.fire();
+        }
+
+        if (event.type === 'tool_execution_start' && event.toolCallId) {
+            tab.pendingTools.set(String(event.toolCallId), {
+                name: String(event.toolName ?? '?'),
+                startTime: Date.now(),
+            });
+        }
+
+        if (event.type === 'tool_execution_end' && event.toolCallId) {
+            tab.pendingTools.delete(String(event.toolCallId));
         }
 
         if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'error'
@@ -1185,6 +1205,7 @@ export class ChatController implements vscode.Disposable {
                 }
             }
             this._logTurnEnd(tab, lastAssistant);
+            this._sweepPendingTools(tab, lastAssistant);
             const turnEndAt = Date.now();
             const turnDurationMs = tab.agentStartTime > 0
                 ? Math.max(0, turnEndAt - tab.agentStartTime)
@@ -1892,6 +1913,46 @@ export class ChatController implements vscode.Disposable {
         if (err) {
             this._outputChannel.appendLine(`  errorMessage: ${String(err).replace(/\r?\n/g, ' ')}`);
         }
+    }
+
+    /**
+     * At turn end, every `tool_execution_start` should have a matching
+     * `tool_execution_end` — if not, the SDK abandoned that tool call and
+     * the transcript will show the assistant's tool-use block with no
+     * corresponding tool result. Log the orphaned calls, and unless a
+     * heavier banner was already surfaced (e.g. provider error), push a
+     * warning notice so the user knows the turn wasn't clean.
+     */
+    private _sweepPendingTools(tab: TabState, assistantMessage: any | undefined): void {
+        if (tab.pendingTools.size === 0) return;
+        const tabLabel = tab.name || tab.id;
+        const now = Date.now();
+        const entries = Array.from(tab.pendingTools.entries()).map(([id, meta]) => ({
+            id,
+            name: meta.name,
+            elapsedMs: Math.max(0, now - meta.startTime),
+        }));
+        for (const e of entries) {
+            this._outputChannel.appendLine(
+                `[tool orphan] tab="${tabLabel}" tool=${e.name} callId=${e.id} elapsedMs=${e.elapsedMs} — tool_execution_start had no matching tool_execution_end at agent_end`,
+            );
+        }
+        tab.pendingTools.clear();
+
+        // Aborted turns are expected to interrupt tools mid-flight — no
+        // point pestering the user with a warning about tools they just
+        // cancelled themselves.
+        const stopReason = assistantMessage?.stopReason;
+        if (stopReason === 'aborted') return;
+
+        const names = entries.map((e) => e.name).join(', ');
+        const label = entries.length === 1 ? 'tool call did' : `${entries.length} tool calls did`;
+        this._postAgentNotice(
+            tab,
+            `${label} not report completion this turn (${names}). The response above may be incomplete.`,
+            'warning',
+            assistantMessage,
+        );
     }
 
     private _logTurnNotice(

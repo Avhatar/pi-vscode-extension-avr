@@ -413,6 +413,13 @@ function handleAgentEvent(event: any): void {
             state.streamingThinking = '';
             state.isThinking = false;
             dismissSteerToast();
+            // Any chip still marked `.running` here means the SDK never fired
+            // `tool_execution_end` for it before the turn wrapped up. Sweep
+            // them to a neutral "no result" state so the invariant "no
+            // running chips outlive a turn" is enforced defensively — the
+            // subsequent updateStreamingUI() wipe would remove them anyway
+            // in the common path, but this guards against reorderings.
+            sweepStaleRunningTools();
             updateStreamingUI();
             updateInputArea();
             break;
@@ -2417,10 +2424,70 @@ const COMMAND_INPUT_KEYS = ['command', 'cmd', 'script', 'code'];
 const TOOL_IO_PREVIEW_LINE_LIMIT = 4;
 const liveToolOutputs = new Map<string, string>();
 
+// Wall-clock threshold after which a still-running tool chip switches to a
+// visually-distinct "stuck" state. Kept intentionally low — the goal is to
+// warn the user that something is off, not to trigger an auto-abort.
+const TOOL_STUCK_THRESHOLD_MS = 60_000;
+let toolTimerHandle: ReturnType<typeof setInterval> | null = null;
+
 function buildStatusHtml(status: string): string {
     if (status === 'done') return '';
     const label = status.charAt(0).toUpperCase() + status.slice(1);
     return `<span class="tool-status ${status}">${label}</span>`;
+}
+
+function formatRunningElapsed(ms: number): string {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return rem > 0 ? `${m}m${rem}s` : `${m}m`;
+}
+
+function tickRunningToolTimers(): void {
+    const chips = document.querySelectorAll<HTMLElement>('.tool-status.running');
+    if (chips.length === 0) {
+        if (toolTimerHandle !== null) {
+            clearInterval(toolTimerHandle);
+            toolTimerHandle = null;
+        }
+        return;
+    }
+    const now = Date.now();
+    chips.forEach((chip) => {
+        const card = chip.closest<HTMLElement>('[data-started-at]');
+        const startedAt = Number(card?.dataset.startedAt ?? 0);
+        if (!startedAt) return;
+        const elapsedMs = Math.max(0, now - startedAt);
+        chip.textContent = `running ${formatRunningElapsed(elapsedMs)}`;
+        if (elapsedMs >= TOOL_STUCK_THRESHOLD_MS && !chip.classList.contains('running-stuck')) {
+            chip.classList.add('running-stuck');
+            chip.title = 'This tool has been running for a while. Press Esc or Abort to stop the turn.';
+        }
+    });
+}
+
+function ensureToolTimerLoop(): void {
+    if (toolTimerHandle !== null) return;
+    toolTimerHandle = setInterval(tickRunningToolTimers, 1000);
+}
+
+/**
+ * Sweep tool chips that are still marked "running" after the turn ended.
+ * The SDK owes us a `tool_execution_end` per `tool_execution_start`; if it
+ * never fired, a stuck chip would otherwise stay yellow forever. We keep
+ * the chip visible (rather than removing it) so the user knows the tool
+ * call did not finish cleanly, and match the "error" pill styling.
+ */
+function sweepStaleRunningTools(): number {
+    const chips = document.querySelectorAll<HTMLElement>('.tool-status.running');
+    chips.forEach((chip) => {
+        chip.classList.remove('running', 'running-stuck');
+        chip.classList.add('stale');
+        chip.textContent = 'no result';
+        chip.title = 'The tool did not report completion before the turn ended.';
+    });
+    return chips.length;
 }
 
 function isCommandLikeTool(name: string, args: any): boolean {
@@ -2929,6 +2996,7 @@ function renderToolStart(event: any): void {
         card.id = `tool-${event.toolCallId}`;
         card.dataset.toolName = event.toolName;
         card.dataset.filepath = editFilePath as string;
+        card.dataset.startedAt = String(Date.now());
         const fileName = (editFilePath as string).split('/').pop() ?? editFilePath;
         const actionLabel = event.toolName === 'write' ? 'Write' : 'Edit';
         card.innerHTML = `
@@ -2939,6 +3007,7 @@ function renderToolStart(event: any): void {
             </div>
         `;
         container.appendChild(card);
+        ensureToolTimerLoop();
         scrollToBottom();
         return;
     }
@@ -2962,7 +3031,9 @@ function renderToolStart(event: any): void {
         details.dataset.toolName = event.toolName;
         details.dataset.commandLike = 'true';
         details.dataset.toolInput = input;
+        details.dataset.startedAt = String(Date.now());
         container.appendChild(details);
+        ensureToolTimerLoop();
         scrollToBottom();
         return;
     }
@@ -2970,6 +3041,7 @@ function renderToolStart(event: any): void {
     const card = el('div', `tool-card${isRead ? ' tool-clickable' : ''}`);
     card.id = `tool-${event.toolCallId}`;
     card.dataset.toolName = event.toolName;
+    card.dataset.startedAt = String(Date.now());
     if (isRead && filePath) card.dataset.filepath = filePath;
 
     card.innerHTML = `
@@ -2981,6 +3053,7 @@ function renderToolStart(event: any): void {
     `;
 
     container.appendChild(card);
+    ensureToolTimerLoop();
     bindToolClickable();
     scrollToBottom();
 }

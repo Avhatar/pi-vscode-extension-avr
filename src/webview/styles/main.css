@@ -779,8 +779,23 @@ body[data-mode="panel"] .tab-strip,
     font-weight: 500;
 }
 .tool-status.running { background: rgba(204, 167, 0, 0.15); color: var(--warning-fg); }
+.tool-status.running-stuck {
+    background: rgba(244, 135, 113, 0.18);
+    color: var(--error-fg);
+    animation: tool-stuck-pulse 1.6s ease-in-out infinite;
+    cursor: help;
+}
+@keyframes tool-stuck-pulse {
+    0%, 100% { background: rgba(244, 135, 113, 0.18); }
+    50% { background: rgba(244, 135, 113, 0.34); }
+}
 .tool-status.done { background: rgba(115, 201, 145, 0.15); color: var(--success-fg); }
 .tool-status.error { background: rgba(244, 135, 113, 0.15); color: var(--error-fg); }
+.tool-status.stale {
+    background: var(--badge-bg);
+    color: var(--muted);
+    opacity: 0.9;
+}
 .tool-status.pending { background: var(--badge-bg); color: var(--badge-fg); }
 .tool-status.retried {
     background: rgba(115, 201, 145, 0.15);

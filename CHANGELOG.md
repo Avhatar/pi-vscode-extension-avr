@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-07-10
+
+### Added
+- Running tool cards now show elapsed time (e.g. `running 12s`) that ticks every second while a tool is executing, so it's obvious whether a call is progressing or hung. After 60s the chip switches to a pulsing red "stuck" style with a tooltip pointing at Esc / Abort.
+- If a tool call never reports completion before the turn ends, a warning banner now names the orphaned tools ("N tool calls did not report completion this turn"). Details are also written to the "Pi Code" output channel with per-call elapsed time.
+
 ## [0.30.4] - 2026-07-09
 
 ### Changed
