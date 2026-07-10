@@ -1,7 +1,7 @@
 # Pi Code for VS Code
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
-[![VS Code](https://img.shields.io/badge/VS%20Code-1.100%2B-007ACC.svg?logo=visualstudiocode)](https://code.visualstudio.com/)
+[![VS Code](https://img.shields.io/badge/VS%20Code-1.110%2B-007ACC.svg?logo=visualstudiocode)](https://code.visualstudio.com/)
 
 A visual VS Code wrapper around the [Pi coding agent](https://pi.dev/) — built as a friendly UI for non-engineers and as a smooth landing pad for anyone moving over from Claude Code who wants the same familiar ergonomics, extra quality-of-life features, and the freedom to use any AI model behind the scenes.
 
@@ -27,14 +27,20 @@ Run several agent sessions in parallel. Conversation history, tracked file chang
 ### Tool visibility
 Every tool call (file reads/writes/edits, shell, glob/grep/find, web search, fetch, LSP semantic queries) renders as an expandable card with arguments and results, streamed in real time. A vertical timeline rail connects the icons on the left so it's easy to follow what the agent did across a long turn; hover any icon for a tooltip describing what the tool does.
 
+### Tool selection panel
+The launcher sidebar has a **Tools** panel that lists every tool the active chat exposes to the model, with a checkbox per tool. Unchecking a tool hides it from the model on the next turn. Tools sharing a prefix (`unity_*`, `blueprint_*`, `task_workspace_*`, …) are grouped into collapsible sections with per-group Enable / Disable buttons — one click drops 50+ Unity tools from the prompt when they aren't needed. Named categories (**Pi built-ins**, **Web**, **ToDo**, **MCP**, **Language Server**) sit alongside prefix groups, and a filter box searches both tool names and descriptions. **Copy** / **Paste** buttons serialise the current selection to the clipboard so you can transplant a curated tool set between chats or between VS Code windows. Selection is per-chat and persists across `Reload Window`.
+
 ### Inline diffs and rollback
 File modifications are tracked automatically. Review unified diffs inline or open them in VS Code's native diff editor. Undo a single file or every change at once.
+
+### File Undo View
+Optional always-visible bar above the prompt input that lists every file the agent has changed in the current chat, each row with **Undo** / **Redo** / **Review** buttons for one-click revert or diff-editor inspection. File-edit tracking always runs regardless — this bar just surfaces it up-front so pending changes stay in your eye-line. Per-chat toggle in the launcher sidebar; enable by default for new chats with `pi-code.fileUndoView.defaultEnabled`.
 
 ### Checkpoints
 Every user message creates a checkpoint. Roll the workspace back to any earlier turn, then redo to bring changes back. The conversation history is preserved so you can branch from any point.
 
 ### Plan Mode
-Per-chat toggle in the launcher sidebar (above ToDo) that makes the agent study the task with read-only tools and propose a plan before making any changes. The first message of a task is sent with only `read`, `grep`, `find`, `ls`, and the web/search tools active — the agent analyses the codebase, asks clarifying questions, and presents an approach. Your next reply unlocks the full tool set for execution. After execution, the next prompt restarts the planning cycle. Disabled by default for new chats; flip on with the `pi-code.planMode.defaultEnabled` setting.
+Per-chat toggle in the launcher sidebar (above ToDo) that makes the agent study the task with read-only tools and propose a plan before making any changes. The first message of a task is sent with only `read`, `grep`, `find`, `ls`, and the web/search tools active — the agent analyses the codebase, asks clarifying questions, and presents an approach. When the plan is finalised the agent ends its message with a `<plan-ready/>` marker; the extension detects it, auto-transitions into execution and dispatches a synthetic proceed prompt so the plan flows straight into changes — no need to type "go" yourself. Reply during the plan phase if you want to iterate before execution. After execution, the next prompt restarts the planning cycle. Disabled by default for new chats; flip on with the `pi-code.planMode.defaultEnabled` setting.
 
 ### Language Server tools (opt-in)
 Eight semantic-navigation tools that ask your active language extension instead of guessing from grep: `find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, and `call_hierarchy_incoming` / `call_hierarchy_outgoing`. Each tool returns authoritative `(file, line, column)` positions plus surrounding context, annotates results in external dependency sources (NuGet, cargo registry, `node_modules`) as `[external]`, and accepts either positional or symbol-name addressing. Off by default — enable with `pi-code.lsp.enabled` for projects where semantic accuracy is worth the extra system-prompt footprint (large Unity / Rust / TS codebases with name collisions, partial classes, overloaded methods). Requires a language extension for each file's language; for C# call hierarchy specifically, install **C# Dev Kit** (the OmniSharp-only extension does not implement it).
@@ -132,6 +138,7 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum `@` mention suggestions to show |
 | `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative config file for `@` mention indexing |
 | `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable Plan Mode for new chats by default |
+| `pi-code.fileUndoView.defaultEnabled` | `boolean` | `false` | Show the File Undo View (Undo / Redo / Review bar above the prompt) by default for new chats |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat ToDo for new chats by default |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines for the ToDo tool |
 | `pi-code.lsp.enabled` | `boolean` | `false` | Expose Language Server tools (find_references, goto_definition, hover, etc.) to the agent. Opt-in; requires a language extension per file's language. |

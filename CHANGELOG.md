@@ -7,6 +7,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-07-10
+
 ### Added
 - Plan Mode now supports agent-driven exit from the plan phase. The agent is instructed to end its final plan-phase response with a `<plan-ready/>` marker when the plan is finalised; on detection the extension auto-transitions into the execution phase and dispatches a synthetic "proceed" prompt in the same conversation, so the user no longer has to type "go" manually. The plan itself stays visible in the chat.
 
