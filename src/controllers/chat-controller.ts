@@ -275,6 +275,11 @@ export class ChatController implements vscode.Disposable {
      *  bar above the input). Default for missing entries: `false`. */
     private static readonly FILE_UNDO_VIEW_KEY_PREFIX = 'pi-code.fileUndoViewEnabled.';
 
+    /** Persistence for the per-tab Tools panel denylist. Value is `string[]`
+     *  of tool names to hide from the LLM. `todo` is handled separately
+     *  (see `TODO_ENABLED_KEY_PREFIX`) for backward compat. */
+    private static readonly TOOLS_DISABLED_KEY_PREFIX = 'pi-code.disabledTools.';
+
     /** Wired by the host (extension.ts) to construct a `ChatPanel` for a tab. */
     private _panelOpener?: (tabId: string) => void;
 
@@ -415,7 +420,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     /** Build a snapshot of launcher state (panel tabs + recent sessions). */
-    async computeLauncherState(): Promise<Omit<LauncherState, 'historyCollapsed' | 'todoCollapsed'>> {
+    async computeLauncherState(): Promise<Omit<LauncherState, 'historyCollapsed' | 'todoCollapsed' | 'toolsCollapsed'>> {
         // Track only tabs with a visible editor panel. A bare TabState without
         // a panel is an internal placeholder (e.g. the initial empty tab), not
         // something the user thinks of as open.
@@ -464,6 +469,7 @@ export class ChatController implements vscode.Disposable {
         let planModeEnabled: boolean | undefined;
         let planModeToggleDisabled: boolean | undefined;
         let fileUndoViewEnabled: boolean | undefined;
+        let toolSelection: LauncherState['toolSelection'];
         const activeTab = this._tabs.get(this._activeTabId);
         if (activeTab && this._openPanels.has(activeTab.id)) {
             const state = activeTab.session.todoStore.getState();
@@ -473,11 +479,17 @@ export class ChatController implements vscode.Disposable {
             planModeEnabled = this._isPlanModeEnabledFor(activeTab);
             planModeToggleDisabled = this._isTabBusy(activeTab);
             fileUndoViewEnabled = this._isFileUndoViewEnabledFor(activeTab);
+            toolSelection = {
+                registered: activeTab.session.getRegisteredToolsInfo(),
+                disabled: this._effectiveDisabledTools(activeTab),
+                toggleDisabled: this._isTabBusy(activeTab),
+            };
         }
 
         return {
             tabs, recentSessions, todos, todoEnabled, todoToggleDisabled,
             planModeEnabled, planModeToggleDisabled, fileUndoViewEnabled,
+            toolSelection,
         };
     }
 
@@ -701,18 +713,11 @@ export class ChatController implements vscode.Disposable {
             }),
         );
 
-        // Apply persisted ToDo toggle for this tab. The session is
-        // already initialised at this point, so setTodoVisibility()
-        // takes effect immediately — replay (which fired on
-        // session_start during initialize) has populated the store
-        // with whatever todos survived in the branch.
-        //
-        // Symmetric: also force OFF when persisted is false. The SDK
-        // enables all extension tools by default, so without this the
-        // user's "OFF" preference would be silently ignored on paths
-        // that skip a fresh `initialize()` (panel restore via
-        // `initializeFromPath`, `loadSession`, `newSession`).
-        this._applyPersistedTodo(tab);
+        // Apply the persisted tool selection (ToDo toggle + per-tab
+        // Tools panel denylist, folded into a single `disabled` set).
+        // The session is already initialised at this point, so it
+        // takes effect immediately.
+        this._applyPersistedToolSelection(tab);
 
         // Apply persisted Plan Mode toggle. Same shape as ToDo — the
         // toggle gates the feature; when OFF the agent has full tools
@@ -736,16 +741,6 @@ export class ChatController implements vscode.Disposable {
             .get<boolean>('todo.defaultEnabled', true);
     }
 
-    /** Read persisted ToDo state for `tab` and apply it to the session
-     *  without writing back. Used at subscribe time and after the
-     *  underlying agent session is swapped (`loadSession`, `newSession`)
-     *  — both of those create a session whose initial active-tools list
-     *  is the SDK default (todo ON) and need the user's explicit OFF
-     *  preference re-applied. */
-    private _applyPersistedTodo(tab: TabState): void {
-        tab.session.setTodoVisibility(this._isTodoEnabledFor(tab));
-    }
-
     private _isTodoEnabledFor(tab: TabState): boolean {
         const key = this._todoEnabledKey(tab.session.sessionPath);
         const fallback = this._todoDefaultEnabled();
@@ -756,18 +751,85 @@ export class ChatController implements vscode.Disposable {
         return this._context.workspaceState.get<boolean>(key, fallback);
     }
 
+    // ── Per-tab tool selection ──
+    //
+    // Persistent denylist of tools disabled for this chat. Composed with
+    // the ToDo toggle (which owns `todo` alone for backward compat) into
+    // a single `disabled` set applied via `PiSessionManager.applyToolSelection`.
+    // Rationale: MCP-heavy projects can push 100+ tools into the active set,
+    // diluting `promptGuidelines` and causing the model to miss meta-tools
+    // like `todo`. Per-chat denylist lets the user trim the surface without
+    // changing global settings.
+
+    private _toolsDisabledKey(sessionPath: string | undefined): string | undefined {
+        if (!sessionPath) return undefined;
+        return `${ChatController.TOOLS_DISABLED_KEY_PREFIX}${sessionPath}`;
+    }
+
+    /** Read the persisted disabled-tools list for this tab. Names not
+     *  currently in the registry are still returned — they're preserved
+     *  so a disable sticks if the tool comes back later (e.g. an MCP
+     *  server re-added). */
+    private _getDisabledToolsFor(tab: TabState): string[] {
+        const key = this._toolsDisabledKey(tab.session.sessionPath);
+        if (!key) return [];
+        const stored = this._context.workspaceState.get<unknown>(key, []);
+        return Array.isArray(stored)
+            ? stored.filter((v): v is string => typeof v === 'string' && v.length > 0)
+            : [];
+    }
+
+    private async _setDisabledToolsFor(tab: TabState, disabled: string[]): Promise<void> {
+        const key = this._toolsDisabledKey(tab.session.sessionPath);
+        if (!key) return;
+        const uniq = [...new Set(disabled.filter((t) => typeof t === 'string' && t.length > 0))];
+        await this._context.workspaceState.update(key, uniq);
+    }
+
+    /** The full effective denylist for this tab: everything in the Tools
+     *  panel denylist, PLUS `todo` when the ToDo toggle is OFF. Kept in
+     *  one place so callers can't accidentally forget the ToDo half. */
+    private _effectiveDisabledTools(tab: TabState): string[] {
+        const base = this._getDisabledToolsFor(tab);
+        const todoEnabled = this._isTodoEnabledFor(tab);
+        if (todoEnabled) return base;
+        return base.includes('todo') ? base : [...base, 'todo'];
+    }
+
+    /** Read persisted state (ToDo toggle + Tools panel denylist) and
+     *  apply it to the session. Used at subscribe time and after the
+     *  underlying agent session is swapped (`loadSession`, `newSession`) —
+     *  both of those create a session whose initial active-tools list is
+     *  the SDK default and need the user's explicit selection re-applied. */
+    private _applyPersistedToolSelection(tab: TabState): void {
+        const disabled = this._effectiveDisabledTools(tab);
+        const todoEnabled = this._isTodoEnabledFor(tab);
+        this._outputChannel.appendLine(
+            `[tool apply] tab="${tab.name || tab.id}" todoEnabled=${todoEnabled} ` +
+            `disabled=[${disabled.join(', ')}]`,
+        );
+        tab.session.applyToolSelection(disabled);
+    }
+
+    /** Diagnostic — one line per prompt showing whether `todo` is active for
+     *  this turn. Helps pin down cases where the UI toggle disagrees with the
+     *  actual tool set the model sees. */
+    private _logPromptToolState(tab: TabState, source: 'prompt' | 'queued' | 'steer' | 'followUp'): void {
+        const snap = tab.session.debugSnapshotTools();
+        const uiEnabled = this._isTodoEnabledFor(tab);
+        this._outputChannel.appendLine(
+            `[${source}] tab="${tab.name || tab.id}" ui-toggle=${uiEnabled} ` +
+            `todo-in-active=${snap.hasTodo} todo-registered=${snap.todoRegistered} active-count=${snap.active.length}` +
+            (uiEnabled && !snap.hasTodo ? ' ⚠ UI shows ON but todo is NOT in active tools' : ''),
+        );
+    }
+
     private async _setTodoEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
         const key = this._todoEnabledKey(tab.session.sessionPath);
-        if (!key) {
-            // No session path yet (rare — only for a brand-new tab
-            // before Pi created its session file). Skip persistence
-            // but still apply visibility so the user sees an effect.
-            tab.session.setTodoVisibility(enabled);
-            this._onLauncherStateChanged.fire();
-            return;
+        if (key) {
+            await this._context.workspaceState.update(key, enabled);
         }
-        await this._context.workspaceState.update(key, enabled);
-        tab.session.setTodoVisibility(enabled);
+        this._applyPersistedToolSelection(tab);
         this._onLauncherStateChanged.fire();
     }
 
@@ -779,6 +841,97 @@ export class ChatController implements vscode.Disposable {
         if (!tab) return;
         if (this._isTabBusy(tab)) return;
         await this._setTodoEnabledFor(tab, enabled);
+    }
+
+    /** Public entry — flip a single tool's disabled state via the Tools panel. */
+    async setActiveTabToolDisabled(toolName: string, disabled: boolean): Promise<void> {
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return;
+        if (this._isTabBusy(tab)) return;
+
+        // `todo` has its own persisted flag (existing UX + config default).
+        // Route through the ToDo toggle path so the two views stay in sync.
+        if (toolName === 'todo') {
+            await this._setTodoEnabledFor(tab, !disabled);
+            return;
+        }
+
+        const current = new Set(this._getDisabledToolsFor(tab));
+        if (disabled) current.add(toolName);
+        else current.delete(toolName);
+        await this._setDisabledToolsFor(tab, [...current]);
+        this._applyPersistedToolSelection(tab);
+        this._onLauncherStateChanged.fire();
+    }
+
+    /** Public entry — replace the disabled-tools list wholesale (used by
+     *  the Enable-all / Disable-all buttons and by Paste). */
+    async setActiveTabToolsBulk(disabled: string[]): Promise<void> {
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return;
+        if (this._isTabBusy(tab)) return;
+
+        const filtered = disabled.filter((t) => typeof t === 'string' && t.length > 0);
+        // Split off `todo` and route it through the ToDo toggle so its
+        // dedicated storage stays authoritative for that entry.
+        const wantsTodoDisabled = filtered.includes('todo');
+        const others = filtered.filter((t) => t !== 'todo');
+
+        const todoKey = this._todoEnabledKey(tab.session.sessionPath);
+        if (todoKey) {
+            await this._context.workspaceState.update(todoKey, !wantsTodoDisabled);
+        }
+        await this._setDisabledToolsFor(tab, others);
+        this._applyPersistedToolSelection(tab);
+        this._onLauncherStateChanged.fire();
+    }
+
+    /** Copy the active tab's tool selection as JSON to the system clipboard.
+     *  Format is versioned so a future paste can reject incompatible payloads. */
+    async copyActiveTabToolSelection(): Promise<void> {
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return;
+        const disabled = this._getDisabledToolsFor(tab);
+        const todoEnabled = this._isTodoEnabledFor(tab);
+        const payload = {
+            piCodeToolSelection: {
+                version: 1,
+                todoEnabled,
+                disabled,
+            },
+        };
+        await vscode.env.clipboard.writeText(JSON.stringify(payload, null, 2));
+        vscode.window.setStatusBarMessage('Pi Code: tool selection copied.', 2500);
+    }
+
+    /** Read a tool selection from the system clipboard and apply it to the
+     *  active tab. Silent-fails with a user notice if the clipboard doesn't
+     *  contain our JSON payload. */
+    async pasteActiveTabToolSelection(): Promise<void> {
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return;
+        if (this._isTabBusy(tab)) return;
+
+        const text = await vscode.env.clipboard.readText();
+        let parsed: any;
+        try { parsed = JSON.parse(text); } catch {
+            vscode.window.showWarningMessage('Pi Code: clipboard does not contain a valid tool selection.');
+            return;
+        }
+        const cfg = parsed?.piCodeToolSelection;
+        if (!cfg || typeof cfg !== 'object' || !Array.isArray(cfg.disabled) || typeof cfg.todoEnabled !== 'boolean') {
+            vscode.window.showWarningMessage('Pi Code: clipboard does not contain a valid tool selection.');
+            return;
+        }
+        const others = cfg.disabled.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0 && t !== 'todo');
+        const todoKey = this._todoEnabledKey(tab.session.sessionPath);
+        if (todoKey) {
+            await this._context.workspaceState.update(todoKey, cfg.todoEnabled);
+        }
+        await this._setDisabledToolsFor(tab, others);
+        this._applyPersistedToolSelection(tab);
+        this._onLauncherStateChanged.fire();
+        vscode.window.setStatusBarMessage('Pi Code: tool selection pasted.', 2500);
     }
 
     private _isTabBusy(tab: TabState): boolean {
@@ -1105,6 +1258,7 @@ export class ChatController implements vscode.Disposable {
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
                     this._prepareCacheForRequest(tab);
+                    this._logPromptToolState(tab, 'queued');
                     tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(text));
                 }
             }
@@ -1366,11 +1520,13 @@ export class ChatController implements vscode.Disposable {
                     tab.checkpointManager.startTurn(turnIdx);
                     tab.diffManager.setCurrentTurn(turnIdx);
                     this._prepareCacheForRequest(tab);
+                    this._logPromptToolState(tab, 'prompt');
                     await tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(promptText), msg.images, msg.files);
                     break;
                 }
                 case 'steer':
                     this._prepareCacheForRequest(tab);
+                    this._logPromptToolState(tab, 'steer');
                     await tab.session.steer(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
                     break;
                 case 'queueMessage':
@@ -1395,6 +1551,7 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'followUp':
                     this._prepareCacheForRequest(tab);
+                    this._logPromptToolState(tab, 'followUp');
                     await tab.session.followUp(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
                     break;
                 case 'setCacheMode': {
@@ -1460,7 +1617,7 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'newSession':
                     await tab.session.newSession();
-                    this._applyPersistedTodo(tab);
+                    this._applyPersistedToolSelection(tab);
                     this._applyPersistedPlanMode(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
@@ -1485,7 +1642,7 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'loadSession':
                     await tab.session.loadSession(msg.sessionPath);
-                    this._applyPersistedTodo(tab);
+                    this._applyPersistedToolSelection(tab);
                     this._applyPersistedPlanMode(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();

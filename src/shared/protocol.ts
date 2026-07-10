@@ -265,6 +265,40 @@ export interface TodoSnapshot {
     nextId: number;
 }
 
+/** Snapshot of the tool set for a chat: everything the SDK has registered
+ *  (via `pi-code.allowedTools` + built-ins + extensions) plus the per-chat
+ *  denylist that the user maintains through the Tools panel. */
+export interface RegisteredToolInfo {
+    /** Tool identifier (e.g. `read`, `unity_scene_new`). */
+    name: string;
+    /** Human-readable description — same string the LLM sees in its system
+     *  prompt. May be multi-line and quite long for MCP-heavy tools. */
+    description?: string;
+    /** Where the tool came from: `"builtin"`, `"sdk"`, or a package name
+     *  (e.g. `"pi-web-access"`, `"pi-mcp-adapter"`). Useful when the user
+     *  wants to know why a tool is in their set. */
+    source?: string;
+    /** True when the tool ships with promptGuidelines beyond just the
+     *  description — those guidelines add tokens to every turn while the
+     *  tool is active. Surfaced so the user can see which entries carry
+     *  extra prompt weight. */
+    hasGuidelines?: boolean;
+}
+
+export interface ToolSelectionSnapshot {
+    /** All tools currently registered for this session, sorted by name.
+     *  Includes `todo`. Each entry carries metadata for the tooltip. */
+    registered: RegisteredToolInfo[];
+    /** Tools currently disabled for this chat (subset of `registered.name`,
+     *  but may also contain names not in `registered` — those are preserved
+     *  so the disable sticks if the tool comes back later, e.g. an MCP
+     *  server re-added). */
+    disabled: string[];
+    /** True when the active tab is streaming/compacting and the panel
+     *  toggles should be greyed out. */
+    toggleDisabled: boolean;
+}
+
 export interface LauncherState {
     tabs: LauncherTabInfo[];
     recentSessions: LauncherSessionInfo[];
@@ -296,6 +330,12 @@ export interface LauncherState {
      *  files the agent changed (with Undo/Redo/Review buttons) is
      *  shown above the chat input. */
     fileUndoViewEnabled?: boolean;
+    /** Active tab's tool selection (registered + disabled). Absent when
+     *  no active tab. Drives the Tools panel in the launcher. */
+    toolSelection?: ToolSelectionSnapshot;
+    /** Whether the user has collapsed the Tools panel (UI-only, global
+     *  like `historyCollapsed`). Persisted via globalState. */
+    toolsCollapsed: boolean;
 }
 
 export type LauncherClientMessage =
@@ -310,6 +350,11 @@ export type LauncherClientMessage =
     | { type: 'setTodoCollapsed'; collapsed: boolean }
     | { type: 'setPlanModeEnabled'; enabled: boolean }
     | { type: 'setFileUndoViewEnabled'; enabled: boolean }
+    | { type: 'setToolDisabled'; toolName: string; disabled: boolean }
+    | { type: 'setToolsBulk'; disabled: string[] }
+    | { type: 'setToolsCollapsed'; collapsed: boolean }
+    | { type: 'copyToolSelection' }
+    | { type: 'pasteToolSelection' }
     | { type: 'openSettings' };
 
 export type LauncherServerMessage =

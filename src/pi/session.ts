@@ -111,25 +111,97 @@ export class PiSessionManager {
      *
      * Idempotent — passing the current visibility is a no-op.
      */
-    setTodoVisibility(visible: boolean): void {
+    /** All tools currently in the session registry (anything that can be
+     *  activated). Includes built-ins, bundled Pi packages, and dynamically
+     *  registered extension tools (`todo`, MCP-adapted tools, LSP tools).
+     *  Sorted alphabetically for stable UI rendering. */
+    getRegisteredToolNames(): string[] {
         const session = this._session;
-        if (!session) return;
-        const active = session.getActiveToolNames();
-        const present = active.includes('todo');
-        if (visible === present) return;
-        const next = visible
-            ? [...active, 'todo']
-            : active.filter((name) => name !== 'todo');
-        session.setActiveToolsByName(next);
-        // If Plan Mode is active, the saved full tool set must stay in
-        // sync so restoring later reflects the user's ToDo preference.
-        if (this._planModeActive && this._savedToolNames.length > 0) {
-            if (visible && !this._savedToolNames.includes('todo')) {
-                this._savedToolNames = [...this._savedToolNames, 'todo'];
-            } else if (!visible) {
-                this._savedToolNames = this._savedToolNames.filter((n) => n !== 'todo');
-            }
+        if (!session) return [];
+        return session.getAllTools().map((t) => t.name).sort();
+    }
+
+    /** Registered-tool metadata: `name`, `description` (the same one shown to
+     *  the LLM), source label from `sourceInfo`, and a `hasGuidelines` flag
+     *  when the tool ships with promptGuidelines beyond the description.
+     *  Used to populate tooltips in the Tools panel. Sorted by name. */
+    getRegisteredToolsInfo(): Array<{
+        name: string;
+        description?: string;
+        source?: string;
+        hasGuidelines?: boolean;
+    }> {
+        const session = this._session;
+        if (!session) return [];
+        return session.getAllTools()
+            .map((t: any) => {
+                const guidelines = t.promptGuidelines;
+                const source: string | undefined = t.sourceInfo?.source;
+                return {
+                    name: String(t.name),
+                    description: typeof t.description === 'string' ? t.description : undefined,
+                    source,
+                    hasGuidelines: Array.isArray(guidelines) && guidelines.length > 0,
+                };
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    /**
+     * Apply a per-tab denylist to the active-tools set. Active tools become
+     * `registered - disabled` (case-sensitive name match). Names in `disabled`
+     * that are not currently in the registry are silently skipped — but the
+     * caller should still store them so the disable is preserved if the tool
+     * comes back later (e.g. an MCP server re-added).
+     *
+     * When Plan Mode is active, updates the saved full-tool set so restoring
+     * later reflects the new selection, and applies the read-only
+     * intersection to the current active set instead. Idempotent.
+     */
+    applyToolSelection(disabled: readonly string[]): void {
+        const session = this._session;
+        if (!session) {
+            this._outputChannel.appendLine('[tool selection] session=<none> — skipped');
+            return;
         }
+        const registered = session.getAllTools().map((t) => t.name);
+        const disabledSet = new Set(disabled);
+        const fullActive = registered.filter((t) => !disabledSet.has(t));
+
+        if (this._planModeActive) {
+            // Plan Mode restricts to a read-only subset; the saved full set
+            // (restored when Plan Mode turns off) must reflect the new
+            // selection. Intersect the read-only set with `fullActive` so
+            // disabled tools don't sneak back in via the read-only list.
+            this._savedToolNames = fullActive;
+            const readOnly = [...PiSessionManager.PLAN_MODE_READONLY_TOOLS]
+                .filter((t) => fullActive.includes(t));
+            session.setActiveToolsByName(readOnly);
+            this._outputChannel.appendLine(
+                `[tool selection] plan-mode=on disabled-count=${disabledSet.size} ` +
+                `full-active-count=${fullActive.length} applied-active=${readOnly.length}`,
+            );
+        } else {
+            session.setActiveToolsByName(fullActive);
+            const after = session.getActiveToolNames();
+            this._outputChannel.appendLine(
+                `[tool selection] disabled-count=${disabledSet.size} ` +
+                `registered=${registered.length} active-after=${after.length}`,
+            );
+        }
+    }
+
+    /** Diagnostic helper — snapshot of the current active-tool set, exposed for
+     *  the controller to log at prompt time and after persisted-toggle apply. */
+    debugSnapshotTools(): { active: string[]; hasTodo: boolean; todoRegistered: boolean } {
+        const session = this._session;
+        if (!session) return { active: [], hasTodo: false, todoRegistered: false };
+        const active = session.getActiveToolNames();
+        return {
+            active,
+            hasTodo: active.includes('todo'),
+            todoRegistered: session.getAllTools().some((t) => t.name === 'todo'),
+        };
     }
 
     // ── Plan Mode ──

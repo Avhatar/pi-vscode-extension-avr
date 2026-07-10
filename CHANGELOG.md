@@ -7,6 +7,41 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.30.4] - 2026-07-09
+
+### Changed
+- Tools panel demotes single-member categories into **Other** instead of showing them as their own top-level sections. Previously a category with just one tool (e.g. **ToDo** or **MCP**, when they're the only member registered) got its own heading + collapse chevron + Enable/Disable buttons — overkill for a single checkbox. Now the same "≥2 members required" rule that already applied to prefix groups applies to named categories too, so tiny sections consolidate into the shared Other bucket at the bottom.
+
+## [0.30.3] - 2026-07-09
+
+### Changed
+- Tools panel now categorizes previously-ungrouped tools into named sections instead of a flat list: **Pi built-ins** (`read`, `bash`, `edit`, `write`), **Web** (`web_search`, `fetch_content`, `get_search_content`), **ToDo** (`todo`), **MCP** (`mcp`), **Language Server** (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_incoming`, `call_hierarchy_outgoing`). Each category is collapsible with per-category Enable / Disable buttons, mirroring the prefix-based groups (`unity_*`, `blueprint_*`, …). Anything not matching a category and not sharing a prefix with another tool lands in a new **Other** section at the bottom.
+- Named categories carry a subtle blue left-accent stripe so the curated set reads distinctly from the auto-derived prefix groups. Category labels are rendered as human text (sentence case) while prefix groups keep their monospaced identifier styling (e.g. `unity`).
+
+## [0.30.2] - 2026-07-09
+
+### Fixed
+- Tools panel no longer scrolls back to the top after every checkbox click. The launcher re-render (triggered by the host state push after a toggle) now preserves the tools body's scroll position and, if the filter box was focused, restores focus + cursor selection.
+
+### Changed
+- Tools panel now uses the same framed-box treatment as ToDo, Plan Mode, and History (border + rounded corners + subtle section-header background) so all four side-by-side sections read as siblings.
+
+## [0.30.1] - 2026-07-09
+
+### Added
+- Hover tooltips in the Tools panel — each row's title carries the tool's `name`, source label (`builtin` / `sdk` / package name like `pi-web-access`), a `§` marker + explanation when the tool ships `promptGuidelines` (extra tokens per turn), the full description string the LLM sees in its system prompt (up to 600 chars), and a one-line hint about what checking / unchecking the row will do. Group headings show a sample of up to three descriptions from the group so you can see at a glance whether the whole prefix is worth keeping active.
+- Filter box in the Tools panel now matches against tool descriptions in addition to names — typing "prefab" finds every Unity tool whose description mentions prefabs even when the name doesn't contain the word.
+
+## [0.30.0] - 2026-07-09
+
+### Added
+- **Tools panel** in the launcher sidebar under History. Lists every tool registered for the active chat with a checkbox per tool; unchecking hides the tool from the model on the next turn. Tools sharing a prefix (`unity_*`, `blueprint_*`, `task_workspace_*`, …) are grouped into collapsible sections with per-group "Enable" / "Disable" buttons — one click removes 50+ Unity tools from the prompt when they aren't needed. Also has a filter box and top-level "Enable all" / "Disable all". Selection is per-chat, persisted, and survives ReloadWindow. When the active chat is streaming, the panel is greyed out (matches the ToDo / Plan Mode toggles).
+- **Copy / Paste tool selection** buttons in the Tools panel heading — Copy writes the current chat's tool selection to the system clipboard as versioned JSON, Paste applies a previously copied selection to the active chat. Works between chats and between VS Code windows.
+- Diagnostic log lines in the "Pi Code" output channel: `[tool apply]` on every persisted-state application (subscribe / newSession / loadSession / restore), `[tool selection]` on every effective `setActiveToolsByName` call, and `[prompt|steer|followUp|queued]` before every model turn with a warning if the UI toggle disagrees with the actual active-tools set. Makes tool-visibility mismatches (e.g. "ToDo toggle shows ON but the model isn't calling it") visible without a debugger.
+
+### Changed
+- Per-chat ToDo toggle is now folded into the same denylist storage as the Tools panel — toggling ToDo OFF via its dedicated switch is equivalent to unchecking `todo` in the Tools panel, and vice versa. Existing per-chat ToDo state is preserved (the ToDo toggle still uses its historical storage key for the `todo` entry).
+
 ## [0.29.2] - 2026-07-09
 
 ### Added

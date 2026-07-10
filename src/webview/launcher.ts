@@ -1,6 +1,7 @@
 import type {
     LauncherClientMessage, LauncherServerMessage, LauncherState,
     LauncherSessionInfo, TaskInfo, TaskStatus, TodoSnapshot,
+    RegisteredToolInfo, ToolSelectionSnapshot,
 } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
@@ -18,7 +19,13 @@ let currentState: LauncherState = {
     recentSessions: [],
     historyCollapsed: true,
     todoCollapsed: false,
+    toolsCollapsed: true,
 };
+
+// UI-local state for the Tools panel (search filter + per-group collapse).
+// Not persisted — resets on window reload, but survives launcher re-renders.
+let toolsSearch = '';
+const toolGroupsCollapsed = new Map<string, boolean>();
 
 window.addEventListener('message', (event) => {
     const msg = event.data as LauncherServerMessage;
@@ -64,7 +71,52 @@ function formatRelative(ts?: number): string {
 
 // ── Render ──
 
+/** Snapshot of transient UI state that `render()` rebuilds from scratch
+ *  every call (scroll positions, focused input, cursor). Captured before
+ *  wiping the DOM and restored on the fresh tree so a state push from the
+ *  host doesn't yank the user's scroll position or steal focus mid-typing. */
+interface RenderPreservation {
+    toolsBodyScrollTop: number;
+    toolsSearchFocused: boolean;
+    toolsSearchSelectionStart: number | null;
+    toolsSearchSelectionEnd: number | null;
+}
+
+function captureRenderState(): RenderPreservation {
+    const root = document.getElementById('launcher');
+    const body = root?.querySelector('.tools-body') as HTMLElement | null;
+    const search = root?.querySelector('.tools-search') as HTMLInputElement | null;
+    const searchFocused = search !== null && document.activeElement === search;
+    return {
+        toolsBodyScrollTop: body?.scrollTop ?? 0,
+        toolsSearchFocused: searchFocused,
+        toolsSearchSelectionStart: searchFocused ? search!.selectionStart : null,
+        toolsSearchSelectionEnd: searchFocused ? search!.selectionEnd : null,
+    };
+}
+
+function restoreRenderState(prev: RenderPreservation): void {
+    const root = document.getElementById('launcher');
+    if (!root) return;
+    const body = root.querySelector('.tools-body') as HTMLElement | null;
+    if (body && prev.toolsBodyScrollTop > 0) {
+        body.scrollTop = prev.toolsBodyScrollTop;
+    }
+    if (prev.toolsSearchFocused) {
+        const search = root.querySelector('.tools-search') as HTMLInputElement | null;
+        if (search) {
+            search.focus();
+            if (prev.toolsSearchSelectionStart !== null && prev.toolsSearchSelectionEnd !== null) {
+                try { search.setSelectionRange(prev.toolsSearchSelectionStart, prev.toolsSearchSelectionEnd); }
+                catch { /* some input types don't support setSelectionRange */ }
+            }
+        }
+    }
+}
+
 function render(): void {
+    const preserved = captureRenderState();
+
     const root = document.getElementById('launcher')!;
     root.innerHTML = '';
 
@@ -76,6 +128,10 @@ function render(): void {
     const todos = renderTodos();
     if (todos) root.appendChild(todos);
     root.appendChild(renderRecentSessions());
+    const tools = renderTools();
+    if (tools) root.appendChild(tools);
+
+    restoreRenderState(preserved);
 }
 
 function renderToolbar(): HTMLElement {
@@ -486,6 +542,412 @@ function renderSessionRow(s: LauncherSessionInfo): HTMLElement {
     });
 
     return row;
+}
+
+// ── Tools panel ──
+//
+// Under History. Lists every tool registered for the active chat with a
+// checkbox to toggle it on/off. Grouped by shared prefix so a project with
+// 100+ MCP tools (unity_*, blueprint_*, ...) stays browseable. Copy/Paste
+// buttons in the heading move the whole selection between chats/windows
+// via the system clipboard.
+
+function setToolsCollapsed(collapsed: boolean): void {
+    currentState = { ...currentState, toolsCollapsed: collapsed };
+    render();
+    vscode.postMessage({ type: 'setToolsCollapsed', collapsed });
+}
+
+/** Split a tool name into (group, rest). Group is the prefix up to the
+ *  first `_` or `-` (whichever comes first). Bare names without a
+ *  separator have `group = ''` and land in the ungrouped bucket. */
+function toolGroupOf(name: string): string {
+    const under = name.indexOf('_');
+    const dash = name.indexOf('-');
+    let idx = -1;
+    if (under >= 0 && dash >= 0) idx = Math.min(under, dash);
+    else idx = Math.max(under, dash);
+    if (idx <= 0) return '';
+    return name.slice(0, idx);
+}
+
+interface ToolGroup {
+    /** Machine key used for collapse state and heading title. */
+    key: string;
+    /** Human-readable heading. Same as `key` for prefix groups. */
+    label: string;
+    /** How this group was derived — affects heading tooltip wording. */
+    kind: 'known' | 'prefix' | 'other';
+    tools: RegisteredToolInfo[];
+    disabledCount: number;
+}
+
+/** Human-readable categorization of tools that don't share a naming prefix.
+ *  Ordered — the first match wins, and groups appear in this order at the
+ *  top of the panel. Anything not in this list AND without a shared prefix
+ *  falls into "Other". */
+const KNOWN_TOOL_CATEGORIES: Array<{ key: string; label: string; tools: readonly string[] }> = [
+    { key: 'category-pi', label: 'Pi built-ins',
+        tools: ['read', 'bash', 'edit', 'write'] },
+    { key: 'category-web', label: 'Web',
+        tools: ['web_search', 'fetch_content', 'get_search_content'] },
+    { key: 'category-todo', label: 'ToDo',
+        tools: ['todo'] },
+    { key: 'category-mcp', label: 'MCP',
+        tools: ['mcp'] },
+    { key: 'category-lsp', label: 'Language Server',
+        tools: [
+            'find_references', 'document_symbols', 'goto_definition', 'hover',
+            'find_implementations', 'type_definition', 'workspace_symbols',
+            'call_hierarchy_incoming', 'call_hierarchy_outgoing',
+        ] },
+];
+
+function buildToolGroups(sel: ToolSelectionSnapshot): ToolGroup[] {
+    const disabledSet = new Set(sel.disabled);
+    const assigned = new Set<string>();
+
+    // Pass 1 — known categories (top of the list, defined order). Categories
+    // with fewer than 2 registered members get demoted to `leftovers` so
+    // tiny single-tool sections (e.g. ToDo alone, MCP alone) collapse into
+    // the shared Other bucket at the bottom instead of cluttering the top.
+    const knownGroups: ToolGroup[] = [];
+    const knownLeftovers: RegisteredToolInfo[] = [];
+    const byName = new Map(sel.registered.map((t) => [t.name, t]));
+    for (const cat of KNOWN_TOOL_CATEGORIES) {
+        const tools: RegisteredToolInfo[] = [];
+        for (const name of cat.tools) {
+            const t = byName.get(name);
+            if (t) tools.push(t);
+        }
+        if (tools.length === 0) continue;
+        for (const t of tools) assigned.add(t.name);
+        if (tools.length < 2) {
+            knownLeftovers.push(...tools);
+            continue;
+        }
+        tools.sort((a, b) => a.name.localeCompare(b.name));
+        knownGroups.push({
+            key: cat.key,
+            label: cat.label,
+            kind: 'known',
+            tools,
+            disabledCount: tools.filter((t) => disabledSet.has(t.name)).length,
+        });
+    }
+
+    // Pass 2 — shared-prefix groups for whatever remains (unity_*, blueprint_*, …).
+    const buckets = new Map<string, RegisteredToolInfo[]>();
+    for (const info of sel.registered) {
+        if (assigned.has(info.name)) continue;
+        const g = toolGroupOf(info.name);
+        const list = buckets.get(g) ?? [];
+        list.push(info);
+        buckets.set(g, list);
+    }
+    const leftovers: RegisteredToolInfo[] = [
+        ...knownLeftovers,
+        ...(buckets.get('') ?? []),
+    ];
+    const prefixGroups: ToolGroup[] = [];
+    for (const [prefix, tools] of buckets) {
+        if (prefix === '') continue;
+        if (tools.length < 2) {
+            // Single-member prefix "groups" become part of Other; a section
+            // of one is more noise than help.
+            leftovers.push(...tools);
+            continue;
+        }
+        tools.sort((a, b) => a.name.localeCompare(b.name));
+        prefixGroups.push({
+            key: `prefix-${prefix}`,
+            label: prefix,
+            kind: 'prefix',
+            tools,
+            disabledCount: tools.filter((t) => disabledSet.has(t.name)).length,
+        });
+    }
+    prefixGroups.sort((a, b) => a.label.localeCompare(b.label));
+
+    const groups: ToolGroup[] = [...knownGroups, ...prefixGroups];
+    if (leftovers.length > 0) {
+        leftovers.sort((a, b) => a.name.localeCompare(b.name));
+        groups.push({
+            key: 'category-other',
+            label: 'Other',
+            kind: 'other',
+            tools: leftovers,
+            disabledCount: leftovers.filter((t) => disabledSet.has(t.name)).length,
+        });
+    }
+    return groups;
+}
+
+/** Build the multi-line title string shown on hover. Keeps the description
+ *  (first ~600 chars) plus a source label and guidelines hint. Native
+ *  `title` renders newlines fine in most VS Code themes. */
+function toolTooltip(info: RegisteredToolInfo, checked: boolean): string {
+    const parts: string[] = [info.name];
+    if (info.source) parts.push(`Source: ${info.source}`);
+    if (info.hasGuidelines) parts.push('Ships extra promptGuidelines (adds tokens per turn while active).');
+    if (info.description) {
+        const desc = info.description.length > 600
+            ? info.description.slice(0, 600).trimEnd() + '…'
+            : info.description;
+        parts.push('', desc);
+    }
+    parts.push('', checked
+        ? `Uncheck to hide "${info.name}" from the model on the next turn.`
+        : `Check to expose "${info.name}" to the model again.`);
+    return parts.join('\n');
+}
+
+function renderTools(): HTMLElement | undefined {
+    const sel = currentState.toolSelection;
+    if (!sel) return undefined;
+
+    const collapsed = currentState.toolsCollapsed === true;
+    const disabledSet = new Set(sel.disabled);
+    const enabledCount = sel.registered.filter((t) => !disabledSet.has(t.name)).length;
+    const allNames = sel.registered.map((t) => t.name);
+
+    const section = el('div', 'section tools-section');
+
+    const heading = el('button', 'section-heading section-heading-button tools-heading');
+    heading.type = 'button';
+    heading.setAttribute('aria-expanded', String(!collapsed));
+    heading.title = (collapsed ? 'Expand Tools' : 'Collapse Tools') +
+        ' — Choose which tools the agent can call in this chat. Fewer tools = clearer prompt for the model. Selection is per-chat; use Copy/Paste to move it between chats.';
+    heading.appendChild(el('span', 'section-chevron', collapsed ? '▶' : '▼'));
+    heading.appendChild(el('span', 'section-title', 'Tools'));
+    heading.appendChild(el('span', 'section-count', `${enabledCount}/${sel.registered.length}`));
+    heading.appendChild(renderToolsCopyButton());
+    heading.appendChild(renderToolsPasteButton(sel.toggleDisabled));
+    heading.addEventListener('click', () => setToolsCollapsed(!collapsed));
+    section.appendChild(heading);
+
+    if (collapsed) return section;
+
+    const controls = el('div', 'tools-controls');
+    controls.appendChild(renderToolsBulkButton('Enable all', [], sel.toggleDisabled));
+    controls.appendChild(renderToolsBulkButton('Disable all', allNames, sel.toggleDisabled));
+
+    const searchInput = el('input', 'tools-search') as HTMLInputElement;
+    searchInput.type = 'search';
+    searchInput.placeholder = 'Filter tools…';
+    searchInput.value = toolsSearch;
+    searchInput.addEventListener('input', () => {
+        toolsSearch = searchInput.value;
+        // Re-render only the tools body; a full render would steal focus.
+        const body = section.querySelector('.tools-body');
+        if (body) {
+            const next = renderToolsBody(sel);
+            body.replaceWith(next);
+        }
+    });
+    controls.appendChild(searchInput);
+    section.appendChild(controls);
+
+    section.appendChild(renderToolsBody(sel));
+    return section;
+}
+
+function renderToolsBody(sel: ToolSelectionSnapshot): HTMLElement {
+    const body = el('div', 'tools-body');
+    if (sel.registered.length === 0) {
+        body.appendChild(el('div', 'empty', 'No tools registered for this chat.'));
+        return body;
+    }
+
+    const filter = toolsSearch.trim().toLowerCase();
+    const groups = buildToolGroups(sel);
+    const disabledSet = new Set(sel.disabled);
+    let anyRendered = false;
+
+    for (const group of groups) {
+        const matching = filter
+            ? group.tools.filter((t) =>
+                t.name.toLowerCase().includes(filter)
+                || (t.description ?? '').toLowerCase().includes(filter))
+            : group.tools;
+        if (matching.length === 0) continue;
+
+        const groupCollapsed = toolGroupsCollapsed.get(group.key) === true;
+        const groupHeading = el('div', `tools-group-heading tools-group-heading-${group.kind}`);
+        // Group tooltip: prefix line describing what the group is, then up
+        // to 3 tool descriptions as a preview.
+        const headerLine = group.kind === 'prefix'
+            ? `Prefix "${group.label}_*" — ${group.tools.length} tool${group.tools.length === 1 ? '' : 's'}`
+            : group.kind === 'known'
+                ? `Category: ${group.label} — ${group.tools.length} tool${group.tools.length === 1 ? '' : 's'}`
+                : `Uncategorized — ${group.tools.length} tool${group.tools.length === 1 ? '' : 's'}`;
+        const groupSample = group.tools.slice(0, 3)
+            .map((t) => t.description ? `${t.name}: ${t.description.split(/\r?\n/)[0].slice(0, 120)}` : t.name)
+            .join('\n');
+        const groupExtra = group.tools.length > 3 ? `\n… and ${group.tools.length - 3} more` : '';
+        groupHeading.title = `${headerLine}\n\n${groupSample}${groupExtra}`;
+
+        const chevron = el('span', 'tools-group-chevron', groupCollapsed ? '▶' : '▼');
+        chevron.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toolGroupsCollapsed.set(group.key, !groupCollapsed);
+            render();
+        });
+        groupHeading.appendChild(chevron);
+
+        // Category headings use their human label; prefix groups render the
+        // prefix in monospace so `unity_*` reads as an identifier.
+        const nameEl = el('span',
+            group.kind === 'prefix' ? 'tools-group-name tools-group-name-prefix' : 'tools-group-name',
+            group.label);
+        groupHeading.appendChild(nameEl);
+
+        const groupCount = el('span', 'tools-group-count',
+            `${group.tools.length - group.disabledCount}/${group.tools.length}`);
+        groupHeading.appendChild(groupCount);
+
+        const groupNames = group.tools.map((t) => t.name);
+        const enableAll = renderToolsGroupAction('Enable', group.label, false, groupNames, sel.toggleDisabled);
+        const disableAll = renderToolsGroupAction('Disable', group.label, true, groupNames, sel.toggleDisabled);
+        groupHeading.appendChild(enableAll);
+        groupHeading.appendChild(disableAll);
+
+        body.appendChild(groupHeading);
+
+        if (!groupCollapsed) {
+            const list = el('div', 'tools-list tools-list-grouped');
+            for (const info of matching) {
+                list.appendChild(renderToolRow(info, !disabledSet.has(info.name), sel.toggleDisabled));
+            }
+            body.appendChild(list);
+        }
+        anyRendered = true;
+    }
+
+    if (!anyRendered) {
+        body.appendChild(el('div', 'empty', 'No tools match the filter.'));
+    }
+    return body;
+}
+
+function renderToolRow(info: RegisteredToolInfo, enabled: boolean, toggleDisabled: boolean): HTMLElement {
+    const row = el('label', `tool-row${toggleDisabled ? ' tool-row-disabled' : ''}`);
+    row.title = toolTooltip(info, enabled);
+
+    const input = el('input', 'tool-row-checkbox') as HTMLInputElement;
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.disabled = toggleDisabled;
+    input.addEventListener('change', () => {
+        if (toggleDisabled) { input.checked = enabled; return; }
+        vscode.postMessage({ type: 'setToolDisabled', toolName: info.name, disabled: !input.checked });
+    });
+    row.appendChild(input);
+
+    row.appendChild(el('span', 'tool-row-name', info.name));
+    if (info.hasGuidelines) {
+        // A tiny marker so the user can see which tools carry extra prompt
+        // weight (promptGuidelines add tokens every turn while active).
+        const marker = el('span', 'tool-row-guideline-marker', '§');
+        marker.title = 'Ships extra promptGuidelines — these tokens are added to every turn while this tool is active.';
+        row.appendChild(marker);
+    }
+    return row;
+}
+
+function renderToolsBulkButton(label: string, disabled: string[], toggleDisabled: boolean): HTMLElement {
+    const btn = el('button', `tools-bulk-btn${toggleDisabled ? ' tools-bulk-btn-disabled' : ''}`, label);
+    btn.type = 'button';
+    btn.title = toggleDisabled
+        ? 'Wait for the agent to finish'
+        : label === 'Enable all'
+            ? 'Enable every registered tool for this chat'
+            : 'Disable every registered tool for this chat';
+    btn.disabled = toggleDisabled;
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (toggleDisabled) return;
+        vscode.postMessage({ type: 'setToolsBulk', disabled });
+    });
+    return btn;
+}
+
+function renderToolsGroupAction(
+    label: string,
+    prefix: string,
+    disable: boolean,
+    groupToolNames: string[],
+    toggleDisabled: boolean,
+): HTMLElement {
+    const btn = el('button', `tools-group-action${toggleDisabled ? ' tools-group-action-disabled' : ''}`, label);
+    btn.type = 'button';
+    btn.disabled = toggleDisabled;
+    btn.title = toggleDisabled
+        ? 'Wait for the agent to finish'
+        : `${label} all "${prefix}_*" tools`;
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (toggleDisabled) return;
+        const currentDisabled = new Set(currentState.toolSelection?.disabled ?? []);
+        for (const t of groupToolNames) {
+            if (disable) currentDisabled.add(t);
+            else currentDisabled.delete(t);
+        }
+        vscode.postMessage({ type: 'setToolsBulk', disabled: [...currentDisabled] });
+    });
+    return btn;
+}
+
+function renderToolsCopyButton(): HTMLElement {
+    const btn = el('span', 'tools-action-btn');
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.title = 'Copy this chat\'s tool selection to clipboard';
+    btn.setAttribute('aria-label', 'Copy tool selection');
+    btn.innerHTML =
+        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<rect x="4" y="5" width="9" height="9" rx="1.2"/>'
+        + '<path d="M6.5 5V3.2a1 1 0 0 1 1-1H12a1 1 0 0 1 1 1V10"/>'
+        + '</svg>';
+    const invoke = (e: Event): void => {
+        e.stopPropagation();
+        btn.classList.add('tools-action-btn-flash');
+        setTimeout(() => btn.classList.remove('tools-action-btn-flash'), 700);
+        vscode.postMessage({ type: 'copyToolSelection' });
+    };
+    btn.addEventListener('click', invoke);
+    btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); invoke(e); }
+    });
+    return btn;
+}
+
+function renderToolsPasteButton(disabled: boolean): HTMLElement {
+    const btn = el('span', `tools-action-btn${disabled ? ' tools-action-btn-disabled' : ''}`);
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', disabled ? '-1' : '0');
+    btn.title = disabled
+        ? 'Wait for the agent to finish'
+        : 'Paste tool selection from clipboard';
+    btn.setAttribute('aria-label', 'Paste tool selection');
+    btn.innerHTML =
+        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<rect x="4" y="3.5" width="8" height="10.5" rx="1.2"/>'
+        + '<path d="M6 3.5V2.6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v0.9"/>'
+        + '<path d="M6 8.5h4M6 11h3"/>'
+        + '</svg>';
+    const invoke = (e: Event): void => {
+        e.stopPropagation();
+        if (disabled) return;
+        btn.classList.add('tools-action-btn-flash');
+        setTimeout(() => btn.classList.remove('tools-action-btn-flash'), 700);
+        vscode.postMessage({ type: 'pasteToolSelection' });
+    };
+    btn.addEventListener('click', invoke);
+    btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); invoke(e); }
+    });
+    return btn;
 }
 
 // Initial render in case message arrives before DOMContentLoaded fires.

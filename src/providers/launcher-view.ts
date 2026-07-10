@@ -10,6 +10,7 @@ import { ChatController } from '../controllers/chat-controller';
 export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposable {
     private static readonly HISTORY_COLLAPSED_KEY = 'pi-code.launcher.historyCollapsed';
     private static readonly TODO_COLLAPSED_KEY = 'pi-code.launcher.todoCollapsed';
+    private static readonly TOOLS_COLLAPSED_KEY = 'pi-code.launcher.toolsCollapsed';
 
     private _view?: vscode.WebviewView;
     private _extensionUri: vscode.Uri;
@@ -101,6 +102,22 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                 case 'setFileUndoViewEnabled':
                     await this._controller.setActiveTabFileUndoViewEnabled(msg.enabled);
                     break;
+                case 'setToolDisabled':
+                    await this._controller.setActiveTabToolDisabled(msg.toolName, msg.disabled);
+                    break;
+                case 'setToolsBulk':
+                    await this._controller.setActiveTabToolsBulk(msg.disabled);
+                    break;
+                case 'setToolsCollapsed':
+                    await this._globalState.update(LauncherView.TOOLS_COLLAPSED_KEY, msg.collapsed);
+                    await this._sendState();
+                    break;
+                case 'copyToolSelection':
+                    await this._controller.copyActiveTabToolSelection();
+                    break;
+                case 'pasteToolSelection':
+                    await this._controller.pasteActiveTabToolSelection();
+                    break;
                 case 'openSettings':
                     vscode.commands.executeCommand('pi-code.openSettings');
                     break;
@@ -120,6 +137,7 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                 ...state,
                 historyCollapsed: this._globalState.get<boolean>(LauncherView.HISTORY_COLLAPSED_KEY, true),
                 todoCollapsed: this._globalState.get<boolean>(LauncherView.TODO_COLLAPSED_KEY, false),
+                toolsCollapsed: this._globalState.get<boolean>(LauncherView.TOOLS_COLLAPSED_KEY, true),
             },
         });
     }
