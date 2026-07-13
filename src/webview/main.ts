@@ -1700,7 +1700,7 @@ function renderInlineFileChange(change: FileChangeInfo): void {
     if (loadingCard) {
         loadingCard.replaceWith(card);
     } else {
-        container.appendChild(card);
+        insertIntoStreamingContainer(card);
     }
 
     bindDiffButtons();
@@ -2186,7 +2186,7 @@ function showPreparingPlaceholder(labelText = 'Preparing next moves...'): void {
     label.textContent = labelText;
     ph.appendChild(spinner);
     ph.appendChild(label);
-    container.appendChild(ph);
+    insertIntoStreamingContainer(ph);
     scrollToBottom();
 }
 
@@ -2199,28 +2199,61 @@ function ensurePreparingPlaceholder(): void {
     }
 }
 
-function renderStreamingContent(): void {
+// The "answer draft" is a persistent DOM node pinned to the bottom of
+// `#streaming-message`. It holds the streamed assistant thinking + text of the
+// *current* in-flight message. Unlike the rest of the streaming container, it
+// survives mid-turn wipes triggered by `updateStreamingUI()` on every
+// `stateSync`, so the streamed answer text does not flicker between the live
+// stream and the finalized transcript position. Tool cards, preparing
+// placeholders and diff cards are inserted *before* the draft so the visual
+// order remains: tools + thinking → answer at the bottom.
+function ensureAnswerDraft(): HTMLElement | null {
+    const container = document.getElementById('streaming-message');
+    if (!container) return null;
+    let draft = document.getElementById('answer-draft');
+    if (!draft) {
+        draft = document.createElement('div');
+        draft.id = 'answer-draft';
+        draft.className = 'message message-assistant answer-draft';
+        draft.style.display = 'none';
+        draft.innerHTML = `
+            <details class="thinking-block active" id="streaming-thinking" style="display:none">
+                <summary class="thinking-summary">
+                    <span class="thinking-indicator" aria-hidden="true" title="The agent is reasoning before its next move. Click the row to expand the thought."><img class="thinking-indicator-icon" src="${iconsBaseUri}/thinking.png" alt=""></span>
+                    <span class="thinking-label">Thinking...</span>
+                    <span class="thinking-preview"></span>
+                    <span class="thinking-chevron">&#9656;</span>
+                </summary>
+                <div class="thinking-content"></div>
+            </details>
+            <div class="message-content" id="streaming-text"></div>
+        `;
+        container.appendChild(draft);
+    } else if (container.lastElementChild !== draft) {
+        container.appendChild(draft);
+    }
+    return draft;
+}
+
+function insertIntoStreamingContainer(node: HTMLElement): void {
     const container = document.getElementById('streaming-message');
     if (!container) return;
+    const draft = document.getElementById('answer-draft');
+    if (draft && draft.parentElement === container) {
+        container.insertBefore(node, draft);
+    } else {
+        container.appendChild(node);
+    }
+}
 
-    if (!state.streamingText && !state.streamingThinking) return;
-    removePreparingPlaceholder();
+function renderStreamingContent(): void {
+    const draft = ensureAnswerDraft();
+    if (!draft) return;
 
-    if (!container.querySelector('.message')) {
-        container.innerHTML = `
-            <div class="message message-assistant">
-                <details class="thinking-block active" id="streaming-thinking" style="display:none">
-                    <summary class="thinking-summary">
-                        <span class="thinking-indicator" aria-hidden="true" title="The agent is reasoning before its next move. Click the row to expand the thought."><img class="thinking-indicator-icon" src="${iconsBaseUri}/thinking.png" alt=""></span>
-                        <span class="thinking-label">Thinking...</span>
-                        <span class="thinking-preview"></span>
-                        <span class="thinking-chevron">&#9656;</span>
-                    </summary>
-                    <div class="thinking-content"></div>
-                </details>
-                <div class="message-content" id="streaming-text"></div>
-            </div>
-        `;
+    const hasContent = !!(state.streamingText || state.streamingThinking);
+    draft.style.display = hasContent ? '' : 'none';
+    if (hasContent) {
+        removePreparingPlaceholder();
     }
 
     const thinkingEl = document.getElementById('streaming-thinking') as HTMLDetailsElement | null;
@@ -2246,16 +2279,24 @@ function renderStreamingContent(): void {
             }
         } else {
             thinkingEl.style.display = 'none';
+            const contentEl = thinkingEl.querySelector('.thinking-content');
+            if (contentEl) contentEl.innerHTML = '';
+            const previewEl = thinkingEl.querySelector('.thinking-preview');
+            if (previewEl) previewEl.textContent = '';
         }
     }
 
     const textEl = document.getElementById('streaming-text');
     if (textEl) {
-        textEl.innerHTML = renderMarkdown(stripPlanCompleteMarker(state.streamingText));
+        textEl.innerHTML = state.streamingText
+            ? renderMarkdown(stripPlanCompleteMarker(state.streamingText))
+            : '';
     }
 
-    bindCopyButtons();
-    scrollToBottom();
+    if (hasContent) {
+        bindCopyButtons();
+        scrollToBottom();
+    }
 }
 
 // ── Tool rendering ──
@@ -3006,7 +3047,7 @@ function renderToolStart(event: any): void {
                 <span class="tool-status running">running</span>
             </div>
         `;
-        container.appendChild(card);
+        insertIntoStreamingContainer(card);
         ensureToolTimerLoop();
         scrollToBottom();
         return;
@@ -3032,7 +3073,7 @@ function renderToolStart(event: any): void {
         details.dataset.commandLike = 'true';
         details.dataset.toolInput = input;
         details.dataset.startedAt = String(Date.now());
-        container.appendChild(details);
+        insertIntoStreamingContainer(details);
         ensureToolTimerLoop();
         scrollToBottom();
         return;
@@ -3052,7 +3093,7 @@ function renderToolStart(event: any): void {
         </div>
     `;
 
-    container.appendChild(card);
+    insertIntoStreamingContainer(card);
     ensureToolTimerLoop();
     bindToolClickable();
     scrollToBottom();
@@ -3506,7 +3547,18 @@ function looksLikeAuthError(message: string): boolean {
 function updateStreamingUI(): void {
     const container = document.getElementById('streaming-message');
     if (!container) return;
-    container.innerHTML = '';
+    // Wipe transient children (tool cards, preparing placeholder, diff cards)
+    // but keep the persistent #answer-draft node so streamed answer text does
+    // not disappear when stateSync fires mid-turn on message_end / turn_end.
+    // renderStreamingContent() below repopulates the draft from state; if
+    // state.streamingText / streamingThinking are empty (which is the case
+    // after the controller resets them on message_end) the draft is hidden.
+    const draft = document.getElementById('answer-draft');
+    Array.from(container.children).forEach((child) => {
+        if (child !== draft) container.removeChild(child);
+    });
+    ensureAnswerDraft();
+    renderStreamingContent();
 }
 
 // ── File & image attachments ──

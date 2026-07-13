@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-07-12
+
+### Fixed
+- Plan Mode auto-continue no longer fails with "Agent is already processing". The `<plan-ready/>` handler now dispatches via `session.followUp()` instead of `session.prompt()` — the SDK keeps `isStreaming = true` throughout the `agent_end` listener chain and only clears it in `finishRun()` after all listeners return, so a synchronous `prompt()` from inside the handler always raced with the reset. `followUp()` queues the message and the agent loop starts a fresh run on its own, which is exactly the pattern the SDK expects for `agent_end`-queued work.
+- Streamed assistant answer no longer flickers/disappears mid-turn. The streamed text now lives in a persistent "answer draft" widget pinned to the bottom of the current turn, so mid-turn stateSyncs (fired on `message_end` / `turn_end`) no longer wipe it. The controller also resets the streaming buffers on `message_end`, so deltas from the next assistant message start from a clean slate instead of appending to the previous message's text and producing duplicated content when the widget repopulates.
+
 ## [0.32.0] - 2026-07-10
 
 ### Added

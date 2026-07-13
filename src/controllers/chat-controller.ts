@@ -1007,7 +1007,15 @@ export class ChatController implements vscode.Disposable {
      *  tool set, flips the phase to EXEC, and dispatches a short synthetic
      *  prompt so the agent picks up execution in the same conversation
      *  without waiting for the user to type "go". The plan itself stays
-     *  visible as the agent's previous assistant message. */
+     *  visible as the agent's previous assistant message.
+     *
+     *  We dispatch through `session.followUp()` rather than
+     *  `session.prompt()`: the SDK's `isStreaming` flag stays `true` until
+     *  every `agent_end` listener returns and `finishRun()` clears it, so
+     *  `prompt()` would throw "Agent is already processing". `followUp`
+     *  queues the message directly; the agent loop's
+     *  `_willRetryAfterAgentEnd` sees the queued message once our handler
+     *  returns and starts a fresh run to process it. */
     private async _autoContinuePlanToExec(tab: TabState): Promise<void> {
         this._outputChannel.appendLine('Plan Mode: plan → exec (auto, <plan-ready/>)');
         tab.planModePhase = 'exec';
@@ -1040,7 +1048,7 @@ export class ChatController implements vscode.Disposable {
         this._prepareCacheForRequest(tab);
         this._logPromptToolState(tab, 'auto-continue');
         try {
-            await tab.session.prompt(promptText);
+            await tab.session.followUp(promptText);
         } catch (err) {
             this._outputChannel.appendLine(
                 `Plan Mode: auto-continue prompt failed — ${err instanceof Error ? err.message : String(err)}`,
@@ -1221,6 +1229,15 @@ export class ChatController implements vscode.Disposable {
                 tab.messageMeta.set(lastOrdinal, meta);
             }
             tab.streamingThinkingDuration = 0;
+            // Reset streaming buffers so the next assistant message in the
+            // same turn starts fresh. Without this, `tab.streamingText` /
+            // `tab.streamingThinking` carry the finalized message's content
+            // into the next `message_update`; deltas append to stale text,
+            // and the webview's `#answer-draft` widget shows duplicated
+            // content when it repopulates after the mid-turn stateSync wipe.
+            tab.streamingText = '';
+            tab.streamingThinking = '';
+            tab.isThinking = false;
         }
 
         if (event.type === 'agent_end') {
