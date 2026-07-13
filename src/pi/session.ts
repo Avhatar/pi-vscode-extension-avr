@@ -153,10 +153,6 @@ export class PiSessionManager {
      * that are not currently in the registry are silently skipped — but the
      * caller should still store them so the disable is preserved if the tool
      * comes back later (e.g. an MCP server re-added).
-     *
-     * When Plan Mode is active, updates the saved full-tool set so restoring
-     * later reflects the new selection, and applies the read-only
-     * intersection to the current active set instead. Idempotent.
      */
     applyToolSelection(disabled: readonly string[]): void {
         const session = this._session;
@@ -167,28 +163,12 @@ export class PiSessionManager {
         const registered = session.getAllTools().map((t) => t.name);
         const disabledSet = new Set(disabled);
         const fullActive = registered.filter((t) => !disabledSet.has(t));
-
-        if (this._planModeActive) {
-            // Plan Mode restricts to a read-only subset; the saved full set
-            // (restored when Plan Mode turns off) must reflect the new
-            // selection. Intersect the read-only set with `fullActive` so
-            // disabled tools don't sneak back in via the read-only list.
-            this._savedToolNames = fullActive;
-            const readOnly = [...PiSessionManager.PLAN_MODE_READONLY_TOOLS]
-                .filter((t) => fullActive.includes(t));
-            session.setActiveToolsByName(readOnly);
-            this._outputChannel.appendLine(
-                `[tool selection] plan-mode=on disabled-count=${disabledSet.size} ` +
-                `full-active-count=${fullActive.length} applied-active=${readOnly.length}`,
-            );
-        } else {
-            session.setActiveToolsByName(fullActive);
-            const after = session.getActiveToolNames();
-            this._outputChannel.appendLine(
-                `[tool selection] disabled-count=${disabledSet.size} ` +
-                `registered=${registered.length} active-after=${after.length}`,
-            );
-        }
+        session.setActiveToolsByName(fullActive);
+        const after = session.getActiveToolNames();
+        this._outputChannel.appendLine(
+            `[tool selection] disabled-count=${disabledSet.size} ` +
+            `registered=${registered.length} active-after=${after.length}`,
+        );
     }
 
     /** Diagnostic helper — snapshot of the current active-tool set, exposed for
@@ -202,78 +182,6 @@ export class PiSessionManager {
             hasTodo: active.includes('todo'),
             todoRegistered: session.getAllTools().some((t) => t.name === 'todo'),
         };
-    }
-
-    // ── Plan Mode ──
-    //
-    // When Plan Mode is active, the agent is restricted to read-only
-    // tools so it can study the task and propose a plan without making
-    // any changes. The full tool set is saved before restriction and
-    // restored when Plan Mode is deactivated.
-
-    /** Tools allowed during Plan Mode's PLAN phase (study/plan only). */
-    static readonly PLAN_MODE_READONLY_TOOLS: ReadonlySet<string> = new Set([
-        'read', 'grep', 'find', 'ls',           // Pi built-in read-only
-        'web_search',                            // pi-web-access
-        'fetch_content', 'get_search_content',   // pi-web-access
-        'todo',                                   // our inline extension
-        'mcp',                                    // MCP adapter (diagnostic queries)
-    ]);
-
-    /** True when Plan Mode has restricted tools to read-only. */
-    private _planModeActive = false;
-    /** Saved full tool set, restored when Plan Mode deactivates. */
-    private _savedToolNames: string[] = [];
-
-    get isPlanModeActive(): boolean {
-        return this._planModeActive;
-    }
-
-    /**
-     * Activate or deactivate Plan Mode's read-only tool restriction.
-     * When `active` is true, restricts to PLAN_MODE_READONLY_TOOLS
-     * (intersected with registered tools). When false, restores the
-     * full tool set saved during activation.
-     *
-     * Idempotent — passing the current state is a no-op.
-     */
-    setPlanModeActive(active: boolean): void {
-        const session = this._session;
-        if (!session) return;
-        if (active === this._planModeActive) return;
-
-        if (active) {
-            // Save the current active tool set so we can restore it later.
-            this._savedToolNames = session.getActiveToolNames();
-            // Build the read-only tool set: all PLAN_MODE_READONLY_TOOLS
-            // that exist in the registry, respecting the ToDo toggle.
-            const readOnly = [...PiSessionManager.PLAN_MODE_READONLY_TOOLS];
-            // Respect ToDo visibility: if the user toggled todo OFF, remove
-            // it so Plan Mode doesn't silently re-enable it.
-            if (!this._savedToolNames.includes('todo')) {
-                const idx = readOnly.indexOf('todo');
-                if (idx >= 0) readOnly.splice(idx, 1);
-            }
-            this._outputChannel.appendLine(
-                `Plan Mode: restricting tools (${readOnly.join(', ')}) — saved ${this._savedToolNames.length} tools`,
-            );
-            session.setActiveToolsByName(readOnly);
-            const afterRestrict = session.getActiveToolNames();
-            this._outputChannel.appendLine(
-                `Plan Mode: active tools after restriction: ${afterRestrict.join(', ')}`,
-            );
-            this._planModeActive = true;
-        } else {
-            // Restore the full tool set saved during activation.
-            if (this._savedToolNames.length > 0) {
-                this._outputChannel.appendLine(
-                    `Plan Mode: restoring full tools (${this._savedToolNames.join(', ')})`,
-                );
-                session.setActiveToolsByName(this._savedToolNames);
-            }
-            this._savedToolNames = [];
-            this._planModeActive = false;
-        }
     }
 
     private async _buildResourceLoader(cwd: string): Promise<ResourceLoader> {
@@ -436,9 +344,6 @@ export class PiSessionManager {
         if (!this._session) { return; }
         this._unsubscribe?.();
         this._session.dispose();
-        this._planModeActive = false;
-        this._savedToolNames = [];
-
         const { createAgentSession } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
@@ -480,8 +385,6 @@ export class PiSessionManager {
 
     async initializeFromPath(sessionPath: string): Promise<void> {
         this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
-        this._planModeActive = false;
-        this._savedToolNames = [];
         const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
@@ -545,9 +448,6 @@ export class PiSessionManager {
         if (!this._session) { return; }
         this._unsubscribe?.();
         this._session.dispose();
-        this._planModeActive = false;
-        this._savedToolNames = [];
-
         const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
@@ -699,8 +599,6 @@ export class PiSessionManager {
         this._unsubscribe?.();
         this._session?.dispose();
         this._session = undefined;
-        this._planModeActive = false;
-        this._savedToolNames = [];
         this.events.clear();
     }
 

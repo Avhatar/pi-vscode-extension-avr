@@ -1954,7 +1954,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
 
     // Assistant messages: wrap in a styled container
     const thinking = extractThinking(msg);
-    const text = stripPlanCompleteMarker(extractText(msg));
+    const text = extractText(msg);
 
     if (!thinking && !text) {
         const empty = el('div');
@@ -2289,7 +2289,7 @@ function renderStreamingContent(): void {
     const textEl = document.getElementById('streaming-text');
     if (textEl) {
         textEl.innerHTML = state.streamingText
-            ? renderMarkdown(stripPlanCompleteMarker(state.streamingText))
+            ? renderMarkdown(state.streamingText)
             : '';
     }
 
@@ -4714,21 +4714,10 @@ function extractText(msg: any): string {
  *  Text files:   [File: name]\ncontent\n[/File]\n */
 const FILE_BLOCK_RE = /\[File:\s*(.+?)\]\s*(?:\(binary file\))?[\s\S]*?\[\/File\]\s*\n?/g;
 
-/** Pattern for the Plan Mode prefix injected by chat-controller when entering
- *  the PLAN or EXEC phase. Always lives at the very start of the prompt. Keep
- *  in sync with the wrapper tags in chat-controller.ts. */
+/** Pattern for the Plan Mode instruction prefix injected by chat-controller
+ *  when the Plan Mode toggle is on. Always lives at the very start of the
+ *  prompt. Keep in sync with the wrapper tags in chat-controller.ts. */
 const PLAN_MODE_BLOCK_RE = /^<plan-mode-instructions>[\s\S]*?<\/plan-mode-instructions>\s*\n?/;
-
-/** Pattern for the agent's plan-complete signal. Matches the marker plus any
- *  surrounding whitespace so the surrounding lines don't end up with a blank
- *  trailing paragraph after stripping. Kept lenient on whitespace and the
- *  optional self-closing slash. */
-const PLAN_COMPLETE_MARKER_RE = /\s*<\s*plan-complete\s*\/?\s*>\s*/gi;
-
-/** Symmetric pattern for the agent's plan-ready signal, emitted at the end of
- *  the PLAN phase. Stripped from the visible chat bubble on the same principle
- *  as PLAN_COMPLETE — it's a control signal, not user-facing text. */
-const PLAN_READY_MARKER_RE = /\s*<\s*plan-ready\s*\/?\s*>\s*/gi;
 
 interface StrippedFileInfo {
     cleanText: string;
@@ -4751,12 +4740,6 @@ function stripPlanModeBlock(text: string): string {
     return text.replace(PLAN_MODE_BLOCK_RE, '');
 }
 
-/** Strip the agent's `<plan-complete/>` completion marker from assistant text
- *  before rendering. The marker is a control signal for the chat controller,
- *  not user-facing content. */
-function stripPlanCompleteMarker(text: string): string {
-    return text.replace(PLAN_COMPLETE_MARKER_RE, '').replace(PLAN_READY_MARKER_RE, '');
-}
 
 function extractImages(msg: any): ImageAttachment[] {
     if (!Array.isArray(msg.content)) return [];

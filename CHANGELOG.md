@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Plan Mode now works as pure prompt injection. When the toggle is on, every user prompt is prefixed with a fixed `<plan-mode-instructions>` block asking the agent to plan first for change-heavy or multi-step tasks and to re-read files before editing. The agent decides per-prompt whether the task actually needs a plan — simple questions and lookups get answered directly. No tool restrictions, no phase state machine, no manual "go" hand-off, no `<plan-ready/>` / `<plan-complete/>` markers. The Plan Mode toggle keeps its per-chat persistence and greyed-out-while-streaming behaviour; everything else about it is gone.
+
+### Removed
+- Plan Mode's `plan` / `exec` / `idle` phase machine, the read-only tool restriction (`PLAN_MODE_READONLY_TOOLS`, `setPlanModeActive`, saved-tool-set restoration), the `<plan-ready/>` and `<plan-complete/>` markers, the auto-continue-into-exec flow, the `EXEC_IDLE_RESET_MS` idle safety net, and the phase-restart on session load / new session / abort. Everything the toggle now does is a single string prepended to the outgoing prompt.
+
 ## [0.32.1] - 2026-07-12
 
 ### Fixed

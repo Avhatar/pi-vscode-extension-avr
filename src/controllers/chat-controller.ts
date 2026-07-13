@@ -22,9 +22,6 @@ interface MessageMeta {
     totalTurnDurationMs?: number;
 }
 
-/** Plan Mode phase for the current tab. */
-type PlanModePhase = 'idle' | 'plan' | 'exec';
-
 interface TabState {
     id: string;
     name: string;
@@ -58,18 +55,6 @@ interface TabState {
     maxIdleGapMs: number;
     /** Cache retention applied to the most recent request from this tab. */
     cacheEffective: CacheEffective;
-    /** Plan Mode: current phase. */
-    planModePhase: PlanModePhase;
-    /** Plan Mode: true when the agent emitted the `<plan-complete/>` marker
-     *  in its last response during the EXEC phase. The next user prompt
-     *  then starts a fresh planning cycle instead of continuing execution. */
-    planComplete: boolean;
-    /** Plan Mode: true when the agent emitted the `<plan-ready/>` marker in
-     *  its last response during the PLAN phase. On `agent_end` this flag
-     *  triggers an automatic transition into EXEC without requiring the
-     *  user to type "go" — the plan stays visible in the chat and the
-     *  agent picks it up immediately. */
-    planReady: boolean;
     /**
      * `tool_execution_start` events without a matching `tool_execution_end`
      * yet. Cleared on `tool_execution_end`, on `agent_start`, and swept on
@@ -133,9 +118,6 @@ function makeTabState(
         lastTurnEndAt: 0,
         maxIdleGapMs: 0,
         cacheEffective: 'short',
-        planModePhase: 'idle',
-        planComplete: false,
-        planReady: false,
         pendingTools: new Map(),
     };
 }
@@ -285,6 +267,32 @@ export class ChatController implements vscode.Disposable {
 
     /** Persistence for per-tab Plan Mode toggle. Same shape as ToDo. */
     private static readonly PLAN_MODE_KEY_PREFIX = 'pi-code.planModeEnabled.';
+
+    /** Fixed instruction block injected in front of every user prompt when
+     *  the Plan Mode toggle is on. No tool restriction, no phase state —
+     *  the agent decides per-prompt whether the request warrants a plan.
+     *  The wrapper tags must stay in sync with PLAN_MODE_BLOCK_RE in
+     *  webview/main.ts so the block is stripped from the rendered bubble. */
+    private static readonly PLAN_MODE_INSTRUCTIONS =
+        '<plan-mode-instructions>\n' +
+        'Plan Mode is on. Not every prompt needs a plan — use judgment:\n' +
+        '\n' +
+        '- If the user is asking a question, requesting information, or\n' +
+        '  discussing an approach: answer directly, no planning required.\n' +
+        '- If the user is asking for changes to code or a multi-step task:\n' +
+        '  first study the relevant files, then sketch a plan (use the todo\n' +
+        '  tool for multi-step work), then execute. Confirm the approach is\n' +
+        '  sound before doing anything invasive.\n' +
+        '\n' +
+        'When editing a file, oldText must match the current file\n' +
+        'byte-for-byte (exact whitespace, indentation, line endings).\n' +
+        'Re-read the target region if you are unsure — do not reconstruct\n' +
+        'oldText from memory or from an earlier plan.\n' +
+        '\n' +
+        'You can execute the plan in the same turn once it is clear. Only\n' +
+        'stop and wait for the user if you have a genuinely open question\n' +
+        'they need to answer before you can proceed.\n' +
+        '</plan-mode-instructions>';
 
     /** Persistence for per-tab File Undo View toggle (the changed-files
      *  bar above the input). Default for missing entries: `false`. */
@@ -734,11 +742,6 @@ export class ChatController implements vscode.Disposable {
         // takes effect immediately.
         this._applyPersistedToolSelection(tab);
 
-        // Apply persisted Plan Mode toggle. Same shape as ToDo — the
-        // toggle gates the feature; when OFF the agent has full tools
-        // immediately on every prompt.
-        this._applyPersistedPlanMode(tab);
-
         this._tabSubscriptions.set(tab.id, unsubs);
     }
 
@@ -966,16 +969,6 @@ export class ChatController implements vscode.Disposable {
             .get<boolean>('planMode.defaultEnabled', false);
     }
 
-    private _applyPersistedPlanMode(tab: TabState): void {
-        // Start in `idle` phase so the next prompt triggers a planning
-        // cycle when Plan Mode is on. Always restore full tools — the
-        // PLAN restriction is re-applied on the next prompt if needed.
-        tab.planModePhase = 'idle';
-        tab.planComplete = false;
-        tab.planReady = false;
-        tab.session.setPlanModeActive(false);
-    }
-
     private _isPlanModeEnabledFor(tab: TabState): boolean {
         const key = this._planModeKey(tab.session.sessionPath);
         const fallback = this._planModeDefaultEnabled();
@@ -988,9 +981,6 @@ export class ChatController implements vscode.Disposable {
         if (key) {
             await this._context.workspaceState.update(key, enabled);
         }
-        tab.session.setPlanModeActive(false);
-        tab.planModePhase = 'idle';
-        tab.planComplete = false;
         this._onLauncherStateChanged.fire();
     }
 
@@ -1000,60 +990,6 @@ export class ChatController implements vscode.Disposable {
         if (!tab) return;
         if (this._isTabBusy(tab)) return;
         await this._setPlanModeEnabledFor(tab, enabled);
-    }
-
-    /** Called from `agent_end` when the PLAN-phase response contains
-     *  `<plan-ready/>` and no user message is queued. Restores the full
-     *  tool set, flips the phase to EXEC, and dispatches a short synthetic
-     *  prompt so the agent picks up execution in the same conversation
-     *  without waiting for the user to type "go". The plan itself stays
-     *  visible as the agent's previous assistant message.
-     *
-     *  We dispatch through `session.followUp()` rather than
-     *  `session.prompt()`: the SDK's `isStreaming` flag stays `true` until
-     *  every `agent_end` listener returns and `finishRun()` clears it, so
-     *  `prompt()` would throw "Agent is already processing". `followUp`
-     *  queues the message directly; the agent loop's
-     *  `_willRetryAfterAgentEnd` sees the queued message once our handler
-     *  returns and starts a fresh run to process it. */
-    private async _autoContinuePlanToExec(tab: TabState): Promise<void> {
-        this._outputChannel.appendLine('Plan Mode: plan → exec (auto, <plan-ready/>)');
-        tab.planModePhase = 'exec';
-        tab.planComplete = false;
-        tab.planReady = false;
-        tab.session.setPlanModeActive(false);
-
-        const promptText =
-            '<plan-mode-instructions>\n' +
-            'Plan Mode: execution phase. You may use the full tool set.\n' +
-            'When editing a file, oldText must match the current file\n' +
-            'byte-for-byte (exact whitespace, indentation, line endings).\n' +
-            'If the file was only read during the plan phase, re-read the\n' +
-            'target region before editing — do not reconstruct oldText\n' +
-            'from your plan or memory. Prefer read → edit pairs on the\n' +
-            'same region.\n' +
-            'When all work in the agreed plan is finished and you would\n' +
-            'otherwise stop and wait for new instructions, end your final\n' +
-            'response with the literal marker on its own line:\n' +
-            '<plan-complete/>\n' +
-            'If anything remains to be done, you hit a blocker, or you\n' +
-            'expect a follow-up from the user, do NOT include the marker.\n' +
-            '</plan-mode-instructions>\n\n' +
-            'Proceed with the plan.';
-
-        tab.turnCounter++;
-        const turnIdx = tab.turnCounter;
-        tab.checkpointManager.startTurn(turnIdx);
-        tab.diffManager.setCurrentTurn(turnIdx);
-        this._prepareCacheForRequest(tab);
-        this._logPromptToolState(tab, 'auto-continue');
-        try {
-            await tab.session.followUp(promptText);
-        } catch (err) {
-            this._outputChannel.appendLine(
-                `Plan Mode: auto-continue prompt failed — ${err instanceof Error ? err.message : String(err)}`,
-            );
-        }
     }
 
     // ── File Undo View ──
@@ -1093,57 +1029,6 @@ export class ChatController implements vscode.Disposable {
         const tab = this._tabs.get(this._activeTabId);
         if (!tab) return;
         await this._setFileUndoViewEnabledFor(tab, enabled);
-    }
-
-    // ── Plan Mode signal: agent-emitted completion marker ──
-    //
-    // After the agent finishes a turn in EXEC, the next user message might
-    // be a follow-up to the same plan or the start of a brand-new task.
-    // Rather than guessing from the user's wording (which is language-
-    // dependent and unreliable), we delegate the decision to the agent
-    // itself: an EXEC reminder asks the agent to emit `<plan-complete/>`
-    // in its final response when it considers all planned work done.
-    // We parse that marker on `agent_end` and use it to decide whether
-    // the next prompt restarts the planning cycle.
-
-    /** Max idle gap (ms) since the last EXEC turn before we force a fresh
-     *  PLAN cycle even if the agent did not emit a completion marker. */
-    private static readonly EXEC_IDLE_RESET_MS = 10 * 60 * 1000;
-
-    /** Detects the agent's plan-completion marker in any case, with optional
-     *  whitespace and self-closing slash: `<plan-complete>`, `<plan-complete/>`,
-     *  `<plan-complete />`. We search the whole text rather than anchoring
-     *  to the end because models sometimes append trailing whitespace or
-     *  punctuation after the tag. */
-    private static readonly PLAN_COMPLETE_MARKER_RE = /<\s*plan-complete\s*\/?\s*>/i;
-
-    /** Symmetric detector for the plan-ready marker, emitted by the agent at
-     *  the end of the PLAN phase to signal that the plan is finalised and
-     *  execution can begin without waiting for a user confirmation prompt. */
-    private static readonly PLAN_READY_MARKER_RE = /<\s*plan-ready\s*\/?\s*>/i;
-
-    private static _extractAssistantText(msg: any): string {
-        if (!msg) return '';
-        if (typeof msg.content === 'string') return msg.content;
-        if (Array.isArray(msg.content)) {
-            return msg.content
-                .filter((c: any) => c?.type === 'text')
-                .map((c: any) => c.text ?? '')
-                .join('');
-        }
-        if (typeof msg.text === 'string') return msg.text;
-        return '';
-    }
-
-    private _lastAssistantText(tab: TabState): string {
-        const msgs = tab.session.getMessages();
-        for (let i = msgs.length - 1; i >= 0; i--) {
-            const m = msgs[i] as any;
-            if (m?.role === 'assistant') {
-                return ChatController._extractAssistantText(m);
-            }
-        }
-        return '';
     }
 
     private _unsubscribeTab(tabId: string): void {
@@ -1314,28 +1199,6 @@ export class ChatController implements vscode.Disposable {
             tab.agentStartTime = 0;
             tab.isStreamingLocal = false;
             tab.lastTurnEndAt = turnEndAt;
-            // Plan Mode: during EXEC, the agent is asked to emit
-            // `<plan-complete/>` in its final response when the planned
-            // work is done. We record that signal here; the next user
-            // prompt uses it to decide whether to restart the PLAN cycle.
-            if (tab.planModePhase === 'exec') {
-                const lastText = this._lastAssistantText(tab);
-                tab.planComplete = ChatController.PLAN_COMPLETE_MARKER_RE.test(lastText);
-                if (tab.planComplete) {
-                    this._outputChannel.appendLine('Plan Mode: agent signalled <plan-complete/>');
-                }
-            }
-            // Plan Mode: during PLAN, the agent is asked to emit
-            // `<plan-ready/>` when the plan is finalised. Detect it here so
-            // the auto-continue block below can dispatch a synthetic exec
-            // prompt without waiting for the user to type anything.
-            if (tab.planModePhase === 'plan') {
-                const lastText = this._lastAssistantText(tab);
-                tab.planReady = ChatController.PLAN_READY_MARKER_RE.test(lastText);
-                if (tab.planReady) {
-                    this._outputChannel.appendLine('Plan Mode: agent signalled <plan-ready/>');
-                }
-            }
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
             } else {
@@ -1369,11 +1232,6 @@ export class ChatController implements vscode.Disposable {
                     this._logPromptToolState(tab, 'queued');
                     tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(text));
                 }
-            } else if (tab.planReady && tab.planModePhase === 'plan' && this._isPlanModeEnabledFor(tab)) {
-                // Agent signalled <plan-ready/> and the user hasn't queued
-                // anything — auto-continue into EXEC without waiting for a
-                // manual "go" prompt. Plan stays visible in the chat.
-                this._autoContinuePlanToExec(tab);
             }
         }
 
@@ -1554,88 +1412,17 @@ export class ChatController implements vscode.Disposable {
                         break;
                     }
 
-                    // Plan Mode interception — restrict tools during PLAN phase
-                    // and inject phase-specific instructions. The wrapper tags
-                    // let the webview strip the injected block when rendering
-                    // the user's message, so the bubble shows only what the user
-                    // typed. Keep these tags in sync with PLAN_MODE_BLOCK_RE in
-                    // webview/main.ts.
-                    const planEnabled = this._isPlanModeEnabledFor(tab);
+                    // Plan Mode injection — when the toggle is on, prepend a
+                    // fixed <plan-mode-instructions> block that tells the agent
+                    // to plan before making changes and to re-read files before
+                    // editing them. No tool restriction, no state machine — the
+                    // agent decides per-prompt whether the task needs a plan.
+                    // The wrapper tags let the webview strip the block from the
+                    // rendered user bubble; keep them in sync with
+                    // PLAN_MODE_BLOCK_RE in webview/main.ts.
                     let promptText = msg.text;
-                    if (planEnabled) {
-                        const idleGap = tab.lastTurnEndAt > 0 ? Date.now() - tab.lastTurnEndAt : 0;
-                        const forceReset = idleGap > ChatController.EXEC_IDLE_RESET_MS;
-                        if (tab.planModePhase === 'idle') {
-                            this._outputChannel.appendLine(`Plan Mode: idle → plan ("${msg.text.slice(0, 80)}")`);
-                            tab.planModePhase = 'plan';
-                            tab.planComplete = false;
-                            tab.planReady = false;
-                            tab.session.setPlanModeActive(true);
-                        } else if (tab.planModePhase === 'plan') {
-                            this._outputChannel.appendLine(`Plan Mode: plan → exec ("${msg.text.slice(0, 80)}")`);
-                            tab.planModePhase = 'exec';
-                            tab.planComplete = false;
-                            tab.planReady = false;
-                            tab.session.setPlanModeActive(false);
-                        } else if (tab.planModePhase === 'exec') {
-                            // The agent's last response decides whether we restart
-                            // the plan cycle. Idle-gap is a safety net for the case
-                            // when the agent forgot to emit the completion marker.
-                            if (tab.planComplete || forceReset) {
-                                const reason = tab.planComplete ? '<plan-complete/> seen' : `idle ${Math.round(idleGap / 1000)}s`;
-                                this._outputChannel.appendLine(`Plan Mode: exec → plan (${reason})`);
-                                tab.planModePhase = 'plan';
-                                tab.planComplete = false;
-                                tab.planReady = false;
-                                tab.session.setPlanModeActive(true);
-                            } else {
-                                this._outputChannel.appendLine(`Plan Mode: exec → exec (continuation)`);
-                            }
-                        }
-
-                        if (tab.planModePhase === 'plan') {
-                            promptText =
-                                '<plan-mode-instructions>\n' +
-                                'You are in Plan Mode. You have read-only tools — read, search,\n' +
-                                'code search, fetch, grep, find, ls. You CANNOT write, edit,\n' +
-                                'or run commands right now.\n' +
-                                'Your job: study the task, examine the codebase, create a clear\n' +
-                                'step-by-step plan (use the todo tool), and ask any clarifying\n' +
-                                'questions. Present the plan in your final response.\n' +
-                                'When the plan is finalised and you would otherwise stop and\n' +
-                                'wait for user confirmation, end your final response with the\n' +
-                                'literal marker on its own line:\n' +
-                                '<plan-ready/>\n' +
-                                'Emit the marker ONLY when the plan is complete and does not\n' +
-                                'require further clarification from the user. If you still\n' +
-                                'have open questions, ask them and do NOT emit the marker —\n' +
-                                'wait for the user to answer.\n' +
-                                'Do NOT attempt to make changes or say you cannot do something.\n' +
-                                '</plan-mode-instructions>\n\n' +
-                                promptText;
-                        } else if (tab.planModePhase === 'exec') {
-                            // Short reminder so the agent emits the completion
-                            // marker when (and only when) it considers all
-                            // planned work done. Keep it terse — this block is
-                            // prepended on every EXEC prompt.
-                            promptText =
-                                '<plan-mode-instructions>\n' +
-                                'Plan Mode: execution phase. You may use the full tool set.\n' +
-                                'When editing a file, oldText must match the current file\n' +
-                                'byte-for-byte (exact whitespace, indentation, line endings).\n' +
-                                'If the file was only read during the plan phase, re-read the\n' +
-                                'target region before editing — do not reconstruct oldText\n' +
-                                'from your plan or memory. Prefer read → edit pairs on the\n' +
-                                'same region.\n' +
-                                'When all work in the agreed plan is finished and you would\n' +
-                                'otherwise stop and wait for new instructions, end your final\n' +
-                                'response with the literal marker on its own line:\n' +
-                                '<plan-complete/>\n' +
-                                'If anything remains to be done, you hit a blocker, or you\n' +
-                                'expect a follow-up from the user, do NOT include the marker.\n' +
-                                '</plan-mode-instructions>\n\n' +
-                                promptText;
-                        }
+                    if (this._isPlanModeEnabledFor(tab)) {
+                        promptText = ChatController.PLAN_MODE_INSTRUCTIONS + '\n\n' + promptText;
                     }
 
                     if (tab.checkpointManager.rollbackPoint !== null) {
@@ -1699,15 +1486,6 @@ export class ChatController implements vscode.Disposable {
                 }
                 case 'abort':
                     await tab.session.abort();
-                    // After an abort the conversation is in an unknown state
-                    // — reset to idle so the next prompt starts a fresh
-                    // planning cycle rather than continuing execution or
-                    // jumping straight to exec.
-                    if (tab.planModePhase !== 'idle') {
-                        tab.planModePhase = 'idle';
-                        tab.planComplete = false;
-                        tab.planReady = false;
-                    }
                     break;
                 case 'getModels': {
                     const models = tab.session.getModels();
@@ -1747,7 +1525,6 @@ export class ChatController implements vscode.Disposable {
                 case 'newSession':
                     await tab.session.newSession();
                     this._applyPersistedToolSelection(tab);
-                    this._applyPersistedPlanMode(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
                     tab.turnCounter = 0;
@@ -1772,7 +1549,6 @@ export class ChatController implements vscode.Disposable {
                 case 'loadSession':
                     await tab.session.loadSession(msg.sessionPath);
                     this._applyPersistedToolSelection(tab);
-                    this._applyPersistedPlanMode(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
                     tab.turnCounter = 0;
