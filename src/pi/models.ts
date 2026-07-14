@@ -2,6 +2,7 @@ import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { ModelInfo } from '../shared/protocol';
 import { getAuthStorage } from './auth';
 import { registerQwenCnProvider, registerQwenProvider } from './providers/qwen';
+import { applyModelMetadataCorrections } from './model-metadata';
 
 let cached: ModelRegistry | undefined;
 
@@ -26,6 +27,7 @@ export async function syncCustomProviders(): Promise<void> {
     const authStorage = await getAuthStorage();
     syncProvider(registry, 'qwen', () => registerQwenProvider(registry), () => authStorage.hasAuth('qwen'));
     syncProvider(registry, 'qwen-cn', () => registerQwenCnProvider(registry), () => authStorage.hasAuth('qwen-cn'));
+    applyModelMetadataCorrections(registry);
 }
 
 const registeredProviders = new Set<string>();
@@ -54,6 +56,7 @@ function syncProvider(
 export async function refreshModelRegistry(): Promise<void> {
     if (cached) {
         cached.refresh();
+        applyModelMetadataCorrections(cached);
     }
 }
 

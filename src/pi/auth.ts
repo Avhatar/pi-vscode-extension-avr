@@ -16,11 +16,11 @@ const KNOWN_PROVIDERS = [
 let cached: AuthStorage | undefined;
 let cachedSecrets: vscode.SecretStorage | undefined;
 
-const _onAuthChanged = new vscode.EventEmitter<void>();
+const _onAuthChanged = new vscode.EventEmitter<string | undefined>();
 export const onAuthChanged = _onAuthChanged.event;
 
-export function notifyAuthChanged(): void {
-    _onAuthChanged.fire();
+export function notifyAuthChanged(providerId?: string): void {
+    _onAuthChanged.fire(providerId);
 }
 
 export async function getAuthStorage(secrets?: vscode.SecretStorage): Promise<AuthStorage> {

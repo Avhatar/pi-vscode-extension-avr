@@ -7,8 +7,37 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.33.3] - 2026-07-14
+
+### Fixed
+- GPT-5.6 context usage now uses the correct provider-specific maximum: 272k tokens for Codex subscriptions and 1.05M tokens for the direct OpenAI API; approximate usage is now clearly marked until an authoritative provider snapshot is available.
+
+## [0.33.2] - 2026-07-14
+
+### Fixed
+- Codex subscription usage now loads from the authenticated ChatGPT usage endpoint instead of a Cloudflare-blocked API path, and failed requests show an actionable unavailable state instead of spinning indefinitely.
+
+## [0.33.1] - 2026-07-14
+
 ### Changed
+- Codex subscription usage now refreshes only when a Codex chat opens and after each completed turn; concurrent refresh triggers share one request and no periodic polling is used.
+
+### Fixed
+- Codex usage now remains current with the default WebSocket transport and supports model-specific limit buckets, optional window metadata, current plan types, credits, workspace spend controls, and banked resets from the account usage API.
+- Stale or reset-crossing account snapshots are no longer shown as zero usage or incorrectly attributed to a single assistant turn, and cached usage is cleared when the Codex account changes.
+
+## [0.33.0] - 2026-07-14
+
+### Added
+- New `xhigh` and `max` thinking levels are now available in the Settings page's Default Thinking Level dropdown and in the in-chat thinking picker. `xhigh` extends `high` with deeper reasoning; `max` is the deepest tier and is natively supported only by GPT-5.6 and adaptive Claude models — on other models the SDK falls back to the closest supported level.
+- GPT-5.6 support out of the box: the OpenAI model catalog now includes `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` (verified for `openai-codex` as well). They appear in the model picker once an OpenAI or Codex key is configured.
+
+### Changed
+- Bumped bundled Pi SDK from `0.80.3` to `0.80.6`. Notable behavioural improvements inherited from upstream: input-based pricing tiers for long-context GPT-5.4/5.5/5.6 accounting, `agent_settled` extension hook, `showCacheMissNotices` transcript notices, and more robust retry classification (Cloudflare 524, Copilot device-code polling, Codex WebSocket 60-minute rotation).
 - Plan Mode now works as pure prompt injection. When the toggle is on, every user prompt is prefixed with a fixed `<plan-mode-instructions>` block asking the agent to plan first for change-heavy or multi-step tasks and to re-read files before editing. The agent decides per-prompt whether the task actually needs a plan — simple questions and lookups get answered directly. No tool restrictions, no phase state machine, no manual "go" hand-off, no `<plan-ready/>` / `<plan-complete/>` markers. The Plan Mode toggle keeps its per-chat persistence and greyed-out-while-streaming behaviour; everything else about it is gone.
+
+### Fixed
+- Newer Claude models no longer intermittently error out on thinking-block conversion. The Pi SDK now preserves thinking blocks with empty text but a valid signature instead of dropping them, which used to trigger provider-side thinking-block validation failures on the latest Claude releases.
 
 ### Removed
 - Plan Mode's `plan` / `exec` / `idle` phase machine, the read-only tool restriction (`PLAN_MODE_READONLY_TOOLS`, `setPlanModeActive`, saved-tool-set restoration), the `<plan-ready/>` and `<plan-complete/>` markers, the auto-continue-into-exec flow, the `EXEC_IDLE_RESET_MS` idle safety net, and the phase-restart on session load / new session / abort. Everything the toggle now does is a single string prepended to the outgoing prompt.

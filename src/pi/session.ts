@@ -14,6 +14,7 @@ import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
 import { createLspExtension } from './lsp/extension';
 import { installEditToolPreflight } from './tools/preflight-edit';
+import { isContextUsageEstimated } from './context-usage';
 
 export class PiSessionManager {
     private _session: AgentSession | undefined;
@@ -555,7 +556,8 @@ export class PiSessionManager {
         if (!usage) { return undefined; }
         let tokens = usage.tokens;
         let percent = usage.percent;
-        let estimated = false;
+        let estimated = tokens != null
+            && isContextUsageEstimated(this._session?.messages ?? []);
 
         // The SDK intentionally reports an unknown token count immediately after
         // compaction until a later assistant response provides fresh provider

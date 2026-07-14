@@ -11,8 +11,9 @@ import { DiffManager } from '../providers/diff';
 import { CheckpointManager } from '../providers/checkpoint';
 import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
+import { computeCodexTurnUsage, isCodexUsageStale } from '../shared/codex-usage';
 import { WorkspaceFileMentions } from '../workspace/file-mentions';
-import type { CodexTurnUsage, CodexTurnWindowDelta, CodexUsageSnapshot, CodexUsageWindow } from '../shared/protocol';
+import type { CodexTurnUsage, CodexUsageSnapshot } from '../shared/protocol';
 
 interface MessageMeta {
     thinkingDurationSec: number;
@@ -45,8 +46,10 @@ interface TabState {
     isStreamingLocal: boolean;
     /** True while SDK context compaction is running. */
     isCompacting: boolean;
-    /** Codex usage snapshot captured at agent_start; used to compute per-turn delta on agent_end. */
+    /** Fresh Codex usage snapshot captured at agent_start for an account-window delta. */
     codexTurnBaseline?: CodexUsageSnapshot | null;
+    /** Model id associated with the current Codex turn and its usage bucket. */
+    codexTurnModelId?: string;
     /** Set when a provider error has already been surfaced to the UI for the current run, so the agent_end fallback doesn't duplicate it. */
     errorReportedThisRun: boolean;
     /** Timestamp (ms) of the last `agent_end`. Used by `auto` cache heuristic. 0 means no turn finished yet. */
@@ -334,8 +337,12 @@ export class ChatController implements vscode.Disposable {
         this._activeTabId = id;
         this._subscribeTab(tab);
 
-        this._authChangedSubscription = onAuthChanged(() => {
+        this._authChangedSubscription = onAuthChanged((providerId) => {
             this._broadcastModels();
+            if (providerId === 'openai-codex') {
+                const tab = this._activeTab;
+                if (tab) void this._refreshCodexUsageForTab(tab, 'Codex authentication changed');
+            }
         });
 
         this._codexUsageUnsubscribe = getCodexUsageStore().onChange((snapshot) => {
@@ -345,11 +352,35 @@ export class ChatController implements vscode.Disposable {
 
     addSink(sink: ChatViewSink): void {
         this._sinks.add(sink);
-        // Replay the latest known Codex usage so a freshly opened webview can
-        // render the indicator immediately, without waiting for the next turn.
+        // Replay a recent snapshot immediately, then refresh once for an opened
+        // Codex chat. Restored panels share the store's in-flight request.
         const usage = getCodexUsageStore().getCurrent();
         if (usage) {
             sink.post({ type: 'codexUsage', usage });
+        }
+        const tab = sink.tabFilter === 'active'
+            ? this._activeTab
+            : this._tabs.get(sink.tabFilter);
+        if (tab) void this._refreshCodexUsageForTab(tab, 'chat opened');
+    }
+
+    private async _refreshCodexUsageForTab(tab: TabState, reason: string): Promise<void> {
+        if (tab.session.getCurrentModel()?.provider !== 'openai-codex') return;
+        try {
+            const usage = await getCodexUsageStore().refresh();
+            if (!usage) {
+                this._postForTab(tab.id, {
+                    type: 'codexUsageError',
+                    message: 'Sign in with ChatGPT to view subscription usage.',
+                });
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this._outputChannel.appendLine(`Codex usage refresh failed (${reason}): ${message}`);
+            this._postForTab(tab.id, {
+                type: 'codexUsageError',
+                message: 'Unable to load subscription usage. Open the Pi Code output for details.',
+            });
         }
     }
 
@@ -1050,7 +1081,12 @@ export class ChatController implements vscode.Disposable {
             tab.isStreamingLocal = true;
             tab.errorReportedThisRun = false;
             tab.pendingTools.clear();
-            tab.codexTurnBaseline = getCodexUsageStore().getCurrent();
+            const currentModel = tab.session.getCurrentModel();
+            const currentUsage = getCodexUsageStore().getCurrent();
+            tab.codexTurnModelId = currentModel?.provider === 'openai-codex' ? currentModel.id : undefined;
+            tab.codexTurnBaseline = tab.codexTurnModelId && currentUsage && !isCodexUsageStale(currentUsage)
+                ? currentUsage
+                : null;
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
             }
@@ -1176,9 +1212,14 @@ export class ChatController implements vscode.Disposable {
             }
 
             const baseline = tab.codexTurnBaseline;
+            const codexModelId = tab.codexTurnModelId;
             tab.codexTurnBaseline = undefined;
+            tab.codexTurnModelId = undefined;
+            if (codexModelId) {
+                await this._refreshCodexUsageForTab(tab, 'turn ended');
+            }
             const after = getCodexUsageStore().getCurrent();
-            const turn = computeCodexTurnUsage(baseline ?? null, after);
+            const turn = computeCodexTurnUsage(baseline ?? null, after, codexModelId);
             const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
             if (lastOrdinal >= 0 && (turn || turnDurationMs > 0)) {
                 const meta = tab.messageMeta.get(lastOrdinal) ?? { thinkingDurationSec: 0, messageEndTime: 0 };
@@ -2028,42 +2069,6 @@ function lastAssistantOrdinal(messages: any[]): number {
         }
     }
     return ordinal;
-}
-
-function computeCodexTurnUsage(
-    baseline: CodexUsageSnapshot | null,
-    after: CodexUsageSnapshot | null,
-): CodexTurnUsage | undefined {
-    if (!after) return undefined;
-    if (baseline && after.capturedAt <= baseline.capturedAt) return undefined;
-
-    const primary = computeWindowDelta(baseline?.primary, after.primary);
-    const secondary = computeWindowDelta(baseline?.secondary, after.secondary);
-    if (!primary && !secondary) return undefined;
-
-    return {
-        primary,
-        secondary,
-        capturedAt: after.capturedAt,
-    };
-}
-
-function computeWindowDelta(
-    before: CodexUsageWindow | undefined,
-    after: CodexUsageWindow | undefined,
-): CodexTurnWindowDelta | undefined {
-    if (!after) return undefined;
-    // If the window reset between snapshots (or there was no baseline), the
-    // "before" point is effectively 0% — the entire current usage came from
-    // this turn (give or take other clients sharing the account).
-    const beforePercent = before && before.resetAt === after.resetAt ? before.percentUsed : 0;
-    const deltaPercent = Math.max(0, after.percentUsed - beforePercent);
-    return {
-        windowMinutes: after.windowMinutes,
-        beforePercent,
-        afterPercent: after.percentUsed,
-        deltaPercent,
-    };
 }
 
 function parseCompactCommand(text: string): string | undefined | null {

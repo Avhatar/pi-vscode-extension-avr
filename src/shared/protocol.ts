@@ -8,12 +8,10 @@ export interface ContextUsageInfo {
 export interface CodexUsageWindow {
     /** Percentage already used in this window (0-100). */
     percentUsed: number;
-    /** Window length in minutes (e.g. 300 for the 5h window, 10080 for the weekly one). */
-    windowMinutes: number;
-    /** Seconds until reset, as reported when the headers were captured. */
-    resetAfterSeconds: number;
-    /** Unix epoch seconds when the window resets. */
-    resetAt: number;
+    /** Rolling-window duration in minutes, when reported by Codex. */
+    windowMinutes?: number;
+    /** Unix epoch seconds when the window resets, when reported by Codex. */
+    resetAt?: number;
 }
 
 export interface CodexUsageCredits {
@@ -22,21 +20,40 @@ export interface CodexUsageCredits {
     unlimited: boolean;
 }
 
-export interface CodexUsageSnapshot {
-    /** Subscription plan label reported by Codex (e.g. "plus", "pro"). */
-    planType: string;
-    /** Active limit label (e.g. "premium"). */
-    activeLimit?: string;
+export interface CodexUsageBucket {
+    /** Stable metered-feature id (for example "codex" or "codex_other"). */
+    limitId: string;
+    /** Optional human/model-facing name reported by Codex. */
+    limitName?: string;
     primary?: CodexUsageWindow;
     secondary?: CodexUsageWindow;
+}
+
+export interface CodexSpendControlLimit {
+    limit: string;
+    used: string;
+    remainingPercent: number;
+    resetAt: number;
+}
+
+export interface CodexUsageSnapshot {
+    /** Subscription plan label reported by Codex (for example "plus" or "prolite"). */
+    planType?: string;
+    /** Active metered-feature id reported on a provider response. */
+    activeLimit?: string;
+    /** Default and model/feature-specific rate-limit buckets. */
+    buckets: CodexUsageBucket[];
     credits?: CodexUsageCredits;
-    /** Unix epoch milliseconds when these headers were captured. */
+    individualLimit?: CodexSpendControlLimit;
+    rateLimitReachedType?: string;
+    resetCreditsAvailable?: number;
+    /** Unix epoch milliseconds when this state was captured. */
     capturedAt: number;
 }
 
 export interface CodexTurnWindowDelta {
-    windowMinutes: number;
-    /** Window usage at the start of the turn (clamped to 0 if the window reset mid-turn). */
+    windowMinutes?: number;
+    /** Window usage at the start of the turn from a matching fresh snapshot. */
     beforePercent: number;
     /** Window usage right after the turn ended. */
     afterPercent: number;
@@ -386,6 +403,7 @@ export type ServerMessage =
     | { type: 'skills'; skills: SkillInfo[] }
     | { type: 'workspaceFileSuggestions'; requestId: number; query: string; isIndexing?: boolean; items: WorkspaceFileSuggestion[] }
     | { type: 'codexUsage'; usage: CodexUsageSnapshot | null }
+    | { type: 'codexUsageError'; message: string }
     | { type: 'error'; message: string; severity?: 'error' | 'warning' | 'info' };
 
 // Extension -> Settings webview messages

@@ -31,7 +31,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 if (e.key.startsWith('pi-code.apiKey.')) {
                     await reloadCredentials();
                     await syncCustomProviders();
-                    notifyAuthChanged();
+                    notifyAuthChanged(e.key.slice('pi-code.apiKey.'.length));
                     outputChannel.appendLine(`Credentials reloaded after change to ${e.key}`);
                 }
             }),

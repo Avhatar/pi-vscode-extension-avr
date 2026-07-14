@@ -1732,15 +1732,21 @@ body[data-mode="panel"] .input-container {
     color: var(--badge-fg);
 }
 .footer-codex-segment--mid {
-    color: var(--vscode-editorWarning-foreground, #d8a022);
+    color: var(--vscode-editorWarning-foreground);
 }
 .footer-codex-segment--high {
-    color: var(--vscode-editorError-foreground, #e26060);
+    color: var(--vscode-editorError-foreground);
     font-weight: 600;
 }
-.footer-codex--pending {
+.footer-codex--pending,
+.footer-codex--stale {
     opacity: 0.6;
+}
+.footer-codex--pending {
     font-style: italic;
+}
+.footer-codex--error {
+    color: var(--vscode-editorError-foreground);
 }
 
 .send-btn {

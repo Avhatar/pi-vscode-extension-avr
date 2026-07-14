@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.32.1",
+  "version": "0.33.3",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -114,9 +114,11 @@
             "minimal",
             "low",
             "medium",
-            "high"
+            "high",
+            "xhigh",
+            "max"
           ],
-          "description": "Default thinking level for Pi Code responses"
+          "description": "Default thinking level for Pi Code responses. `xhigh` extends `high` with deeper reasoning; `max` is the deepest tier and is natively supported only by GPT-5.6 and adaptive Claude models."
         },
         "pi-code.allowedTools": {
           "type": "array",
@@ -215,10 +217,10 @@
     "deploy:major": "npm run version:major && npm run deploy"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.80.3",
-    "@earendil-works/pi-ai": "^0.80.3",
-    "@earendil-works/pi-coding-agent": "^0.80.3",
-    "@earendil-works/pi-tui": "^0.80.3",
+    "@earendil-works/pi-agent-core": "^0.80.6",
+    "@earendil-works/pi-ai": "^0.80.6",
+    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-tui": "^0.80.6",
     "marked": "^18.0.2",
     "pi-mcp-adapter": "^2.11.0",
     "pi-web-access": "^0.13.0",

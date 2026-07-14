@@ -85,7 +85,9 @@ function render(data: SettingsData): void {
             { value: 'low', label: 'Low' },
             { value: 'medium', label: 'Medium' },
             { value: 'high', label: 'High' },
-        ], 'How verbose the agent\'s chain-of-thought should be by default.'),
+            { value: 'xhigh', label: 'Extra High' },
+            { value: 'max', label: 'Max (GPT-5.6 / adaptive Claude only)' },
+        ], 'How verbose the agent\'s chain-of-thought should be by default. Max is only natively supported by GPT-5.6 and adaptive Claude models.'),
     ]));
 
     container.appendChild(buildSection('Tool Execution', [
@@ -356,7 +358,7 @@ function buildOAuthPlaceholder(): HTMLElement {
 }
 
 const OAUTH_DESCRIPTIONS: Record<string, string> = {
-    'openai-codex': 'Use your ChatGPT Plus / Pro / Codex subscription. Unlocks GPT-5.1, GPT-5.2 and Codex models.',
+    'openai-codex': 'Use your ChatGPT subscription. Unlocks the GPT-5.6 family and Codex models included with your plan.',
     'anthropic': 'Use your Claude Pro / Max subscription instead of an Anthropic API key.',
     'github-copilot': 'Use your GitHub Copilot subscription as a model provider.',
     'google-gemini-cli': 'Use Google Cloud Code Assist credentials (gemini CLI flow).',

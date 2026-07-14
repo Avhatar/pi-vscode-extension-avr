@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo, OAuthProviderInfo } from '../shared/protocol';
 import { API_KEY_PROVIDERS } from '../shared/providers';
 import { getAuthStorage, notifyAuthChanged } from '../pi/auth';
+import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { refreshModelRegistry } from '../pi/models';
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
@@ -225,7 +226,8 @@ export class SettingsPanel {
                 state: { kind: 'success' },
             });
             await refreshModelRegistry();
-            notifyAuthChanged();
+            if (providerId === 'openai-codex') getCodexUsageStore().clear();
+            notifyAuthChanged(providerId);
             await this._sendSettings();
         } catch (err: any) {
             const message = err?.message ?? String(err);
@@ -245,7 +247,8 @@ export class SettingsPanel {
         const authStorage = await getAuthStorage(this._secrets);
         authStorage.logout(providerId);
         await refreshModelRegistry();
-        notifyAuthChanged();
+        if (providerId === 'openai-codex') getCodexUsageStore().clear();
+        notifyAuthChanged(providerId);
         await this._sendSettings();
     }
 

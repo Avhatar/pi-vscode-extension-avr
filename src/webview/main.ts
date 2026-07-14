@@ -1,6 +1,7 @@
 import { marked } from 'marked';
 import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
+import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -142,6 +143,7 @@ const state: {
     skills: SkillInfo[];
     queuedMessages: string[];
     codexUsage: CodexUsageSnapshot | null;
+    codexUsageError: string | null;
     cacheMode: 'short' | 'long' | 'auto';
     cacheEffective: 'short' | 'long';
 } = {
@@ -166,6 +168,7 @@ const state: {
     skills: [],
     queuedMessages: [],
     codexUsage: null,
+    codexUsageError: null,
     cacheMode: 'auto',
     cacheEffective: 'short',
 };
@@ -255,6 +258,11 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'codexUsage':
             state.codexUsage = msg.usage ?? null;
+            state.codexUsageError = null;
+            updateInputArea();
+            break;
+        case 'codexUsageError':
+            state.codexUsageError = msg.message;
             updateInputArea();
             break;
         case 'error':
@@ -769,59 +777,96 @@ function updateTabs(): void {
 }
 
 function renderCodexUsage(): string {
-    const provider = state.model?.provider;
-    if (provider !== 'openai-codex') return '';
+    if (state.model?.provider !== 'openai-codex') return '';
     const snap = state.codexUsage;
-    if (!snap) return `<span class="footer-codex footer-codex--pending" title="Subscription usage will appear after the first response">Codex &middot; &hellip;</span>`;
+    if (!snap && state.codexUsageError) {
+        return `<span class="footer-codex footer-codex--error" title="${escHtml(state.codexUsageError)}">Codex &middot; unavailable</span>`;
+    }
+    if (!snap) return `<span class="footer-codex footer-codex--pending" title="Subscription usage is loading">Codex &middot; &hellip;</span>`;
 
-    const nowSec = Date.now() / 1000;
-    const primaryPct = snap.primary
-        ? (nowSec >= snap.primary.resetAt ? 0 : snap.primary.percentUsed)
-        : null;
-    const secondaryPct = snap.secondary
-        ? (nowSec >= snap.secondary.resetAt ? 0 : snap.secondary.percentUsed)
-        : null;
-
+    const bucket = selectCodexUsageBucket(snap, state.model.id);
+    const stale = isCodexUsageStale(snap);
     const segments: string[] = [];
-    const planLabel = snap.planType ? snap.planType.charAt(0).toUpperCase() + snap.planType.slice(1) : 'Codex';
-    segments.push(`<span class="footer-codex-plan">${escHtml(planLabel)}</span>`);
-    if (primaryPct !== null && snap.primary) {
-        const label = formatCodexWindow(snap.primary.windowMinutes);
-        const sev = severityClass(primaryPct);
-        segments.push(`<span class="footer-codex-segment ${sev}">${escHtml(label)} ${primaryPct.toFixed(1)}%</span>`);
+    segments.push(`<span class="footer-codex-plan">${escHtml(formatCodexPlan(snap.planType))}</span>`);
+    if (bucket?.primary) {
+        const label = formatCodexWindow(bucket.primary.windowMinutes);
+        const percent = bucket.primary.percentUsed;
+        segments.push(`<span class="footer-codex-segment ${severityClass(percent)}">${escHtml(label)} ${percent.toFixed(1)}%</span>`);
     }
-    if (secondaryPct !== null && snap.secondary) {
-        const label = formatCodexWindow(snap.secondary.windowMinutes);
-        const sev = severityClass(secondaryPct);
-        segments.push(`<span class="footer-codex-segment ${sev}">${escHtml(label)} ${secondaryPct.toFixed(1)}%</span>`);
+    if (bucket?.secondary) {
+        const label = formatCodexWindow(bucket.secondary.windowMinutes);
+        const percent = bucket.secondary.percentUsed;
+        segments.push(`<span class="footer-codex-segment ${severityClass(percent)}">${escHtml(label)} ${percent.toFixed(1)}%</span>`);
     }
 
-    const tooltipLines: string[] = [];
-    tooltipLines.push(`Plan: ${snap.planType}${snap.activeLimit ? ` (${snap.activeLimit})` : ''}`);
-    if (snap.primary) {
-        tooltipLines.push(
-            `${formatCodexWindow(snap.primary.windowMinutes)} window: ${(primaryPct ?? 0).toFixed(1)}% used, resets ${formatResetTime(snap.primary.resetAt)}`,
-        );
-    }
-    if (snap.secondary) {
-        tooltipLines.push(
-            `${formatCodexWindow(snap.secondary.windowMinutes)} window: ${(secondaryPct ?? 0).toFixed(1)}% used, resets ${formatResetTime(snap.secondary.resetAt)}`,
-        );
+    const tooltipLines: string[] = [`Plan: ${formatCodexPlan(snap.planType)}`];
+    for (const candidate of snap.buckets) {
+        const bucketName = formatCodexBucket(candidate.limitName ?? candidate.limitId);
+        const prefix = snap.buckets.length > 1 || candidate.limitId !== 'codex' ? `${bucketName} — ` : '';
+        if (candidate.primary) {
+            tooltipLines.push(formatCodexWindowTooltip(prefix, candidate.primary));
+        }
+        if (candidate.secondary) {
+            tooltipLines.push(formatCodexWindowTooltip(prefix, candidate.secondary));
+        }
     }
     if (snap.credits) {
         if (snap.credits.unlimited) {
             tooltipLines.push('Credits: unlimited');
-        } else if (snap.credits.balance) {
+        } else if (snap.credits.balance !== undefined) {
             tooltipLines.push(`Credits balance: ${snap.credits.balance}`);
         } else if (snap.credits.hasCredits) {
             tooltipLines.push('Credits: available');
         }
     }
+    if (snap.individualLimit) {
+        const reset = formatResetSuffix(snap.individualLimit.resetAt);
+        tooltipLines.push(
+            `Monthly credits: ${snap.individualLimit.used} / ${snap.individualLimit.limit}, ${snap.individualLimit.remainingPercent.toFixed(0)}% remaining${reset}`,
+        );
+    }
+    if ((snap.resetCreditsAvailable ?? 0) > 0) {
+        tooltipLines.push(`Banked resets: ${snap.resetCreditsAvailable} available`);
+    }
+    if (snap.rateLimitReachedType) {
+        tooltipLines.push(`Limit status: ${formatCodexBucket(snap.rateLimitReachedType)}`);
+    }
     const ageSec = Math.max(0, Math.round((Date.now() - snap.capturedAt) / 1000));
-    tooltipLines.push(`Last update: ${formatAge(ageSec)} ago`);
+    tooltipLines.push(`Last update: ${formatAge(ageSec)} ago${stale ? ' (stale)' : ''}`);
 
     const title = tooltipLines.join('\n');
-    return `<span class="footer-codex" title="${escHtml(title)}">${segments.join(' &middot; ')}</span>`;
+    const staleClass = stale ? ' footer-codex--stale' : '';
+    return `<span class="footer-codex${staleClass}" title="${escHtml(title)}">${segments.join(' &middot; ')}</span>`;
+}
+
+function formatCodexWindowTooltip(prefix: string, window: { percentUsed: number; windowMinutes?: number; resetAt?: number }): string {
+    return `${prefix}${formatCodexWindow(window.windowMinutes)} window: ${window.percentUsed.toFixed(1)}% used${formatResetSuffix(window.resetAt)}`;
+}
+
+function formatResetSuffix(resetAt?: number): string {
+    return resetAt === undefined ? '' : `, resets ${formatResetTime(resetAt)}`;
+}
+
+function formatCodexPlan(planType?: string): string {
+    const labels: Record<string, string> = {
+        prolite: 'Pro Lite',
+        self_serve_business_usage_based: 'Business',
+        enterprise_cbp_usage_based: 'Enterprise',
+        free_workspace: 'Free Workspace',
+        education: 'Education',
+    };
+    if (!planType) return 'Codex';
+    return labels[planType] ?? formatCodexBucket(planType);
+}
+
+function formatCodexBucket(value: string): string {
+    return value
+        .split(/[_-]+/)
+        .filter(Boolean)
+        .map((part) => part.toLowerCase() === 'gpt'
+            ? 'GPT'
+            : part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
 }
 
 function severityClass(percent: number): string {
@@ -830,7 +875,8 @@ function severityClass(percent: number): string {
     return 'footer-codex-segment--low';
 }
 
-function formatCodexWindow(minutes: number): string {
+function formatCodexWindow(minutes?: number): string {
+    if (minutes === undefined) return 'window';
     if (minutes >= 1440 && minutes % 1440 === 0) {
         const days = minutes / 1440;
         return days === 7 ? 'week' : `${days}d`;
@@ -841,7 +887,7 @@ function formatCodexWindow(minutes: number): string {
 
 function formatResetTime(unixSec: number): string {
     const diffMs = unixSec * 1000 - Date.now();
-    if (diffMs <= 0) return 'now';
+    if (diffMs <= 0) return 'time passed';
     const totalMin = Math.round(diffMs / 60000);
     if (totalMin < 60) return `in ${totalMin} min`;
     const hours = Math.floor(totalMin / 60);
@@ -1224,7 +1270,9 @@ const THINKING_LEVELS: Array<{ value: string; label: string; desc: string }> = [
     { value: 'minimal', label: 'Minimal', desc: 'Shortest possible reasoning, fastest responses.' },
     { value: 'low', label: 'Low', desc: 'Brief reasoning before each action.' },
     { value: 'medium', label: 'Medium', desc: 'Balanced reasoning depth.' },
-    { value: 'high', label: 'High', desc: 'Deepest reasoning, slowest but most thorough.' },
+    { value: 'high', label: 'High', desc: 'Deep reasoning, slower but more thorough.' },
+    { value: 'xhigh', label: 'Extra High', desc: 'Extended reasoning above High for hard problems.' },
+    { value: 'max', label: 'Max', desc: 'Deepest tier — natively supported only by GPT-5.6 and adaptive Claude.' },
 ];
 
 function toggleThinkingPicker(): void {
@@ -4674,10 +4722,10 @@ function formatCodexTurnParts(turn: any): string[] {
     if (!turn) return [];
     const parts: string[] = [];
     if (turn.primary) {
-        parts.push(`${formatCodexWindow(turn.primary.windowMinutes)} +${turn.primary.deltaPercent.toFixed(1)}%`);
+        parts.push(`account ${formatCodexWindow(turn.primary.windowMinutes)} +${turn.primary.deltaPercent.toFixed(1)}%`);
     }
     if (turn.secondary) {
-        parts.push(`${formatCodexWindow(turn.secondary.windowMinutes)} +${turn.secondary.deltaPercent.toFixed(1)}%`);
+        parts.push(`account ${formatCodexWindow(turn.secondary.windowMinutes)} +${turn.secondary.deltaPercent.toFixed(1)}%`);
     }
     return parts;
 }

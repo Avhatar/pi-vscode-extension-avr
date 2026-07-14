@@ -1,43 +1,60 @@
 import * as vscode from 'vscode';
-import type { CodexUsageSnapshot, CodexUsageWindow, CodexUsageCredits } from '../shared/protocol';
+import type { CodexUsageSnapshot } from '../shared/protocol';
+import { CODEX_USAGE_STALE_MS, normalizeCodexLimitId } from '../shared/codex-usage';
+import { getAuthStorage } from './auth';
+import { parseCodexHeaders, parseCodexUsagePayload } from './codex-usage-parser';
 
 const PERSIST_KEY = 'pi-code.codexUsage';
+const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+const CODEX_AUTH_CLAIM = 'https://api.openai.com/auth';
 
 export type CodexUsageListener = (snapshot: CodexUsageSnapshot | null) => void;
 
 /**
- * Singleton holding the latest Codex subscription-usage snapshot for the
- * signed-in account. The data is global to the user (not per chat), so all
- * webviews share one instance and persist between window reloads.
+ * Holds account-global Codex subscription usage. Refreshes are explicitly
+ * triggered when a chat opens and after a turn; there is intentionally no
+ * polling timer.
  */
 class CodexUsageStore {
     private _snapshot: CodexUsageSnapshot | null = null;
     private _memento: vscode.Memento | undefined;
     private _listeners = new Set<CodexUsageListener>();
+    private _refreshPromise: Promise<CodexUsageSnapshot | null> | undefined;
 
     init(memento: vscode.Memento): void {
         this._memento = memento;
         const persisted = memento.get<CodexUsageSnapshot>(PERSIST_KEY);
-        if (persisted) {
+        if (isPersistedSnapshotUsable(persisted)) {
             this._snapshot = persisted;
+        } else if (persisted) {
+            void memento.update(PERSIST_KEY, undefined);
         }
     }
 
-    /**
-     * Update from a Codex provider response. Returns true if anything changed
-     * (and listeners were notified). Returns false when headers don't carry
-     * subscription metadata — for example when the user is on an OPENAI_API_KEY
-     * (token-billed) flow rather than a ChatGPT subscription.
-     */
+    /** Merge opportunistic SSE response headers into the latest snapshot. */
     updateFromHeaders(headers: Record<string, string>): boolean {
-        const snapshot = parseCodexHeaders(headers);
-        if (!snapshot) return false;
-        this._snapshot = snapshot;
-        void this._memento?.update(PERSIST_KEY, snapshot);
-        for (const listener of this._listeners) {
-            try { listener(snapshot); } catch { /* swallow */ }
-        }
+        const update = parseCodexHeaders(headers);
+        if (!update) return false;
+        this._setSnapshot(mergeCodexUsageSnapshots(this._snapshot, update));
         return true;
+    }
+
+    /** Replace state with the authoritative account usage payload. */
+    updateFromPayload(payload: unknown): CodexUsageSnapshot {
+        const snapshot = parseCodexUsagePayload(payload);
+        this._setSnapshot(snapshot);
+        return snapshot;
+    }
+
+    /** Share concurrent open/turn-end refreshes instead of fanning out. */
+    refresh(): Promise<CodexUsageSnapshot | null> {
+        if (this._refreshPromise) return this._refreshPromise;
+        const request = this._refreshFromApi();
+        this._refreshPromise = request;
+        void request.finally(() => {
+            if (this._refreshPromise === request) this._refreshPromise = undefined;
+        }).catch(() => undefined);
+        return request;
     }
 
     getCurrent(): CodexUsageSnapshot | null {
@@ -50,10 +67,45 @@ class CodexUsageStore {
     }
 
     clear(): void {
+        const hadSnapshot = this._snapshot !== null;
         this._snapshot = null;
         void this._memento?.update(PERSIST_KEY, undefined);
+        if (!hadSnapshot) return;
         for (const listener of this._listeners) {
-            try { listener(null); } catch { /* swallow */ }
+            try { listener(null); } catch { /* Listener failures must not break auth/session flow. */ }
+        }
+    }
+
+    private async _refreshFromApi(): Promise<CodexUsageSnapshot | null> {
+        const authStorage = await getAuthStorage();
+        const accessToken = await authStorage.getApiKey('openai-codex', { includeFallback: false });
+        if (!accessToken) {
+            this.clear();
+            return null;
+        }
+
+        const response = await fetch(CODEX_USAGE_URL, {
+            method: 'GET',
+            headers: {
+                authorization: `Bearer ${accessToken}`,
+                'chatgpt-account-id': extractCodexAccountId(accessToken),
+                accept: 'application/json',
+                originator: 'pi',
+            },
+            signal: AbortSignal.timeout(15_000),
+        });
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) this.clear();
+            throw new Error(`Codex usage refresh failed with HTTP ${response.status}`);
+        }
+        return this.updateFromPayload(await response.json());
+    }
+
+    private _setSnapshot(snapshot: CodexUsageSnapshot): void {
+        this._snapshot = snapshot;
+        void this._memento?.update(PERSIST_KEY, snapshot);
+        for (const listener of this._listeners) {
+            try { listener(snapshot); } catch { /* Listener failures must not break provider flow. */ }
         }
     }
 }
@@ -64,61 +116,59 @@ export function getCodexUsageStore(): CodexUsageStore {
     return instance;
 }
 
-function parseCodexHeaders(headers: Record<string, string>): CodexUsageSnapshot | null {
-    const planType = headers['x-codex-plan-type'];
-    if (!planType) return null;
-
-    const primary = parseWindow(headers, 'primary');
-    const secondary = parseWindow(headers, 'secondary');
-    const credits = parseCredits(headers);
-
-    return {
-        planType,
-        activeLimit: headers['x-codex-active-limit'] || undefined,
-        primary,
-        secondary,
-        credits,
-        capturedAt: Date.now(),
-    };
+export function extractCodexAccountId(accessToken: string): string {
+    const parts = accessToken.split('.');
+    if (parts.length !== 3) throw new Error('Invalid Codex OAuth token');
+    try {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as Record<string, unknown>;
+        const auth = payload[CODEX_AUTH_CLAIM];
+        const accountId = auth && typeof auth === 'object' && !Array.isArray(auth)
+            ? (auth as Record<string, unknown>).chatgpt_account_id
+            : undefined;
+        if (typeof accountId !== 'string' || accountId.length === 0) {
+            throw new Error('Codex OAuth token has no account id');
+        }
+        return accountId;
+    } catch (error) {
+        if (error instanceof Error && error.message === 'Codex OAuth token has no account id') throw error;
+        throw new Error('Invalid Codex OAuth token payload');
+    }
 }
 
-function parseWindow(headers: Record<string, string>, kind: 'primary' | 'secondary'): CodexUsageWindow | undefined {
-    const used = numberOrUndefined(headers[`x-codex-${kind}-used-percent`]);
-    const window = numberOrUndefined(headers[`x-codex-${kind}-window-minutes`]);
-    const resetAfter = numberOrUndefined(headers[`x-codex-${kind}-reset-after-seconds`]);
-    const resetAt = numberOrUndefined(headers[`x-codex-${kind}-reset-at`]);
-    if (used === undefined || window === undefined || resetAfter === undefined || resetAt === undefined) {
-        return undefined;
+function mergeCodexUsageSnapshots(
+    current: CodexUsageSnapshot | null,
+    update: CodexUsageSnapshot,
+): CodexUsageSnapshot {
+    if (!current) return update;
+    const byId = new Map(current.buckets.map((bucket) => [normalizeCodexLimitId(bucket.limitId), bucket]));
+    for (const bucket of update.buckets) {
+        const key = normalizeCodexLimitId(bucket.limitId);
+        const previous = byId.get(key);
+        byId.set(key, previous ? {
+            ...previous,
+            ...bucket,
+            primary: bucket.primary ?? previous.primary,
+            secondary: bucket.secondary ?? previous.secondary,
+        } : bucket);
     }
     return {
-        percentUsed: used,
-        windowMinutes: window,
-        resetAfterSeconds: resetAfter,
-        resetAt,
+        ...current,
+        ...update,
+        planType: update.planType ?? current.planType,
+        activeLimit: update.activeLimit ?? current.activeLimit,
+        buckets: [...byId.values()],
+        credits: update.credits ?? current.credits,
+        individualLimit: update.individualLimit ?? current.individualLimit,
+        rateLimitReachedType: update.rateLimitReachedType ?? current.rateLimitReachedType,
+        resetCreditsAvailable: update.resetCreditsAvailable ?? current.resetCreditsAvailable,
     };
 }
 
-function parseCredits(headers: Record<string, string>): CodexUsageCredits | undefined {
-    const balanceRaw = headers['x-codex-credits-balance'];
-    const hasCreditsRaw = headers['x-codex-credits-has-credits'];
-    const unlimitedRaw = headers['x-codex-credits-unlimited'];
-    if (balanceRaw === undefined && hasCreditsRaw === undefined && unlimitedRaw === undefined) {
-        return undefined;
-    }
-    return {
-        balance: balanceRaw && balanceRaw.length > 0 ? balanceRaw : undefined,
-        hasCredits: parseBool(hasCreditsRaw),
-        unlimited: parseBool(unlimitedRaw),
-    };
-}
-
-function numberOrUndefined(value: string | undefined): number | undefined {
-    if (value === undefined || value === '') return undefined;
-    const n = Number(value);
-    return Number.isFinite(n) ? n : undefined;
-}
-
-function parseBool(value: string | undefined): boolean {
-    if (!value) return false;
-    return value.toLowerCase() === 'true';
+function isPersistedSnapshotUsable(value: unknown): value is CodexUsageSnapshot {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const snapshot = value as Partial<CodexUsageSnapshot>;
+    return Array.isArray(snapshot.buckets)
+        && typeof snapshot.capturedAt === 'number'
+        && Number.isFinite(snapshot.capturedAt)
+        && Date.now() - snapshot.capturedAt <= CODEX_USAGE_STALE_MS;
 }
