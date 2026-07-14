@@ -8,7 +8,7 @@ import { ChatController } from './controllers/chat-controller';
 import { createChatPanel, CHAT_PANEL_VIEW_TYPE } from './providers/chat-panel';
 import { ChatPanelSerializer } from './providers/chat-panel-serializer';
 import { notifyAuthChanged, reloadCredentials } from './pi/auth';
-import { syncCustomProviders } from './pi/models';
+import { refreshModelRegistry } from './pi/models';
 
 import { DiffManager, DiffContentProvider } from './providers/diff';
 import { CheckpointManager } from './providers/checkpoint';
@@ -30,7 +30,7 @@ export async function activate(context: vscode.ExtensionContext) {
             context.secrets.onDidChange(async (e) => {
                 if (e.key.startsWith('pi-code.apiKey.')) {
                     await reloadCredentials();
-                    await syncCustomProviders();
+                    await refreshModelRegistry((message) => outputChannel.appendLine(message));
                     notifyAuthChanged(e.key.slice('pi-code.apiKey.'.length));
                     outputChannel.appendLine(`Credentials reloaded after change to ${e.key}`);
                 }

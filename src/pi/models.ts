@@ -2,18 +2,18 @@ import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { ModelInfo } from '../shared/protocol';
 import { getAuthStorage } from './auth';
 import { registerQwenCnProvider, registerQwenProvider } from './providers/qwen';
-import { applyModelMetadataCorrections } from './model-metadata';
+import { refreshModelMetadata, type ModelMetadataLog } from './model-metadata';
 
 let cached: ModelRegistry | undefined;
 
-export async function getModelRegistry(): Promise<ModelRegistry> {
-    if (cached) {
-        return cached;
-    }
-    const { ModelRegistry: MR } = await import('@earendil-works/pi-coding-agent');
+export async function getModelRegistry(log?: ModelMetadataLog): Promise<ModelRegistry> {
     const authStorage = await getAuthStorage();
-    cached = MR.create(authStorage);
-    await syncCustomProviders();
+    if (!cached) {
+        const { ModelRegistry: MR } = await import('@earendil-works/pi-coding-agent');
+        cached = MR.create(authStorage);
+        await syncCustomProviders();
+    }
+    await refreshModelMetadata(cached, authStorage, log);
     return cached;
 }
 
@@ -27,7 +27,6 @@ export async function syncCustomProviders(): Promise<void> {
     const authStorage = await getAuthStorage();
     syncProvider(registry, 'qwen', () => registerQwenProvider(registry), () => authStorage.hasAuth('qwen'));
     syncProvider(registry, 'qwen-cn', () => registerQwenCnProvider(registry), () => authStorage.hasAuth('qwen-cn'));
-    applyModelMetadataCorrections(registry);
 }
 
 const registeredProviders = new Set<string>();
@@ -53,11 +52,12 @@ function syncProvider(
     }
 }
 
-export async function refreshModelRegistry(): Promise<void> {
-    if (cached) {
-        cached.refresh();
-        applyModelMetadataCorrections(cached);
-    }
+export async function refreshModelRegistry(log?: ModelMetadataLog): Promise<void> {
+    if (!cached) return;
+    cached.refresh();
+    await syncCustomProviders();
+    const authStorage = await getAuthStorage();
+    await refreshModelMetadata(cached, authStorage, log);
 }
 
 export function getAvailableModels(registry: ModelRegistry): ModelInfo[] {

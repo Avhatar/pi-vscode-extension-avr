@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.33.4] - 2026-07-14
+
+### Fixed
+- Codex context limits now follow the authenticated model catalog for the current ChatGPT account instead of pinning GPT-5.6 to 272k, so account rollouts between 272k and 372k are reflected when chats open or credentials change.
+
 ## [0.33.3] - 2026-07-14
 
 ### Fixed

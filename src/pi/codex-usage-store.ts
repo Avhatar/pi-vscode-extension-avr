@@ -3,10 +3,10 @@ import type { CodexUsageSnapshot } from '../shared/protocol';
 import { CODEX_USAGE_STALE_MS, normalizeCodexLimitId } from '../shared/codex-usage';
 import { getAuthStorage } from './auth';
 import { parseCodexHeaders, parseCodexUsagePayload } from './codex-usage-parser';
+import { extractCodexAccountId } from './codex-auth';
 
 const PERSIST_KEY = 'pi-code.codexUsage';
 const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
-const CODEX_AUTH_CLAIM = 'https://api.openai.com/auth';
 
 export type CodexUsageListener = (snapshot: CodexUsageSnapshot | null) => void;
 
@@ -114,25 +114,6 @@ const instance = new CodexUsageStore();
 
 export function getCodexUsageStore(): CodexUsageStore {
     return instance;
-}
-
-export function extractCodexAccountId(accessToken: string): string {
-    const parts = accessToken.split('.');
-    if (parts.length !== 3) throw new Error('Invalid Codex OAuth token');
-    try {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as Record<string, unknown>;
-        const auth = payload[CODEX_AUTH_CLAIM];
-        const accountId = auth && typeof auth === 'object' && !Array.isArray(auth)
-            ? (auth as Record<string, unknown>).chatgpt_account_id
-            : undefined;
-        if (typeof accountId !== 'string' || accountId.length === 0) {
-            throw new Error('Codex OAuth token has no account id');
-        }
-        return accountId;
-    } catch (error) {
-        if (error instanceof Error && error.message === 'Codex OAuth token has no account id') throw error;
-        throw new Error('Invalid Codex OAuth token payload');
-    }
 }
 
 function mergeCodexUsageSnapshots(

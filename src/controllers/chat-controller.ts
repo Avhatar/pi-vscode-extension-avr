@@ -339,6 +339,9 @@ export class ChatController implements vscode.Disposable {
 
         this._authChangedSubscription = onAuthChanged((providerId) => {
             this._broadcastModels();
+            for (const tab of this._tabs.values()) {
+                if (tab.session.refreshCurrentModelMetadata()) this.sendStateSync(tab.id);
+            }
             if (providerId === 'openai-codex') {
                 const tab = this._activeTab;
                 if (tab) void this._refreshCodexUsageForTab(tab, 'Codex authentication changed');

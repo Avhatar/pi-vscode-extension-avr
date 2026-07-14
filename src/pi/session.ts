@@ -4,7 +4,7 @@ import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, Re
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
-import { getModelRegistry, getAvailableModels, findModel, disposeModelRegistry } from './models';
+import { getModelRegistry, getAvailableModels, findModel, refreshModelRegistry, disposeModelRegistry } from './models';
 import { createCodexMonitorExtension } from './codex-monitor';
 import { getCodexUsageStore } from './codex-usage-store';
 import { getBundledPiPackagePaths } from './bundled-packages';
@@ -54,7 +54,7 @@ export class PiSessionManager {
         // Chdir to the workspace folder so adapters resolve project files correctly.
         try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
         const authStorage = await getAuthStorage(this._secrets);
-        this._modelRegistry = await getModelRegistry();
+        this._modelRegistry = await getModelRegistry((message) => this._outputChannel.appendLine(message));
 
         this._sessionManager = SM.create(cwd);
 
@@ -353,6 +353,7 @@ export class PiSessionManager {
         // Chdir to the workspace folder so adapters resolve project files correctly.
         try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
         const { SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
+        await refreshModelRegistry((message) => this._outputChannel.appendLine(message));
         this._sessionManager = SM.create(cwd);
 
         const config = vscode.workspace.getConfiguration('pi-code');
@@ -394,7 +395,7 @@ export class PiSessionManager {
         // Chdir to the workspace folder so adapters resolve project files correctly.
         try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
         const authStorage = await getAuthStorage(this._secrets);
-        this._modelRegistry = await getModelRegistry();
+        this._modelRegistry = await getModelRegistry((message) => this._outputChannel.appendLine(message));
         this._sessionManager = SM.open(sessionPath, undefined);
 
         const config = vscode.workspace.getConfiguration('pi-code');
@@ -456,6 +457,7 @@ export class PiSessionManager {
         // typically the VS Code install directory, not the workspace, so those configs are missed.
         // Chdir to the workspace folder so adapters resolve project files correctly.
         try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
+        await refreshModelRegistry((message) => this._outputChannel.appendLine(message));
         this._sessionManager = SM.open(sessionPath, undefined);
 
         const resourceLoader = await this._buildResourceLoader(cwd);
@@ -488,6 +490,16 @@ export class PiSessionManager {
             name: m.name,
             supportsImages: Array.isArray(m.input) ? m.input.includes('image') : undefined,
         };
+    }
+
+    /** Copy refreshed registry metadata onto an already-open session model. */
+    refreshCurrentModelMetadata(): boolean {
+        const current: any = this._session?.model;
+        if (!current || !this._modelRegistry) return false;
+        const refreshed: any = findModel(this._modelRegistry, getProviderId(current), current.id);
+        if (!refreshed || refreshed.contextWindow === current.contextWindow) return false;
+        current.contextWindow = refreshed.contextWindow;
+        return true;
     }
 
     getThinkingLevel(): string | undefined {
