@@ -8,7 +8,13 @@ import { getModelRegistry, getAvailableModels, findModel, refreshModelRegistry, 
 import { createCodexMonitorExtension } from './codex-monitor';
 import { getCodexUsageStore } from './codex-usage-store';
 import { getBundledPiPackagePaths } from './bundled-packages';
-import { createClaudeMdInjectorExtension } from './claude-md-injector';
+import { createClaudeContextExtension } from './claude-compat/context-extension';
+import { getRootClaudeFiles } from './claude-compat/context';
+import { retainNativePiContextFiles } from './claude-compat/boundary';
+import { detectClaudeInfrastructure } from './claude-compat/detect';
+import { CLAUDE_NESTED_SEARCH_EXCLUDE } from './claude-compat/discovery';
+import { indexClaudeRules } from './claude-compat/rules';
+import { indexClaudeResources } from './claude-compat/resources';
 import { createTodoExtension } from './todo/extension';
 import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
@@ -202,16 +208,48 @@ export class PiSessionManager {
         const lspEnabled = vscode.workspace
             .getConfiguration('pi-code')
             .get<boolean>('lsp.enabled', false);
+        const claudeInfrastructure = await detectClaudeInfrastructure(cwd, {
+            collectNestedClaudeFiles: true,
+            collectNestedClaudeSkillFiles: true,
+            findNestedClaudeFiles: async () => {
+                const pattern = new vscode.RelativePattern(cwd, '**/{CLAUDE.md,CLAUDE.local.md}');
+                const matches = await vscode.workspace.findFiles(pattern, CLAUDE_NESTED_SEARCH_EXCLUDE, 1);
+                return matches.map((uri) => uri.fsPath);
+            },
+            findNestedClaudeSkillFiles: async () => {
+                const pattern = new vscode.RelativePattern(cwd, '**/.claude/skills/**/SKILL.md');
+                const matches = await vscode.workspace.findFiles(pattern, CLAUDE_NESTED_SEARCH_EXCLUDE, 500);
+                return matches.map((uri) => uri.fsPath);
+            },
+        });
         const factories = [
             createCodexMonitorExtension({
                 onResponse: ({ headers }) => {
                     usageStore.updateFromHeaders(headers);
                 },
             }),
-            createClaudeMdInjectorExtension(),
             createTodoExtension(this.todoStore, todoGuidelines),
             createLspExtension({ enabled: lspEnabled }),
         ];
+        if (claudeInfrastructure.active) {
+            // User-level Claude context is inspected only after a project marker
+            // activates compatibility, preserving the inactive-project boundary.
+            const contextEnabled = claudeInfrastructure.rootContextFiles.length > 0 ||
+                claudeInfrastructure.nestedContextFiles.length > 0 ||
+                getRootClaudeFiles(cwd).length > 0;
+            const rulesEnabled = claudeInfrastructure.ruleDirectories.length > 0 ||
+                indexClaudeRules(cwd).rules.length > 0;
+            const resources = indexClaudeResources(cwd, {
+                projectSkillDirectories: claudeInfrastructure.skillDirectories,
+                projectSkillFiles: claudeInfrastructure.nestedSkillFiles,
+                projectCommandDirectories: claudeInfrastructure.commandDirectories,
+            });
+            factories.push(createClaudeContextExtension({ contextEnabled, rulesEnabled, resources }));
+            this._outputChannel.appendLine(
+                `Claude compatibility activated: ${claudeInfrastructure.activationReasons.join(', ')} ` +
+                `(context=${contextEnabled}, rules=${rulesEnabled}, skills=${resources.skills.length}, commands=${resources.commands.length})`,
+            );
+        }
         const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const loader = new DefaultResourceLoader({
             cwd,
@@ -219,6 +257,14 @@ export class PiSessionManager {
             settingsManager,
             extensionFactories: factories,
             additionalExtensionPaths: bundledPackagePaths,
+            // Pi natively treats CLAUDE.md as an AGENTS.md-equivalent system
+            // context file. Always remove only Claude-authored files from that
+            // unbounded path: active projects receive them through the bridge,
+            // while inactive projects retain the zero-Claude-content invariant.
+            // Native AGENTS.md files remain untouched.
+            agentsFilesOverride: (base) => ({
+                agentsFiles: retainNativePiContextFiles(base.agentsFiles),
+            }),
         });
         await loader.reload();
         if (bundledPackagePaths.length > 0) {
@@ -520,6 +566,30 @@ export class PiSessionManager {
         } catch {
             return [];
         }
+    }
+
+    /** Commands currently mounted by SDK extensions. Temporary diagnostics use
+     * this to verify that capability-gated extensions were actually loaded. */
+    getCommands(): Array<{ name: string; description?: string; source: string }> {
+        if (!this._session) return [];
+        try {
+            return this._session.resourceLoader.getExtensions().extensions.flatMap((extension) =>
+                Array.from(extension.commands.values(), (command) => ({
+                    name: command.name,
+                    description: command.description,
+                    source: command.sourceInfo.source,
+                })),
+            );
+        } catch {
+            return [];
+        }
+    }
+
+    /** Execute an SDK slash command. Diagnostic commands stay local; adapted
+     * workflow commands may intentionally submit their bounded prompt. */
+    async executeSlashCommand(command: string): Promise<void> {
+        if (!this._session) throw new Error('Session not initialized');
+        await this._session.prompt(command);
     }
 
     getActiveToolNames(): string[] {

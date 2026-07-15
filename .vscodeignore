@@ -8,13 +8,10 @@ vitest.config.ts
 tsconfig.json
 tsconfig.integration.json
 esbuild.js
-TODO.md
 AGENTS.md
 CLAUDE.md
 README.md
-MIGRATION_PANELS.md
-PERSISTENT_TODO.md
-WORKSPACE_FILE_MENTIONS.md
+.dev-notes/**
 docs/**
 user-reply.txt
 nul

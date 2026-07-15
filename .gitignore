@@ -11,3 +11,21 @@ nul
 
 user-reply.txt
 
+# Local feature plans, implementation notes, and development backlogs
+.dev-notes/
+
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+.mcp.json
+.pi/mcp.json
+.vscode/settings.json
+*.code-workspace
+

@@ -7,6 +7,150 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.43.5] - 2026-07-15
+
+### Removed
+- Removed feature-specific planning, migration, backlog, and implementation-note documents from the public repository while retaining them locally in an ignored development-notes directory.
+
+## [0.43.4] - 2026-07-15
+
+### Fixed
+- Restored full author attribution in the package metadata and MIT license after an overbroad privacy cleanup.
+
+## [0.43.3] - 2026-07-15
+
+### Security
+- Removed embedded editor timestamps, timezone data, and document identifiers from all bundled PNG assets.
+
+## [0.43.2] - 2026-07-15
+
+### Security
+- Removed local filesystem paths and image-editor metadata from the marketplace screenshot.
+- Added ignore rules for common credential files and machine-specific MCP, VS Code, and workspace configuration.
+
+## [0.43.1] - 2026-07-14
+
+### Removed
+- Removed project-specific task-store, MCP-server, and directory-layout assumptions from the universal Claude compatibility bridge; projects retain full control of their own task workflows through source instructions, skills, and MCP tools.
+
+### Changed
+- Compatibility fixtures and documentation now use generic project names and portable paths only.
+
+## [0.41.1] - 2026-07-14
+
+### Fixed
+- Nested Claude discovery now ignores generated, dependency, and build directories such as `Library`, `Temp`, `node_modules`, `bin`, and `obj`, preventing cached package skills or instructions from activating project compatibility.
+- Other ignored source directories remain eligible for nested Claude instructions and skills.
+- Claude compatibility diagnostics now fail when a generated or dependency resource leaks into the detected nested resource set.
+
+## [0.41.0] - 2026-07-14
+
+### Added
+- Nested `<subdirectory>/.claude/skills/**/SKILL.md` resources now activate compatibility and appear under directory-qualified commands such as `/apps/web:deploy`.
+- Nested skills are delivered to the model only when a path-bearing tool works inside their directory scope, with branch/compaction-aware deduplication and the existing identity/tool boundary.
+- The Claude compatibility smoke test now validates nested-only activation, qualified naming, path isolation, pre-tool delivery, retry behavior, and compaction reapplication.
+
+### Changed
+- Nested skills remain outside the global skill catalog to avoid irrelevant monorepo context; source changes intentionally take effect after a window reload/new chat rather than through live watchers.
+
+## [0.40.0] - 2026-07-14
+
+### Added
+- Claude skills and commands now receive an auditable per-resource tool-reference map based on the active Pi registry, including built-in capability names and Claude-style MCP names.
+- `/claude-compat` and the smoke test now distinguish mapped, direct-MCP, proxy-MCP, runtime-only, unavailable, and intentionally deferred agent references.
+
+### Changed
+- Claude `mcp__server__tool` references now resolve to existing `server_tool` direct tools or the bundled `mcp` proxy without introducing a second MCP configuration or runtime path.
+- Progressively disclosed skill files are annotated after reading so Claude-specific names are interpreted through available Pi tools without modifying the source files or granting permissions.
+
+## [0.39.0] - 2026-07-14
+
+### Added
+- Project and activated user Claude skills are now indexed as provider-independent Pi resources with progressive-disclosure descriptions and native slash-command invocation.
+- Legacy `.claude/commands/**/*.md` and `~/.claude/commands/**/*.md` files now appear as native Pi slash commands, including colon-qualified nested names and argument substitution.
+- `/claude-compat` and the smoke test now report skill/command precedence, malformed metadata recovery, unsupported runtime fields, command mounting, substitutions, and identity-boundary enforcement.
+
+### Changed
+- Same-named user resources now take precedence over project resources, skills take precedence over legacy commands, and canonical targets reached through multiple symlinks load only once.
+- Claude skill fields that would change models, permissions, tools, agents, hooks, shell execution, or forked runtime behavior are now diagnosed without changing the current Pi agent contract.
+
+## [0.38.0] - 2026-07-14
+
+### Added
+- Claude-authored instructions and rules now include a provider-independent interpretation boundary explaining how unsupported Claude tools and runtime concepts map to the current Pi environment.
+- Activated projects now consume applicable ancestor `CLAUDE.md` and `CLAUDE.local.md` files in general-to-specific order.
+
+### Changed
+- Claude infrastructure compatibility now explicitly preserves the selected Pi agent's identity, model, system instructions, permissions, runtime, and tool contract instead of presenting Claude resources as harness-defining instructions.
+- Claude instruction files are removed from Pi's native `AGENTS.md` system-context path and are delivered only through the conditionally activated bounded adapter; native `AGENTS.md` handling is unchanged.
+- `/claude-compat` and the smoke test now report and validate resource adaptation rather than Claude identity or runtime emulation.
+
+## [0.37.1] - 2026-07-14
+
+### Fixed
+- The Claude compatibility smoke test now unlinks its temporary circular rule junctions before cleanup on Windows, preventing `ERROR_CANT_RESOLVE_FILENAME` after otherwise successful checks.
+
+## [0.37.0] - 2026-07-14
+
+### Added
+- Claude compatibility now loads root and nested `CLAUDE.local.md`, activated user rules from `~/.claude/rules/`, symlinked rule files/directories, and `claudeMdExcludes` from Claude settings.
+- Rule path matching now covers Claude's documented brace and bracket glob expressions while isolating malformed patterns.
+
+### Changed
+- Supplemental Claude instructions and project-wide rules are now delivered as hidden context messages rather than system-prompt additions, with duplicate prevention and automatic reapplication after compaction.
+- Relative `@file` imports now resolve from the containing instruction file, stop after Claude's four-hop limit, and ignore import-looking text inside Markdown code or HTML comments.
+- The Claude compatibility smoke test now validates all corrected context, import, exclusion, user-rule, symlink, glob, delivery, and compaction semantics against the production implementation.
+
+### Fixed
+- Human-only HTML comments are stripped from injected Claude instructions while remaining intact in fenced or inline code.
+
+## [0.36.1] - 2026-07-14
+
+### Changed
+- The Claude compatibility smoke test now executes the actual production rule hooks against an isolated fixture, covering project-wide prompt injection, pre-tool blocking, parallel sibling calls, next-turn retry, compaction and content-change reapplication, shell fallback, and capability gating without contacting an AI provider.
+
+## [0.36.0] - 2026-07-14
+
+### Added
+- Claude projects can now use `.claude/rules/**/*.md` with project-wide rules or path-scoped `paths` frontmatter supporting exact paths and `*`, `**`, and `?` wildcards.
+- Matching path rules are delivered directly before `read`, `write`, `edit`, `grep`, `find`, and `ls`; the original operation is safely blocked and can be retried after the rules enter context, while shell-discovered paths receive rules as a result fallback.
+
+### Changed
+- `/claude-compat <path>` and the Claude compatibility smoke test now report indexed rules, matching scopes, malformed metadata, and isolated wildcard/frontmatter safety checks.
+
+### Fixed
+- Path rules are reapplied after compaction or content changes, remain branch-aware, and block every matching sibling tool call from the same assistant turn without duplicating rule messages.
+
+## [0.35.1] - 2026-07-14
+
+### Changed
+- The Claude compatibility smoke test now validates real-project direct content rendering, instruction precedence, deterministic and bounded imports, canonical deduplication, containment, Pi preload deduplication, and nested path selection.
+- The smoke test also runs isolated temporary-fixture checks for import cycles, workspace escape rejection, depth limiting, and dependency-aware cache invalidation without modifying the opened workspace or contacting an AI provider.
+
+## [0.35.0] - 2026-07-14
+
+### Added
+- Claude project instructions are now injected directly into agent context, including activated user-level instructions, deterministic recursive `@file` imports, and applicable nested `CLAUDE.md` files without requiring the agent to spend read-tool calls.
+
+### Fixed
+- Claude instruction imports now enforce workspace containment, detect cycles, stop after five levels, deduplicate canonical files, and refresh when any imported dependency changes.
+- Path-scoped Claude instructions are reapplied after compaction or when their contents change, while avoiding repeated injection within the same active branch context.
+
+## [0.34.1] - 2026-07-14
+
+### Fixed
+- The Claude compatibility smoke test now checks commands through the SDK extension registry instead of incorrectly reporting active `/claude-compat` commands as missing.
+
+## [0.34.0] - 2026-07-14
+
+### Added
+- Claude compatibility now activates only when the workspace contains real Claude infrastructure such as `CLAUDE.md`, `.claude` resources, nested instructions, or a project-scoped Claude plugin; ordinary projects receive no Claude-specific hooks, commands, tools, or prompt content.
+- Active Claude projects now expose `/claude-compat` for instruction status while retaining `/claude-md-injector` as a backwards-compatible alias.
+- A temporary **Pi Code: Claude Compatibility Smoke Test** command can validate detection and conditional session mounting against an opened Claude project, then run `/claude-compat` locally without making an AI provider request.
+
+### Fixed
+- Nested `CLAUDE.md` instructions are now discovered even when the project has no root `CLAUDE.md`, and path containment no longer mistakes similarly prefixed sibling directories for part of the workspace.
+
 ## [0.33.4] - 2026-07-14
 
 ### Fixed
@@ -78,7 +222,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.30.3] - 2026-07-09
 
 ### Changed
-- Tools panel now categorizes previously-ungrouped tools into named sections instead of a flat list: **Pi built-ins** (`read`, `bash`, `edit`, `write`), **Web** (`web_search`, `fetch_content`, `get_search_content`), **ToDo** (`todo`), **MCP** (`mcp`), **Language Server** (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_incoming`, `call_hierarchy_outgoing`). Each category is collapsible with per-category Enable / Disable buttons, mirroring the prefix-based groups (`unity_*`, `blueprint_*`, …). Anything not matching a category and not sharing a prefix with another tool lands in a new **Other** section at the bottom.
+- Tools panel now categorizes previously-ungrouped tools into named sections instead of a flat list: **Pi built-ins** (`read`, `bash`, `edit`, `write`), **Web** (`web_search`, `fetch_content`, `get_search_content`), **ToDo** (`todo`), **MCP** (`mcp`), **Language Server** (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_incoming`, `call_hierarchy_outgoing`). Each category is collapsible with per-category Enable / Disable buttons, mirroring the prefix-based groups (`github_*`, `database_*`, …). Anything not matching a category and not sharing a prefix with another tool lands in a new **Other** section at the bottom.
 - Named categories carry a subtle blue left-accent stripe so the curated set reads distinctly from the auto-derived prefix groups. Category labels are rendered as human text (sentence case) while prefix groups keep their monospaced identifier styling (e.g. `unity`).
 
 ## [0.30.2] - 2026-07-09
@@ -98,7 +242,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.30.0] - 2026-07-09
 
 ### Added
-- **Tools panel** in the launcher sidebar under History. Lists every tool registered for the active chat with a checkbox per tool; unchecking hides the tool from the model on the next turn. Tools sharing a prefix (`unity_*`, `blueprint_*`, `task_workspace_*`, …) are grouped into collapsible sections with per-group "Enable" / "Disable" buttons — one click removes 50+ Unity tools from the prompt when they aren't needed. Also has a filter box and top-level "Enable all" / "Disable all". Selection is per-chat, persisted, and survives ReloadWindow. When the active chat is streaming, the panel is greyed out (matches the ToDo / Plan Mode toggles).
+- **Tools panel** in the launcher sidebar under History. Lists every tool registered for the active chat with a checkbox per tool; unchecking hides the tool from the model on the next turn. Tools sharing a prefix (`github_*`, `database_*`, `browser_*`, …) are grouped into collapsible sections with per-group "Enable" / "Disable" buttons — one click removes a large tool group from the prompt when it is not needed. Also has a filter box and top-level "Enable all" / "Disable all". Selection is per-chat, persisted, and survives ReloadWindow. When the active chat is streaming, the panel is greyed out (matches the ToDo / Plan Mode toggles).
 - **Copy / Paste tool selection** buttons in the Tools panel heading — Copy writes the current chat's tool selection to the system clipboard as versioned JSON, Paste applies a previously copied selection to the active chat. Works between chats and between VS Code windows.
 - Diagnostic log lines in the "Pi Code" output channel: `[tool apply]` on every persisted-state application (subscribe / newSession / loadSession / restore), `[tool selection]` on every effective `setActiveToolsByName` call, and `[prompt|steer|followUp|queued]` before every model turn with a warning if the UI toggle disagrees with the actual active-tools set. Makes tool-visibility mismatches (e.g. "ToDo toggle shows ON but the model isn't calling it") visible without a debugger.
 
@@ -307,7 +451,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.17.6] - 2026-05-10
 
 ### Removed
-- Trimmed development-only files (`MIGRATION_PANELS.md`, `PERSISTENT_TODO.md`, `WORKSPACE_FILE_MENTIONS.md`, and a stray `nul`) from the VSIX. No runtime impact.
+- Trimmed development-only planning documents and a stray build artifact from the VSIX. No runtime impact.
 
 ## [0.17.5] - 2026-05-10
 

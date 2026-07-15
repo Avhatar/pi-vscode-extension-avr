@@ -26,7 +26,7 @@ In addition to those two structural changes, the fork has accumulated a number o
 - Prompt cache retention controls in the chat footer, with `short`, `long`, and provider-aware `auto` modes.
 - Image attachments via paste, drag-and-drop, or a paperclip button — sent to image-capable models with previews preserved in chat history.
 - Workspace `@` file mentions in the chat input, with cached suggestions, configurable excludes, and inline highlighting of mentioned paths.
-- Auto-loaded `CLAUDE.md` / `AGENTS.md` instructions from the workspace, including per-folder rules surfaced when the agent touches that subtree.
+- Auto-loaded `CLAUDE.md` / `AGENTS.md` instructions from the workspace. In Claude-enabled projects, root, user-level, recursively imported, and per-folder `CLAUDE.md` contents are injected directly without requiring extra read-tool calls.
 - Bundled MCP adapter that picks up servers from `.mcp.json` / `.pi/mcp.json` automatically, with no `pi install` step.
 - Per-chat **Plan Mode**: the agent plans the task with read-only tools and waits for confirmation before any file changes.
 - Opt-in **Language Server tools** (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) that pull semantic information from the active VS Code language extension instead of relying on grep heuristics.
@@ -305,7 +305,7 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 - **DiffManager** ([src/providers/diff.ts](src/providers/diff.ts)) tracks file changes from `edit`/`write` tool calls and provides unified diffs via a `pi-diff:` virtual document scheme.
 - **CheckpointManager** ([src/providers/checkpoint.ts](src/providers/checkpoint.ts)) snapshots file state per turn for rollback and redo.
 - **Codex usage plumbing** ([src/pi/codex-monitor.ts](src/pi/codex-monitor.ts) + [src/pi/codex-usage-store.ts](src/pi/codex-usage-store.ts)) captures subscription windows from Codex response headers and exposes them to the chat footer.
-- **CLAUDE.md injector** ([src/pi/claude-md-injector.ts](src/pi/claude-md-injector.ts)) hooks into the agent lifecycle to inline workspace-level and per-folder `CLAUDE.md` instructions into the system prompt.
+- **Claude infrastructure compatibility bridge** ([src/pi/claude-compat/](src/pi/claude-compat/)) activates only in workspaces with detected Claude infrastructure. It delivers bounded instructions/rules, adapts project/user skills and commands, activates nested skills with directory-qualified names such as `/apps/web:deploy`, and resolves Claude tool vocabulary through the active Pi registry (`Read` → `read`, `Glob` → `find`, `mcp__server__tool` → a direct `server_tool` or the existing `mcp` proxy). Mappings never grant permissions or add tools; Claude-only model, agent, hook, shell, and permission behavior remains diagnosed and non-emulated. Project `.mcp.json` continues to be owned exclusively by the bundled `pi-mcp-adapter`.
 - **Per-chat ToDo** ([src/pi/todo/](src/pi/todo/)) provides a persistent, per-tab task list the agent manages via a built-in `todo` tool. The system includes a reducer-based task graph ([task-graph.ts](src/pi/todo/task-graph.ts)), replay-based persistence ([replay.ts](src/pi/todo/replay.ts)), a state store ([store.ts](src/pi/todo/store.ts)), and the tool schema ([tool.ts](src/pi/todo/tool.ts)). The launcher sidebar renders the active tab's ToDo with a per-tab enable/disable toggle.
 - **Workspace file mentions** ([src/workspace/file-mentions.ts](src/workspace/file-mentions.ts)) indexes the opened workspace for `@` file mention suggestions in the chat input, supporting fuzzy matching, configurable excludes, and cached file lists.
 - **Provider registry** ([src/shared/providers.ts](src/shared/providers.ts)) defines the supported API-key providers (Anthropic, OpenAI, Google, Qwen, Z.ai, and others). Custom provider sync ([src/pi/models.ts](src/pi/models.ts)) keeps the model registry up to date. Qwen-specific logic lives in [src/pi/providers/qwen.ts](src/pi/providers/qwen.ts).
@@ -327,7 +327,7 @@ src/
 │   ├── auth.ts                       # Auth storage singleton + OAuth bridge
 │   ├── events.ts                     # Event router for agent events
 │   ├── bundled-packages.ts           # Pi extensions shipped inside the VSIX
-│   ├── claude-md-injector.ts         # Auto-injects CLAUDE.md / AGENTS.md into prompts
+│   ├── claude-compat/                 # Conditionally bridges Claude project infrastructure
 │   ├── codex-monitor.ts              # Codex subscription header capture
 │   ├── codex-usage-store.ts          # Per-window usage state (5h / weekly)
 │   ├── providers/
