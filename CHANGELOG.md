@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.43.6] - 2026-07-15
+
+### Fixed
+- Normalized collapsed ToDo, History, and Tools panel heights with Plan Mode in the launcher sidebar.
+
 ## [0.43.5] - 2026-07-15
 
 ### Removed

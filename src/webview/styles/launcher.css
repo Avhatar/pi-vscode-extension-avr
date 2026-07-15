@@ -165,10 +165,14 @@ body {
     background: var(--vscode-sideBarSectionHeader-background, transparent);
 }
 
-.todo-heading {
-    /* Inherits .section-heading-button from the History pattern; only
-       extra spacing concerns are local. */
+.todo-heading,
+.history-section > .section-heading,
+.tools-heading {
+    /* These framed panels share Plan Mode's compact heading geometry.
+       The general section-heading padding and margin made collapsed ToDo,
+       History, and Tools rows taller than the Plan Mode row. */
     margin-top: 0;
+    padding: 2px 4px;
 }
 
 /* The toggle host sits at the right edge of the heading row; the
@@ -400,8 +404,10 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    /* Match the 16px toggle used by Plan Mode so Tools remains the same
+       height even when its copy/paste actions are visible. */
+    width: 16px;
+    height: 16px;
     margin-left: 4px;
     border-radius: var(--row-radius);
     cursor: pointer;
