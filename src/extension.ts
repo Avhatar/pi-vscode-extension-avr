@@ -13,7 +13,6 @@ import { refreshModelRegistry } from './pi/models';
 import { DiffManager, DiffContentProvider } from './providers/diff';
 import { CheckpointManager } from './providers/checkpoint';
 import { registerLspSmokeCommand } from './dev/lsp-smoke';
-import { registerClaudeCompatSmokeCommand } from './dev/claude-compat-smoke';
 
 let controllerRef: ChatController | undefined;
 
@@ -127,7 +126,6 @@ export async function activate(context: vscode.ExtensionContext) {
             ),
 
             registerLspSmokeCommand(context),
-            registerClaudeCompatSmokeCommand(context, () => controller.activeSession),
         );
 
         outputChannel.appendLine('Pi Code extension activated.');

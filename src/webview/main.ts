@@ -2,6 +2,7 @@ import { marked } from 'marked';
 import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage';
+import { shouldDisplayChatMessage } from '../shared/message-visibility';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: ClientMessage): void;
@@ -694,6 +695,7 @@ function getDisplayMessageItems(): Array<{ msg: any; sourceIndex: number }> {
 
     for (let i = 0; i < state.messages.length; i++) {
         const msg = state.messages[i];
+        if (!shouldDisplayChatMessage(msg)) continue;
         if ((msg.role ?? 'unknown') === 'compactionSummary') {
             const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : Number.MAX_SAFE_INTEGER;
             compactions.push({ msg, sourceIndex: i, timestamp });

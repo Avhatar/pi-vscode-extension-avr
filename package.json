@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.43.6",
+  "version": "0.43.8",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -74,10 +74,6 @@
       {
         "command": "pi-code.lspSmoke",
         "title": "Pi Code: LSP Smoke Test (cursor)"
-      },
-      {
-        "command": "pi-code.claudeCompatSmoke",
-        "title": "Pi Code: Claude Compatibility Smoke Test"
       }
     ],
     "keybindings": [

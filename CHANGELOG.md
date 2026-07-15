@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.43.8] - 2026-07-15
+
+### Fixed
+- Hidden compatibility instructions no longer appear as visible messages in the chat.
+
+## [0.43.7] - 2026-07-15
+
+### Changed
+- Disabled the Claude compatibility smoke-test command in normal extension use while retaining its implementation for future diagnostics.
+
 ## [0.43.6] - 2026-07-15
 
 ### Fixed

@@ -1,9 +1,10 @@
-// Temporary end-to-end diagnostic command for the Claude compatibility rollout.
+// End-to-end diagnostic command for the Claude compatibility bridge.
 // It runs the real workspace detector, checks whether the active Pi session
 // mounted the conditional extension, and invokes /claude-compat without making
-// a provider request. Remove after the compatibility feature has permanent UI.
+// a provider request.
 //
-// Invoke from Command Palette: "Pi Code: Claude Compatibility Smoke Test".
+// This command is intentionally not registered or contributed to the Command
+// Palette. Keep the implementation available for future bridge diagnostics.
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
