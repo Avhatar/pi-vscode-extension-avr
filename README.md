@@ -1,7 +1,7 @@
 # Pi Code for VS Code
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
-[![VS Code](https://img.shields.io/badge/VS%20Code-1.100%2B-007ACC.svg?logo=visualstudiocode)](https://code.visualstudio.com/)
+[![VS Code](https://img.shields.io/badge/VS%20Code-1.110%2B-007ACC.svg?logo=visualstudiocode)](https://code.visualstudio.com/)
 
 A visual VS Code wrapper around the [Pi coding agent](https://pi.dev/) — built as a friendly UI for non-engineers and as a smooth landing pad for anyone moving over from Claude Code who wants the same familiar ergonomics, extra quality-of-life features, and the freedom to use any AI model behind the scenes.
 
@@ -26,9 +26,9 @@ In addition to those two structural changes, the fork has accumulated a number o
 - Prompt cache retention controls in the chat footer, with `short`, `long`, and provider-aware `auto` modes.
 - Image attachments via paste, drag-and-drop, or a paperclip button — sent to image-capable models with previews preserved in chat history.
 - Workspace `@` file mentions in the chat input, with cached suggestions, configurable excludes, and inline highlighting of mentioned paths.
-- Auto-loaded `CLAUDE.md` / `AGENTS.md` instructions from the workspace. In Claude-enabled projects, root, user-level, recursively imported, and per-folder `CLAUDE.md` contents are injected directly without requiring extra read-tool calls.
+- Conditional Claude project compatibility for instructions, rules, skills, commands, and tool-name adaptation. Ordinary projects receive no Claude-specific prompt content; native `AGENTS.md` handling remains unchanged.
 - Bundled MCP adapter that picks up servers from `.mcp.json` / `.pi/mcp.json` automatically, with no `pi install` step.
-- Per-chat **Plan Mode**: the agent plans the task with read-only tools and waits for confirmation before any file changes.
+- Per-chat **Plan Mode**: persistent prompt guidance asks the agent to study and outline change-heavy work before executing once the approach is clear, without restricting tools or adding execution phases.
 - Opt-in **Language Server tools** (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) that pull semantic information from the active VS Code language extension instead of relying on grep heuristics.
 - Per-chat persistent **ToDo** that the agent maintains across `/compact` and across reloads, with per-tab enable/disable.
 - The launcher persists a session history on disk and lets you delete entries individually; opening an old entry reopens it as a fresh editor panel.
@@ -46,14 +46,20 @@ Run multiple independent agent sessions in parallel — each chat panel has its 
 ### Tool Visibility
 Every tool the agent invokes (file reads, writes, edits, shell commands, glob/grep/find searches, web tools, LSP semantic queries) is rendered as an expandable card showing arguments and results in real time. Tool rows sit on a vertical timeline rail that connects the icons on the left, with hover tooltips on every icon describing what the tool does.
 
+### Tool Selection Panel
+The launcher lists every tool exposed to the active chat with per-tool, per-category, and per-prefix enable/disable controls. A filter searches names and descriptions, while Copy/Paste transfers a curated selection between chats or VS Code windows. Selection is isolated per chat and persists across `Reload Window`.
+
 ### Inline Diffs & File Change Tracking
 File modifications made by the agent are tracked automatically. Review unified diffs inline in the chat or open them in VS Code's native diff editor. Undo individual file changes or all changes at once.
+
+### File Undo View
+An optional bar above the prompt lists every file changed in the current chat with one-click **Undo**, **Redo**, and **Review** actions. File tracking always remains active; the per-chat toggle controls only this always-visible view and can default on through `pi-code.fileUndoView.defaultEnabled`.
 
 ### Checkpoints & Rollback
 Each user message creates a checkpoint. Restore your workspace to any previous checkpoint, then redo to get changes back. The message history is preserved so you can branch the conversation from any point.
 
 ### Streaming with Thinking
-Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle through thinking levels (`off`, `minimal`, `low`, `medium`, `high`) to control how much internal reasoning is shown.
+Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle through `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. `max` is natively supported by GPT-5.6 and adaptive Claude models; other models fall back to their closest supported level.
 
 ### Model Selection
 Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
@@ -67,8 +73,10 @@ Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatical
 ### Workspace File Mentions
 Type `@` in the chat input to open a suggestion menu that fuzzy-matches files from the opened workspace. Selected mentions are highlighted in blue inside the input and sent to the agent as path references it can choose to inspect — this is **not** an attachment mechanism, file contents are not inlined or uploaded. Indexing respects VS Code's standard search excludes plus a built-in pattern set (skip `node_modules`, build artefacts, lockfiles), and can be further tuned via the `pi-code.fileMentions.*` settings or a workspace-local `.pi/file-mentions.json`.
 
-### Auto-Loaded Workspace Instructions
-At the start of each turn the agent automatically reads `CLAUDE.md` (and any files it `@`-imports up to a depth of 5) so project-level rules apply without you having to point at them. Per-folder `CLAUDE.md` files are surfaced on the fly whenever the agent touches paths in that subtree, so directory-scoped instructions are honoured without manual reads.
+### Claude Project Compatibility
+Claude compatibility activates only when the workspace contains real Claude infrastructure such as `CLAUDE.md`, `CLAUDE.local.md`, `.claude` rules, skills or commands, nested resources, or a project-scoped Claude plugin. Ordinary projects receive no Claude-specific hooks or prompt content, and user-level Claude resources are considered only after project activation.
+
+Root, ancestor, local, explicitly imported, and directory-scoped instructions are injected as hidden context without spending read-tool calls. Imports are contained to the workspace and limited to four recursive hops; generated and dependency directories are excluded from nested discovery. Project-wide and path-scoped rules are applied when relevant. Project and activated user skills and legacy commands become native slash commands, while nested skills activate only in their directory scope under qualified names such as `/apps/web:deploy`. Claude tool names map only to capabilities already available through Pi, preserving the active agent, model, permissions, and MCP configuration. `/claude-compat` reports what is active. Native `AGENTS.md` handling remains unchanged.
 
 ### Image Attachments
 Paste images directly into the chat input, drop them onto the chat panel, or pick a file via the paperclip button next to the model picker. Attached images appear as previews before sending and remain in the chat history. Large images are resized automatically; image-capable models receive them inline with the prompt.
@@ -77,10 +85,10 @@ Paste images directly into the chat input, drop them onto the chat panel, or pic
 When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer shows percent used in the 5-hour and weekly windows with colour cues at 50% and 90%. A tooltip details the plan, exact reset times, and remaining credit balance. Each assistant message footer also shows the per-turn delta (`5h +1.2% · week +0.3%`) so you can see how much each turn cost. Hidden for non-Codex models and for token-billed API key accounts.
 
 ### Plan Mode
-A per-chat toggle in the launcher sidebar (above ToDo) that makes the agent study the task with read-only tools and propose a plan before making any changes. When enabled, the first message of a task is sent with only diagnostic/read tools active (`read`, `grep`, `find`, `ls`, `web_search`, `code_search`, `fetch_content`, `get_search_content`) — the agent analyses the code, asks clarifying questions, and presents an approach. Your next reply unlocks the full tool set for execution. After execution, the next prompt restarts the planning cycle. Minor follow-ups (short messages, confirmations) keep execution tools so the flow stays natural. Plan-phase completion is agent-driven via a `<plan-complete/>` control marker, with a 10-minute idle reset as a safety net. Disabled by default for new chats; toggle in the sidebar or set `pi-code.planMode.defaultEnabled` for the default state.
+A per-chat toggle in the launcher sidebar (above ToDo) that prepends planning guidance to every prompt. Questions and information requests are answered directly; for code changes and multi-step work, the agent studies the relevant files, outlines an approach, and can execute it in the same turn once the plan is clear. It waits only when a genuine question requires your answer. Plan Mode does not restrict tools, maintain execution phases, or use control markers. Disabled by default for new chats; toggle it in the sidebar or set `pi-code.planMode.defaultEnabled`.
 
 ### Language Server Tools (opt-in)
-Eight semantic-navigation tools backed by the active VS Code language extension instead of grep heuristics, gated by `pi-code.lsp.enabled` (default **off**):
+Nine semantic-navigation tools backed by the active VS Code language extension instead of grep heuristics, gated by `pi-code.lsp.enabled` (default **off**):
 
 - `find_references` — every reference to a symbol, with optional `includeAccessKind` for read/write/text classification (uses document-highlight provider).
 - `document_symbols` — every declaration in a file (class / method / field / property / …) with authoritative LSP positions, parent container, and kind. Supports a `nameContains` substring filter.
@@ -100,7 +108,7 @@ Each assistant message footer shows the elapsed wall-clock time for that turn pl
 While the agent is streaming, you can **queue** follow-up messages that will be sent automatically once the current generation finishes. Queued messages appear in a collapsible list above the input with inline edit and delete controls. You can also **steer** the agent mid-generation (Ctrl+Enter) to inject guidance into the current response without waiting.
 
 ### Slash Commands & Skills
-Type `/` in the input to trigger a slash-command menu that surfaces available Pi skills. Select a skill to insert it into your prompt. Skills are loaded from `~/.pi/agent/skills/` and `.pi/skills/` in your workspace.
+Type `/` in the input to trigger a slash-command menu that surfaces available Pi skills from `~/.pi/agent/skills/` and workspace `.pi/skills/`. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` appear alongside them, with nested skills activated only in their directory scope.
 
 ### Prompt Cache Retention
 A `cache: …` chip in the chat footer controls prompt cache retention for future requests. Choose `short`, `long`, or `auto`; in `auto`, Pi Code uses provider-aware heuristics. OpenAI-style providers and other free-write cache backends prefer `long`, while Anthropic-style providers switch to `long` only after a meaningful idle gap or a large cached prefix. Providers that do not expose cache controls show the chip faded as informational.
@@ -132,9 +140,9 @@ node --version   # v18.x or later
 npm --version
 ```
 
-### 2. VS Code 1.100.0+
+### 2. VS Code 1.110.0+
 
-Install [VS Code](https://code.visualstudio.com/) `1.100.0` or later. Compatible forks such as [Cursor](https://www.cursor.com/) also work.
+Install [VS Code](https://code.visualstudio.com/) `1.110.0` or later. Compatible forks such as [Cursor](https://www.cursor.com/) also work.
 
 ### 3. AI Provider Credentials
 
@@ -184,10 +192,12 @@ Then press **F5** in VS Code to launch an Extension Development Host with the ex
 ### As a VSIX Package
 
 ```bash
+npm prune --omit=dev
 npm run package
+npm install
 ```
 
-This produces a `.vsix` file you can install via **Extensions > Install from VSIX...** in VS Code.
+Pruning first is required so the VSIX contains only runtime dependencies; reinstall afterward to restore development dependencies. This produces a `.vsix` file you can install via **Extensions > Install from VSIX...** in VS Code. Use `npm run deploy` to compile, prune, package, restore dependencies, and install the current version automatically.
 
 ## Usage
 
@@ -215,7 +225,7 @@ This produces a `.vsix` file you can install via **Extensions > Install from VSI
 
 ## Commands
 
-All commands are available from the command palette (`Ctrl+Shift+P`):
+Main user-facing commands are available from the command palette (`Ctrl+Shift+P`):
 
 - **Pi Code: New Chat** — Open a fresh agent session as an editor tab
 - **Pi Code: New Agent Tab** — Same as *New Chat*, also surfaced as the launcher's `+` button
@@ -234,14 +244,15 @@ Settings can be configured through the dedicated settings page (gear icon in the
 |---|---|---|---|
 | `pi-code.apiProvider` | `string` | `""` | Provider whose API key the Settings page is currently managing. The runtime provider is chosen by the selected model — this only picks which provider's key slot the Settings form edits. |
 | `pi-code.defaultModel` | `string` | `""` | Default model ID for new sessions (e.g. `claude-sonnet-4-20250514`) |
-| `pi-code.thinkingLevel` | `string` | `off` | Default thinking level (`off`, `minimal`, `low`, `medium`, `high`) |
+| `pi-code.thinkingLevel` | `string` | `off` | Default thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) |
 | `pi-code.allowedTools` | `string[]` | `[]` | Restrict which tools the agent can use. Empty = allow all. |
 | `pi-code.fileMentions.enabled` | `boolean` | `true` | Enable `@` file mentions in chat input for files in the opened workspace |
 | `pi-code.fileMentions.useDefaultExcludes` | `boolean` | `true` | Use built-in exclude patterns when indexing workspace files for `@` mentions |
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Additional glob patterns to exclude from `@` file mention suggestions |
 | `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum number of `@` file mention suggestions to show |
 | `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative JSON config file for `@` file mention indexing |
-| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable Plan Mode for new chats by default. When on, the agent studies the task and proposes a plan with read-only tools before making any changes. |
+| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable prompt-guided Plan Mode for new chats by default; it does not restrict tools or require a separate execution phase |
+| `pi-code.fileUndoView.defaultEnabled` | `boolean` | `false` | Show the changed-files Undo / Redo / Review bar by default for new chats |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat persistent ToDo for new chats by default |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines injected into the system prompt for the ToDo tool |
 | `pi-code.lsp.enabled` | `boolean` | `false` | Expose Language Server tools (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) to the agent. Off by default — the tools are not registered and add nothing to the system prompt. Requires a language extension for each file's language (C#, rust-analyzer, Pylance, etc.). |
@@ -318,6 +329,8 @@ src/
 ├── shared/
 │   ├── protocol.ts                   # Typed message protocol (Client ↔ Server)
 │   ├── cache-info.ts                 # Provider cache-retention capability labels
+│   ├── codex-usage.ts                # Shared Codex usage freshness and bucket helpers
+│   ├── message-visibility.ts         # Hidden custom-message display rules
 │   └── providers.ts                  # API-key provider definitions
 ├── controllers/
 │   └── chat-controller.ts            # Tab lifecycle, message routing (shared)

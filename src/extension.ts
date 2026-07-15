@@ -12,7 +12,6 @@ import { refreshModelRegistry } from './pi/models';
 
 import { DiffManager, DiffContentProvider } from './providers/diff';
 import { CheckpointManager } from './providers/checkpoint';
-import { registerLspSmokeCommand } from './dev/lsp-smoke';
 
 let controllerRef: ChatController | undefined;
 
@@ -124,8 +123,6 @@ export async function activate(context: vscode.ExtensionContext) {
                 CHAT_PANEL_VIEW_TYPE,
                 new ChatPanelSerializer(controller, context.extensionUri),
             ),
-
-            registerLspSmokeCommand(context),
         );
 
         outputChannel.appendLine('Pi Code extension activated.');

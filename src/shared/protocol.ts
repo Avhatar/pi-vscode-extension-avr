@@ -90,10 +90,18 @@ export interface SettingsData {
     oauthProviders: OAuthProviderInfo[];
 }
 
+export interface OAuthSelectOption {
+    id: string;
+    label: string;
+}
+
 export type OAuthFlowState =
     | { kind: 'idle' }
     | { kind: 'starting'; message?: string }
+    | { kind: 'awaitingSelection'; message: string; options: OAuthSelectOption[] }
+    | { kind: 'awaitingPrompt'; message: string; placeholder?: string; allowEmpty: boolean }
     | { kind: 'awaitingBrowser'; url: string; instructions?: string; promptForCode?: { message: string; placeholder?: string; allowEmpty?: boolean } }
+    | { kind: 'awaitingDeviceCode'; userCode: string; verificationUri: string; expiresInSeconds?: number }
     | { kind: 'progress'; message: string }
     | { kind: 'success' }
     | { kind: 'error'; message: string };
@@ -387,7 +395,9 @@ export type SettingsClientMessage =
     | { type: 'oauthLogin'; providerId: string }
     | { type: 'oauthLogout'; providerId: string }
     | { type: 'oauthCancel'; providerId: string }
-    | { type: 'oauthSubmitCode'; providerId: string; code: string };
+    | { type: 'oauthSelect'; providerId: string; optionId: string }
+    | { type: 'oauthSubmitInput'; providerId: string; value: string }
+    | { type: 'oauthOpenUrl'; url: string };
 
 // Extension -> Webview messages
 export type ServerMessage =

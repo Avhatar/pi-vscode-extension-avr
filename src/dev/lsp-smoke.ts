@@ -1,11 +1,9 @@
-// Temporary diagnostic command for the LSP-integration feature (Phase 0).
-// Runs every provider we plan to expose against the symbol under the cursor
-// in the active editor, and writes timing + result shape to a dedicated
-// OutputChannel. Used to verify provider availability + result shape across
-// language extensions (C# Dev Kit, built-in TS, Pylance, etc.) BEFORE
-// committing to the tool registration. Remove once Phase 1 lands.
+// End-to-end diagnostic command for the LSP integration. It runs every
+// provider against the symbol under the cursor and writes timing and result
+// shapes to a dedicated OutputChannel.
 //
-// Invoke from Command Palette: "Pi Code: LSP Smoke Test (cursor)".
+// This command is intentionally not registered or contributed to the Command
+// Palette. Keep the implementation available for future LSP diagnostics.
 
 import * as vscode from 'vscode';
 

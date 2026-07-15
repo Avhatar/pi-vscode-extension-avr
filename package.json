@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.43.8",
+  "version": "0.43.9",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -70,10 +70,6 @@
         "command": "pi-code.createTab",
         "title": "Pi Code: New Agent Tab",
         "icon": "$(add)"
-      },
-      {
-        "command": "pi-code.lspSmoke",
-        "title": "Pi Code: LSP Smoke Test (cursor)"
       }
     ],
     "keybindings": [

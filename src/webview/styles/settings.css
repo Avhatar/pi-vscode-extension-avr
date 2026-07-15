@@ -321,6 +321,26 @@ body {
 .oauth-flow-block .api-key-input-row {
     margin-top: 8px;
 }
+.oauth-choice-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+.oauth-device-code {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--input-bg);
+    color: var(--input-fg);
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    user-select: all;
+}
 .oauth-error-message {
     margin-top: 8px;
     padding: 8px 10px;

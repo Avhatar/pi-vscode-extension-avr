@@ -386,7 +386,12 @@ function renderOAuthSection(): void {
 function buildOAuthCard(p: { id: string; name: string; signedIn: boolean; usesCallbackServer: boolean }, flow: OAuthFlowState): HTMLElement {
     const card = el('div', 'oauth-card');
     const description = OAUTH_DESCRIPTIONS[p.id] ?? '';
-    const inProgress = flow.kind === 'starting' || flow.kind === 'awaitingBrowser' || flow.kind === 'progress';
+    const inProgress = flow.kind === 'starting'
+        || flow.kind === 'awaitingSelection'
+        || flow.kind === 'awaitingPrompt'
+        || flow.kind === 'awaitingBrowser'
+        || flow.kind === 'awaitingDeviceCode'
+        || flow.kind === 'progress';
 
     let statusBadge = '';
     if (p.signedIn) {
@@ -407,7 +412,27 @@ function buildOAuthCard(p: { id: string; name: string; signedIn: boolean; usesCa
     }
 
     let flowDetails = '';
-    if (flow.kind === 'awaitingBrowser') {
+    if (flow.kind === 'awaitingSelection') {
+        const options = flow.options.map((option) => `
+            <button class="setting-btn secondary" data-oauth-select="${escAttr(p.id)}" data-oauth-option="${escAttr(option.id)}">${escHtml(option.label)}</button>
+        `).join('');
+        flowDetails = `
+            <div class="oauth-flow-block">
+                <p class="setting-description"><strong>${escHtml(flow.message)}</strong></p>
+                <div class="oauth-choice-list">${options}</div>
+            </div>
+        `;
+    } else if (flow.kind === 'awaitingPrompt') {
+        flowDetails = `
+            <div class="oauth-flow-block">
+                <p class="setting-description"><strong>${escHtml(flow.message)}</strong></p>
+                <div class="api-key-input-row">
+                    <input type="text" class="setting-input" data-oauth-input="${escAttr(p.id)}" data-oauth-allow-empty="${flow.allowEmpty ? 'true' : 'false'}" placeholder="${escAttr(flow.placeholder ?? '')}">
+                    <button class="setting-btn primary" data-oauth-submit-input="${escAttr(p.id)}">Continue</button>
+                </div>
+            </div>
+        `;
+    } else if (flow.kind === 'awaitingBrowser') {
         const instr = flow.instructions ? `<p class="setting-description">${escHtml(flow.instructions)}</p>` : '';
         const promptMsg = flow.promptForCode?.message ?? '';
         const placeholder = flow.promptForCode?.placeholder ?? 'Paste authorization code';
@@ -417,9 +442,25 @@ function buildOAuthCard(p: { id: string; name: string; signedIn: boolean; usesCa
                 ${instr}
                 <p class="setting-description"><strong>${escHtml(promptMsg)}</strong></p>
                 <div class="api-key-input-row">
-                    <input type="text" class="setting-input" data-oauth-code-input="${escAttr(p.id)}" placeholder="${escAttr(placeholder)}">
-                    <button class="setting-btn primary" data-oauth-submit-code="${escAttr(p.id)}">Submit</button>
+                    <input type="text" class="setting-input" data-oauth-input="${escAttr(p.id)}" data-oauth-allow-empty="false" placeholder="${escAttr(placeholder)}">
+                    <button class="setting-btn primary" data-oauth-submit-input="${escAttr(p.id)}">Submit</button>
                 </div>
+            </div>
+        `;
+    } else if (flow.kind === 'awaitingDeviceCode') {
+        const expiry = flow.expiresInSeconds
+            ? `<p class="setting-description">This code expires in about ${Math.max(1, Math.ceil(flow.expiresInSeconds / 60))} minutes.</p>`
+            : '';
+        flowDetails = `
+            <div class="oauth-flow-block">
+                <p class="setting-description">Enter this code on the provider's verification page:</p>
+                <div class="oauth-device-code">${escHtml(flow.userCode)}</div>
+                <div class="oauth-choice-list">
+                    <button class="setting-btn primary" data-oauth-open-url="${escAttr(flow.verificationUri)}">Open verification page</button>
+                    <button class="setting-btn secondary" data-oauth-copy-code="${escAttr(flow.userCode)}">Copy code</button>
+                </div>
+                ${expiry}
+                <p class="setting-description">Waiting for authentication to complete...</p>
             </div>
         `;
     } else if (flow.kind === 'progress') {
@@ -463,41 +504,55 @@ function bindOAuthEvents(): void {
             vscode.postMessage({ type: 'oauthCancel', providerId: id });
         });
     });
-    document.querySelectorAll('[data-oauth-submit-code]').forEach((btn) => {
+    document.querySelectorAll('[data-oauth-select]').forEach((btn) => {
         btn.addEventListener('click', () => {
-            const id = (btn as HTMLElement).getAttribute('data-oauth-submit-code')!;
-            const input = document.querySelector(`[data-oauth-code-input="${cssEscape(id)}"]`) as HTMLInputElement | null;
-            const code = input?.value.trim() ?? '';
-            if (!code) {
-                showToast('Enter the authorization code first.', 'error');
-                return;
-            }
-            vscode.postMessage({ type: 'oauthSubmitCode', providerId: id, code });
+            const id = (btn as HTMLElement).getAttribute('data-oauth-select')!;
+            const optionId = (btn as HTMLElement).getAttribute('data-oauth-option')!;
+            vscode.postMessage({ type: 'oauthSelect', providerId: id, optionId });
         });
     });
-    document.querySelectorAll('[data-oauth-open-url]').forEach((link) => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const url = (link as HTMLElement).getAttribute('data-oauth-open-url') ?? '';
-            // Webview can't open external URLs directly, so we ask the user to copy.
-            navigator.clipboard?.writeText(url).then(
-                () => showToast('Auth URL copied to clipboard.', 'info'),
-                () => showToast('Could not copy auth URL.', 'error'),
-            );
+    document.querySelectorAll('[data-oauth-submit-input]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const id = (btn as HTMLElement).getAttribute('data-oauth-submit-input')!;
+            submitOAuthInput(id);
         });
     });
-    document.querySelectorAll('[data-oauth-code-input]').forEach((input) => {
+    document.querySelectorAll('[data-oauth-input]').forEach((input) => {
         input.addEventListener('keydown', (e) => {
             if ((e as KeyboardEvent).key === 'Enter') {
                 e.preventDefault();
-                const id = (input as HTMLElement).getAttribute('data-oauth-code-input')!;
-                const code = (input as HTMLInputElement).value.trim();
-                if (code) {
-                    vscode.postMessage({ type: 'oauthSubmitCode', providerId: id, code });
-                }
+                const id = (input as HTMLElement).getAttribute('data-oauth-input')!;
+                submitOAuthInput(id);
             }
         });
     });
+    document.querySelectorAll('[data-oauth-open-url]').forEach((control) => {
+        control.addEventListener('click', (e) => {
+            e.preventDefault();
+            const url = (control as HTMLElement).getAttribute('data-oauth-open-url') ?? '';
+            vscode.postMessage({ type: 'oauthOpenUrl', url });
+        });
+    });
+    document.querySelectorAll('[data-oauth-copy-code]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const code = (btn as HTMLElement).getAttribute('data-oauth-copy-code') ?? '';
+            navigator.clipboard?.writeText(code).then(
+                () => showToast('Device code copied to clipboard.', 'info'),
+                () => showToast('Could not copy device code.', 'error'),
+            );
+        });
+    });
+}
+
+function submitOAuthInput(providerId: string): void {
+    const input = document.querySelector(`[data-oauth-input="${cssEscape(providerId)}"]`) as HTMLInputElement | null;
+    if (!input) return;
+    const allowEmpty = input.getAttribute('data-oauth-allow-empty') === 'true';
+    if (!allowEmpty && !input.value.trim()) {
+        showToast('Enter a value first.', 'error');
+        return;
+    }
+    vscode.postMessage({ type: 'oauthSubmitInput', providerId, value: input.value });
 }
 
 function cssEscape(s: string): string {

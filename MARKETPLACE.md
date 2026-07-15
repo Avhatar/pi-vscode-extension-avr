@@ -12,7 +12,7 @@ A visual VS Code wrapper around the [Pi coding agent](https://pi.dev/) — built
 - **Claude Code-style ergonomics.** Chats are normal editor tabs — split, drag into another editor group, move into a separate window, restore across `Reload Window`. Multiple chats run in parallel, each with its own history, file changes, and checkpoints.
 - **Bring your own model.** Works with the major AI providers via API key, or sign in with your existing subscription — no separate setup, no second invoice.
 - **Web access and MCP servers out of the box.** Web search, page/PDF/YouTube fetch, and any MCP server you declare in `.mcp.json` work immediately after install. No CLI step, no global `~/.pi/` writes.
-- **Plan-before-execute.** Optional Plan Mode toggle has the agent study the task with read-only tools and propose a plan before any file changes — useful for unfamiliar codebases or risky refactors.
+- **Plan-before-execute.** Optional Plan Mode gives the agent persistent guidance to study change-heavy tasks, outline an approach, and then execute once the plan is clear — while answering simple questions directly.
 - **Semantic code navigation.** Opt-in Language Server tools let the agent ask your existing language extension (C#, rust-analyzer, Pylance, TypeScript, gopls, clangd) for references, definitions, implementations, call hierarchy, and workspace symbols instead of guessing from grep.
 - **Made for non-engineers too.** Inline diffs, per-turn checkpoints, image attachments, per-turn timing, and a per-chat ToDo make the agent legible — you can see exactly what it's doing and undo any step.
 
@@ -40,13 +40,13 @@ Optional always-visible bar above the prompt input that lists every file the age
 Every user message creates a checkpoint. Roll the workspace back to any earlier turn, then redo to bring changes back. The conversation history is preserved so you can branch from any point.
 
 ### Plan Mode
-Per-chat toggle in the launcher sidebar (above ToDo) that makes the agent study the task with read-only tools and propose a plan before making any changes. The first message of a task is sent with only `read`, `grep`, `find`, `ls`, and the web/search tools active — the agent analyses the codebase, asks clarifying questions, and presents an approach. When the plan is finalised the agent ends its message with a `<plan-ready/>` marker; the extension detects it, auto-transitions into execution and dispatches a synthetic proceed prompt so the plan flows straight into changes — no need to type "go" yourself. Reply during the plan phase if you want to iterate before execution. After execution, the next prompt restarts the planning cycle. Disabled by default for new chats; flip on with the `pi-code.planMode.defaultEnabled` setting.
+Per-chat toggle in the launcher sidebar (above ToDo) that prepends planning guidance to every prompt. Questions and information requests are answered directly; for code changes and multi-step work, the agent studies the relevant files, outlines an approach, and can execute it in the same turn once the plan is clear. It waits only when a genuine question requires your answer. Plan Mode does not restrict tools, use execution phases, or require control markers. Disabled by default for new chats; enable it by default with `pi-code.planMode.defaultEnabled`.
 
 ### Language Server tools (opt-in)
-Eight semantic-navigation tools that ask your active language extension instead of guessing from grep: `find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, and `call_hierarchy_incoming` / `call_hierarchy_outgoing`. Each tool returns authoritative `(file, line, column)` positions plus surrounding context, annotates results in external dependency sources (NuGet, cargo registry, `node_modules`) as `[external]`, and accepts either positional or symbol-name addressing. Off by default — enable with `pi-code.lsp.enabled` for projects where semantic accuracy is worth the extra system-prompt footprint (large Unity / Rust / TS codebases with name collisions, partial classes, overloaded methods). Requires a language extension for each file's language; for C# call hierarchy specifically, install **C# Dev Kit** (the OmniSharp-only extension does not implement it).
+Nine semantic-navigation tools that ask your active language extension instead of guessing from grep: `find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_incoming`, and `call_hierarchy_outgoing`. Each tool returns authoritative `(file, line, column)` positions plus surrounding context, annotates results in external dependency sources (NuGet, cargo registry, `node_modules`) as `[external]`, and accepts either positional or symbol-name addressing. Off by default — enable with `pi-code.lsp.enabled` for projects where semantic accuracy is worth the extra system-prompt footprint (large Unity / Rust / TS codebases with name collisions, partial classes, overloaded methods). Requires a language extension for each file's language; for C# call hierarchy specifically, install **C# Dev Kit** (the OmniSharp-only extension does not implement it).
 
 ### Streaming with thinking
-Watch the agent reason in real time with collapsible thinking blocks. Cycle through `off`, `minimal`, `low`, `medium`, `high` to control verbosity.
+Watch the agent reason in real time with collapsible thinking blocks. Cycle through `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` to control depth. `max` is natively supported by GPT-5.6 and adaptive Claude models; other models fall back to their closest supported level.
 
 ### Per-turn and cumulative timing
 Each assistant message footer shows the elapsed wall-clock time for that turn plus the cumulative active time across the chat (idle gaps excluded), alongside token usage.
@@ -57,14 +57,16 @@ Paste, drop, or pick images via the paperclip button. Previews stay in chat hist
 ### Workspace `@` file mentions
 Type `@` to fuzzy-match files in your workspace. Mentions are highlighted in the input and sent to the agent as path references it can choose to inspect.
 
-### Auto-loaded workspace instructions
-`CLAUDE.md` (and any files it `@`-imports up to depth 5) is read automatically at the start of each turn so project rules apply without you pointing at them. Per-folder `CLAUDE.md` files are surfaced when the agent touches that subtree.
+### Claude project compatibility
+Claude compatibility activates only when the workspace contains real Claude infrastructure such as `CLAUDE.md`, `CLAUDE.local.md`, `.claude` rules, skills or commands, nested resources, or a project-scoped Claude plugin. Ordinary projects receive no Claude-specific hooks or prompt content, and user-level Claude resources are considered only after a project marker activates compatibility.
+
+Root, ancestor, local, explicitly imported, and directory-scoped instructions are injected as hidden context without spending read-tool calls. `@file` imports are contained to the workspace and limited to four recursive hops; generated, dependency, and build directories are excluded from nested discovery. Project-wide and path-scoped `.claude/rules` are applied when relevant. Project and activated user skills and legacy commands become native slash commands, while nested skills use directory-qualified names such as `/apps/web:deploy` and enter context only inside their scope. Claude tool names map only to capabilities already available through Pi, preserving the current agent, model, permissions, and MCP configuration. Run `/claude-compat` in an active Claude project to inspect what was loaded. Native `AGENTS.md` handling remains unchanged.
 
 ### Message queuing and steering
 Queue follow-up messages while the agent is streaming (they auto-send when the turn finishes), or steer mid-generation with `Ctrl+Enter` to inject guidance into the current response.
 
 ### Slash commands and skills
-Type `/` to open a slash-command menu over Pi skills loaded from `~/.pi/agent/skills/` and your workspace's `.pi/skills/`.
+Type `/` to open a slash-command menu over Pi skills loaded from `~/.pi/agent/skills/` and your workspace's `.pi/skills/`. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` are surfaced alongside them, with directory-scoped skills activated only when the agent works in their subtree.
 
 ### Per-chat ToDo
 Each chat has its own persistent task list the agent manages via a built-in `todo` tool — pending / in-progress / completed states, dependencies, and inline display in the launcher. Toggle per-tab on or off.
@@ -92,7 +94,7 @@ Web search, code search, content fetching (web pages, GitHub, YouTube transcript
 5. **Pick a model** with the picker at the bottom of the chat, then type your prompt and press Enter.
 6. **While the agent works:** review tool calls inline, queue follow-ups (Enter), or steer mid-stream (`Ctrl+Enter`).
 7. **Review and roll back:** click *Review* on a diff to open VS Code's diff editor, or use the per-message checkpoint button to roll the workspace back to that turn.
-8. **Optional:** toggle **Plan Mode** above ToDo in the sidebar for unfamiliar codebases or risky refactors — the agent will plan first and only execute after you confirm.
+8. **Optional:** toggle **Plan Mode** above ToDo in the sidebar for unfamiliar codebases or risky refactors — the agent will study and outline change-heavy work before executing once the approach is clear.
 
 ## Supported Providers
 
@@ -112,9 +114,10 @@ Web search, code search, content fetching (web pages, GitHub, YouTube transcript
 
 ## Commands
 
-All commands are available from the command palette (`Ctrl+Shift+P`):
+Main user-facing commands are available from the command palette (`Ctrl+Shift+P`):
 
 - **Pi Code: New Chat** — open a fresh agent session as an editor tab
+- **Pi Code: New Agent Tab** — open a fresh chat from the launcher or Command Palette
 - **Pi Code: Session History** — reveal the launcher with previous sessions
 - **Pi Code: Stop Generation** — abort the current streaming response
 - **Pi Code: Select Model** — choose an AI model
@@ -130,14 +133,14 @@ Settings can be configured through the dedicated settings page (gear icon in the
 |---|---|---|---|
 | `pi-code.apiProvider` | `string` | `""` | Provider whose API key the Settings page is currently managing. Runtime provider is chosen by the selected model — this only picks the key slot to edit. |
 | `pi-code.defaultModel` | `string` | `""` | Default model ID for new sessions |
-| `pi-code.thinkingLevel` | `string` | `off` | Default thinking level (`off`, `minimal`, `low`, `medium`, `high`) |
+| `pi-code.thinkingLevel` | `string` | `off` | Default thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) |
 | `pi-code.allowedTools` | `string[]` | `[]` | Restrict which tools the agent can use. Empty = allow all. |
 | `pi-code.fileMentions.enabled` | `boolean` | `true` | Enable `@` file mentions in chat input |
 | `pi-code.fileMentions.useDefaultExcludes` | `boolean` | `true` | Use built-in exclude patterns for `@` mention indexing |
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Extra glob patterns to exclude from `@` mention suggestions |
 | `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum `@` mention suggestions to show |
 | `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative config file for `@` mention indexing |
-| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable Plan Mode for new chats by default |
+| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable prompt-guided Plan Mode for new chats by default; it does not restrict tools or require a separate execution phase |
 | `pi-code.fileUndoView.defaultEnabled` | `boolean` | `false` | Show the File Undo View (Undo / Redo / Review bar above the prompt) by default for new chats |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat ToDo for new chats by default |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines for the ToDo tool |

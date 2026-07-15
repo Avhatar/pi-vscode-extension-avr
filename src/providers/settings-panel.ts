@@ -3,14 +3,10 @@ import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillI
 import { API_KEY_PROVIDERS } from '../shared/providers';
 import { getAuthStorage, notifyAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
+import { OAuthLoginFlow } from '../pi/oauth-login-flow';
 import { refreshModelRegistry } from '../pi/models';
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
-
-interface OAuthFlow {
-    resolveCode: (code: string) => void;
-    rejectCode: (err: Error) => void;
-}
 
 export class SettingsPanel {
     private static _instance: SettingsPanel | undefined;
@@ -18,7 +14,7 @@ export class SettingsPanel {
     private _extensionUri: vscode.Uri;
     private _secrets: vscode.SecretStorage;
     private _disposables: vscode.Disposable[] = [];
-    private _oauthFlows = new Map<string, OAuthFlow>();
+    private _oauthFlows = new Map<string, OAuthLoginFlow>();
 
     private constructor(
         panel: vscode.WebviewPanel,
@@ -96,8 +92,14 @@ export class SettingsPanel {
                 case 'oauthCancel':
                     this._cancelOAuth(msg.providerId);
                     break;
-                case 'oauthSubmitCode':
-                    this._submitOAuthCode(msg.providerId, msg.code);
+                case 'oauthSelect':
+                    this._submitOAuthSelection(msg.providerId, msg.optionId);
+                    break;
+                case 'oauthSubmitInput':
+                    this._submitOAuthInput(msg.providerId, msg.value);
+                    break;
+                case 'oauthOpenUrl':
+                    await this._openOAuthUrl(msg.url);
                     break;
             }
         } catch (err: any) {
@@ -168,14 +170,15 @@ export class SettingsPanel {
         }
 
         const authStorage = await getAuthStorage(this._secrets);
-
-        let resolveCode!: (code: string) => void;
-        let rejectCode!: (err: Error) => void;
-        const codePromise = new Promise<string>((resolve, reject) => {
-            resolveCode = resolve;
-            rejectCode = reject;
+        const flow = new OAuthLoginFlow({
+            onState: (state) => this._post({ type: 'oauthState', providerId, state }),
+            openExternal: (url) => {
+                void this._openOAuthUrl(url).catch(() => {
+                    // Browser launch failed; the UI still shows the URL for manual opening.
+                });
+            },
         });
-        this._oauthFlows.set(providerId, { resolveCode, rejectCode });
+        this._oauthFlows.set(providerId, flow);
 
         this._post({
             type: 'oauthState',
@@ -183,43 +186,8 @@ export class SettingsPanel {
             state: { kind: 'starting' },
         });
 
-        const callbacks = {
-            onAuth: (info: { url: string; instructions?: string }) => {
-                this._post({
-                    type: 'oauthState',
-                    providerId,
-                    state: {
-                        kind: 'awaitingBrowser',
-                        url: info.url,
-                        instructions: info.instructions,
-                        promptForCode: {
-                            message: 'After logging in, paste the authorization code or callback URL here:',
-                            placeholder: 'Paste code or full callback URL',
-                            allowEmpty: false,
-                        },
-                    },
-                });
-                vscode.env.openExternal(vscode.Uri.parse(info.url)).then(undefined, () => {
-                    // Browser launch failed; UI still shows the URL for manual copy.
-                });
-            },
-            onPrompt: async (_prompt: { message: string; placeholder?: string; allowEmpty?: boolean }) => {
-                // Fallback path used by some providers when no onManualCodeInput is provided.
-                // We always provide onManualCodeInput, so this rarely fires — return the same promise.
-                return codePromise;
-            },
-            onProgress: (message: string) => {
-                this._post({
-                    type: 'oauthState',
-                    providerId,
-                    state: { kind: 'progress', message },
-                });
-            },
-            onManualCodeInput: () => codePromise,
-        };
-
         try {
-            await authStorage.login(providerId as any, callbacks);
+            await authStorage.login(providerId as any, flow.callbacks);
             this._post({
                 type: 'oauthState',
                 providerId,
@@ -234,11 +202,12 @@ export class SettingsPanel {
             this._post({
                 type: 'oauthState',
                 providerId,
-                state: { kind: 'error', message },
+                state: flow.cancelled ? { kind: 'idle' } : { kind: 'error', message },
             });
             // Refresh state so UI shows accurate signed-in status (login may have partially persisted).
             await this._sendSettings();
         } finally {
+            flow.finish();
             this._oauthFlows.delete(providerId);
         }
     }
@@ -253,17 +222,24 @@ export class SettingsPanel {
     }
 
     private _cancelOAuth(providerId: string): void {
-        const flow = this._oauthFlows.get(providerId);
-        if (flow) {
-            flow.rejectCode(new Error('Login cancelled'));
-        }
+        this._oauthFlows.get(providerId)?.cancel();
     }
 
-    private _submitOAuthCode(providerId: string, code: string): void {
-        const flow = this._oauthFlows.get(providerId);
-        if (flow) {
-            flow.resolveCode(code);
+    private _submitOAuthSelection(providerId: string, optionId: string): void {
+        this._oauthFlows.get(providerId)?.submitSelection(optionId);
+    }
+
+    private _submitOAuthInput(providerId: string, value: string): void {
+        this._oauthFlows.get(providerId)?.submitText(value);
+    }
+
+    private async _openOAuthUrl(url: string): Promise<void> {
+        const parsed = vscode.Uri.parse(url);
+        if (parsed.scheme !== 'https' && parsed.scheme !== 'http') {
+            throw new Error('Authentication links must use HTTP or HTTPS.');
         }
+        const opened = await vscode.env.openExternal(parsed);
+        if (!opened) throw new Error('VS Code could not open the authentication link.');
     }
 
     private async _sendSkills(): Promise<void> {
@@ -334,7 +310,7 @@ export class SettingsPanel {
     private _dispose(): void {
         SettingsPanel._instance = undefined;
         for (const [, flow] of this._oauthFlows) {
-            flow.rejectCode(new Error('Settings panel closed'));
+            flow.cancel('Settings panel closed');
         }
         this._oauthFlows.clear();
         for (const d of this._disposables) d.dispose();
