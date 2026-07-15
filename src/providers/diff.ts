@@ -48,6 +48,12 @@ export class DiffManager implements vscode.Disposable {
         this._currentTurn = turn;
     }
 
+    handleExternalToolEvent(event: any): void {
+        if (event?.isolationPath) return;
+        if (event?.type === 'tool_execution_start') void this._onToolStart(event);
+        if (event?.type === 'tool_execution_end') void this._onToolEnd(event);
+    }
+
     onFileChange(listener: FileChangeListener): () => void {
         this._listeners.push(listener);
         return () => {

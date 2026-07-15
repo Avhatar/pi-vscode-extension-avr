@@ -7,6 +7,95 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-07-15
+
+### Added
+- Trusted `.claude/agents/**/*.md` files can now contribute named Pi subagents through the Claude resource compatibility boundary, including conservative Claude tool-name mapping and model-alias inheritance.
+- Bundled Pi packages can declare native agent files through `pi.agents`, with package provenance, path-boundary validation, deterministic precedence, and collision diagnostics.
+- Added explicit host contracts for child-safe extension and MCP tool factories; parent tool registration or MCP discovery alone never grants a capability to child sessions.
+- The cumulative **Pi Code: Run Subagent Smoke Test** now covers native, Claude-compatible, package, duplicate, untrusted, unsupported, child-tool factory, and remote-policy fixtures without provider or network requests.
+
+### Changed
+- Claude `Agent` and legacy `Task` references now map to the native `subagent` capability only when it is active; child agents still cannot delegate recursively.
+- Forked parent context now fails explicitly instead of being silently treated as fresh context.
+
+### Security
+- Claude project agents require Workspace Trust, unsupported Claude tools are diagnosed rather than granted, aliases such as `sonnet` inherit the selected Pi model instead of forcing a provider, and exact unavailable models retain no-fallback behavior.
+- Remote A2A execution, persistent child memory, fork context, and nested delegation remain disabled behind explicit policy decisions until their trust and isolation contracts are implemented.
+
+## [0.50.0] - 2026-07-15
+
+### Added
+- Write-capable child agents can now use `edit` and `write` with a workspace-wide writer lease for foreground shared-workspace runs or extension-owned Git worktrees for isolated and background runs.
+- Shared child edits now feed the parent File Undo View and checkpoint pipeline with namespaced tool-call IDs, while worktree rows provide explicit Review, Apply, and Clean controls.
+- The cumulative **Pi Code: Run Subagent Smoke Test** now includes a confirmed temporary-Git scenario covering writer-lease rejection, mutation routing, worktree isolation, review, explicit staged apply, non-Git rejection, and cleanup.
+
+### Security
+- Background write agents are rejected unless worktree isolation is selected, worktree patches are never applied automatically, and both Apply and destructive cleanup require explicit modal confirmation.
+
+## [0.49.0] - 2026-07-15
+
+### Added
+- Subagents can now run in the background, returning a persistent `agentId` immediately while live status remains visible and a bounded completion or failure notification is added to the parent context.
+- Added configurable global and per-chat child concurrency limits, FIFO queueing, queue-wait metrics, permission-wait status, and deterministic cross-tab fairness.
+- The cumulative **Pi Code: Run Subagent Smoke Test** now covers background IDs, global and per-chat limits, queue order, parent notifications, permission waits, stop, parent close, extension shutdown, and orphan detection.
+
+### Changed
+- Background notifications that settle while the parent is streaming are deferred until the parent turn ends, avoiding concurrent parent-session writes.
+
+## [0.48.0] - 2026-07-15
+
+### Added
+- Subagent transcripts and definition snapshots now persist in extension-owned storage and are restored with their parent chat without appearing in ordinary History.
+- Recent child rows now provide Inspect, Send, Stop, Resume, and Dismiss controls, and the parent `subagent` tool supports the corresponding persistent-ID lifecycle actions.
+- The cumulative **Pi Code: Run Subagent Smoke Test** now covers persist, reload, transcript inspection, parent-compaction isolation, steering, stop, resume, stale IDs, dismissal, and retention cleanup through temporary storage.
+
+### Changed
+- Deleting a parent chat now removes its child metadata and transcripts, while startup retention cleanup removes child records older than 30 days.
+- Active child runs interrupted by an extension restart are restored as explicit failures instead of remaining in a misleading running state.
+
+## [0.47.0] - 2026-07-15
+
+### Added
+- Added a per-chat **Subagents** launcher panel showing active and retained child runs with their actual model, lifecycle status, current tool, activity, turns, elapsed time, errors, and a Stop action for live runs.
+- The cumulative **Pi Code: Run Subagent Smoke Test** now injects inspectable queued, starting, running, retrying, completed, failed, and cancelled rows into the real launcher state path until Reset is clicked.
+
+### Changed
+- Completed, failed, and cancelled subagent rows are now retained for ten minutes with a 20-row cap so recent outcomes remain visible without unbounded session memory growth.
+
+## [0.46.0] - 2026-07-15
+
+### Added
+- Chats can now opt in to a single `subagent` delegation tool for named or ad-hoc read-only child agents, including exact cross-provider model selection, per-call limits, progress updates, and bounded foreground results.
+- Added Subagent settings for new-chat enablement, default and allowed child models, per-call model overrides, maximum turns, and foreground timeouts.
+- The cumulative **Pi Code: Run Subagent Smoke Test** now includes deterministic parent-tool registration, prompt-surface gating, busy-state protection, Tools-panel synchronization, and session-reload checks.
+
+### Security
+- Subagent capability is off by default per chat; while disabled, its schema, named-agent catalog, and prompt guidelines are removed from the model context, and generic Tools-panel operations cannot bypass the dedicated gate.
+
+## [0.45.0] - 2026-07-15
+
+### Added
+- Added the isolated foreground subagent runtime with separate in-memory child sessions, exact cross-provider model selection, structured completion, lifecycle snapshots, bounded concurrency, cancellation, timeouts, turn limits, and result-size limits.
+- The cumulative **Pi Code: Run Subagent Smoke Test** now includes a deterministic foreground runtime scenario plus an optional confirmed live cross-provider check using the active chat's configured models.
+
+### Security
+- Foreground child sessions are restricted to read-only tools, use isolated resource and settings runtimes, and never silently replace an unavailable or unauthenticated explicitly selected model.
+
+## [0.44.1] - 2026-07-15
+
+### Added
+- Subagent diagnostics now use stable run-state and structured activity-event contracts, preparing smoke logs and later launcher status updates to share the same data model.
+
+## [0.44.0] - 2026-07-15
+
+### Added
+- Native subagent definitions can now be discovered from user and trusted-project agent directories with strict validation, deterministic precedence, provider-independent model selection, and policy-bounded tool resolution.
+- Added **Pi Code: Run Subagent Smoke Test** with a deterministic registry-and-resolution scenario and inspectable Output Channel logs for validating the first subagent implementation phase.
+
+### Security
+- Project subagent definitions are ignored in untrusted workspaces, and explicit unavailable or disallowed child models fail instead of silently falling back.
+
 ## [0.43.9] - 2026-07-15
 
 ### Fixed

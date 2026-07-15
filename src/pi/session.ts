@@ -15,12 +15,30 @@ import { detectClaudeInfrastructure } from './claude-compat/detect';
 import { CLAUDE_NESTED_SEARCH_EXCLUDE } from './claude-compat/discovery';
 import { indexClaudeRules } from './claude-compat/rules';
 import { indexClaudeResources } from './claude-compat/resources';
+import { indexClaudeAgents } from './subagents/claude-agents';
+import { indexPackageAgents } from './subagents/package-agents';
 import { createTodoExtension } from './todo/extension';
 import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
 import { createLspExtension } from './lsp/extension';
 import { installEditToolPreflight } from './tools/preflight-edit';
 import { isContextUsageEstimated } from './context-usage';
+import type { SubagentCoordinator } from './subagents/coordinator';
+import { SubagentManager } from './subagents/manager';
+import { PiChildSessionFactory, CHILD_SAFE_TOOLS } from './subagents/pi-child-session';
+import { AgentRegistry } from './subagents/registry';
+import { resolveAgentSpec } from './subagents/resolver';
+import { createSubagentExtension } from './subagents/extension';
+import type { SubagentInvocation, SubagentRun } from './subagents/types';
+import type {
+    SubagentExecutionResult, SubagentForegroundResult, SubagentManagerSnapshot,
+} from './subagents/runtime';
+import type {
+    SubagentControlResult, SubagentToolDetails, SubagentToolParams,
+} from './subagents/tool';
+import type { SubagentRunStore } from './subagents/persistence';
+import type { WriteIsolationManager } from './subagents/write-isolation';
+import type { ChildToolFactoryRegistry } from './subagents/child-tools';
 
 export class PiSessionManager {
     private _session: AgentSession | undefined;
@@ -31,10 +49,29 @@ export class PiSessionManager {
     private _secrets: vscode.SecretStorage | undefined;
     readonly events = new EventRouter();
     readonly todoStore = new TodoStore();
+    private _subagentManager: SubagentManager | undefined;
+    private _subagentManagerUnsubscribe?: () => void;
+    private readonly _onSubagentStateChanged = new vscode.EventEmitter<SubagentManagerSnapshot>();
+    readonly onSubagentStateChanged = this._onSubagentStateChanged.event;
+    private readonly _onSubagentMutation = new vscode.EventEmitter<any>();
+    readonly onSubagentMutation = this._onSubagentMutation.event;
+    private readonly _pendingBackgroundNotifications: Array<{ content: string; details: Record<string, unknown> }> = [];
+    private _backgroundNotificationUnsubscribe?: () => void;
+    private _subagentParentTabId = 'unbound';
 
-    constructor(outputChannel: vscode.OutputChannel, secrets?: vscode.SecretStorage) {
+    constructor(
+        outputChannel: vscode.OutputChannel,
+        secrets?: vscode.SecretStorage,
+        private readonly _subagentCoordinator?: SubagentCoordinator,
+        private readonly _subagentStore?: SubagentRunStore,
+        private readonly _writeIsolation?: WriteIsolationManager,
+        private readonly _childToolFactories?: ChildToolFactoryRegistry,
+    ) {
         this._outputChannel = outputChannel;
         this._secrets = secrets;
+        this._backgroundNotificationUnsubscribe = this.events.onAll((event) => {
+            if (event.type === 'agent_end') this._flushBackgroundSubagentNotifications();
+        });
     }
 
     async reloadCredentials(): Promise<void> {
@@ -86,6 +123,7 @@ export class PiSessionManager {
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
+        await this._resetSubagentManager(cwd, session);
 
         if (modelFallbackMessage) {
             this._outputChannel.appendLine(`Model fallback: ${modelFallbackMessage}`);
@@ -180,14 +218,28 @@ export class PiSessionManager {
 
     /** Diagnostic helper — snapshot of the current active-tool set, exposed for
      *  the controller to log at prompt time and after persisted-toggle apply. */
-    debugSnapshotTools(): { active: string[]; hasTodo: boolean; todoRegistered: boolean } {
+    debugSnapshotTools(): {
+        active: string[];
+        hasTodo: boolean;
+        todoRegistered: boolean;
+        hasSubagent: boolean;
+        subagentRegistered: boolean;
+    } {
         const session = this._session;
-        if (!session) return { active: [], hasTodo: false, todoRegistered: false };
+        if (!session) {
+            return {
+                active: [], hasTodo: false, todoRegistered: false,
+                hasSubagent: false, subagentRegistered: false,
+            };
+        }
         const active = session.getActiveToolNames();
+        const registered = session.getAllTools().map((tool) => tool.name);
         return {
             active,
             hasTodo: active.includes('todo'),
-            todoRegistered: session.getAllTools().some((t) => t.name === 'todo'),
+            todoRegistered: registered.includes('todo'),
+            hasSubagent: active.includes('subagent'),
+            subagentRegistered: registered.includes('subagent'),
         };
     }
 
@@ -208,6 +260,7 @@ export class PiSessionManager {
         const lspEnabled = vscode.workspace
             .getConfiguration('pi-code')
             .get<boolean>('lsp.enabled', false);
+        const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const claudeInfrastructure = await detectClaudeInfrastructure(cwd, {
             collectNestedClaudeFiles: true,
             collectNestedClaudeSkillFiles: true,
@@ -222,6 +275,33 @@ export class PiSessionManager {
                 return matches.map((uri) => uri.fsPath);
             },
         });
+        const availableChildTools = [
+            ...CHILD_SAFE_TOOLS,
+            ...(this._childToolFactories?.listNames() ?? []),
+        ];
+        const claudeAgents = claudeInfrastructure.active
+            ? await indexClaudeAgents({
+                cwd,
+                workspaceTrusted: vscode.workspace.isTrusted,
+                availableChildTools,
+                projectAgentDirectories: claudeInfrastructure.agentDirectories,
+            })
+            : { definitions: [], diagnostics: [] };
+        const packageAgents = await indexPackageAgents(bundledPackagePaths);
+        const subagentRegistry = new AgentRegistry({
+            cwd,
+            workspaceTrusted: vscode.workspace.isTrusted,
+            packageDefinitions: packageAgents.definitions,
+            claudeDefinitions: claudeAgents.definitions,
+            additionalDiagnostics: [...packageAgents.diagnostics, ...claudeAgents.diagnostics],
+        });
+        const subagentRegistrySnapshot = await subagentRegistry.reload();
+        for (const diagnostic of subagentRegistrySnapshot.diagnostics) {
+            this._outputChannel.appendLine(
+                `[subagent definition] severity=${diagnostic.severity} code=${diagnostic.code} ` +
+                `path=${diagnostic.filePath ?? '(none)'} message=${diagnostic.message}`,
+            );
+        }
         const factories = [
             createCodexMonitorExtension({
                 onResponse: ({ headers }) => {
@@ -230,6 +310,13 @@ export class PiSessionManager {
             }),
             createTodoExtension(this.todoStore, todoGuidelines),
             createLspExtension({ enabled: lspEnabled }),
+            createSubagentExtension({
+                definitions: subagentRegistrySnapshot.definitions,
+                execute: (invocation, signal, onProgress) =>
+                    this._executeSubagentInvocation(subagentRegistry, invocation, signal, onProgress),
+                control: (action, params, signal, onProgress) =>
+                    this._executeSubagentControl(action, params, signal, onProgress),
+            }),
         ];
         if (claudeInfrastructure.active) {
             // User-level Claude context is inspected only after a project marker
@@ -250,7 +337,6 @@ export class PiSessionManager {
                 `(context=${contextEnabled}, rules=${rulesEnabled}, skills=${resources.skills.length}, commands=${resources.commands.length})`,
             );
         }
-        const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const loader = new DefaultResourceLoader({
             cwd,
             agentDir,
@@ -389,6 +475,8 @@ export class PiSessionManager {
 
     async newSession(): Promise<void> {
         if (!this._session) { return; }
+        await this._subagentManager?.dispose();
+        this._subagentManager = undefined;
         this._unsubscribe?.();
         this._session.dispose();
         const { createAgentSession } = await import('@earendil-works/pi-coding-agent');
@@ -424,6 +512,7 @@ export class PiSessionManager {
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
+        await this._resetSubagentManager(cwd, session);
         await this._applyDefaultSettings(session);
     }
 
@@ -466,6 +555,7 @@ export class PiSessionManager {
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
+        await this._resetSubagentManager(cwd, session);
         await this._applyDefaultSettings(session);
 
         const model = session.model;
@@ -494,6 +584,8 @@ export class PiSessionManager {
 
     async loadSession(sessionPath: string): Promise<void> {
         if (!this._session) { return; }
+        await this._subagentManager?.dispose();
+        this._subagentManager = undefined;
         this._unsubscribe?.();
         this._session.dispose();
         const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
@@ -520,6 +612,7 @@ export class PiSessionManager {
 
         this._session = session;
         this._unsubscribe = session.subscribe(this.events.asSessionListener());
+        await this._resetSubagentManager(cwd, session);
     }
 
     getModels(): ModelInfo[] {
@@ -679,10 +772,277 @@ export class PiSessionManager {
         }
     }
 
+    get subagentManager(): SubagentManager | undefined {
+        return this._subagentManager;
+    }
+
+    getSubagentSnapshot(): SubagentManagerSnapshot {
+        return this._subagentManager?.getSnapshot() ?? { runs: [], activeCount: 0, queuedCount: 0 };
+    }
+
+    getSubagentRun(agentId: string): SubagentRun | undefined {
+        return this.getSubagentSnapshot().runs.find((run) => run.agentId === agentId);
+    }
+
+    stopSubagent(agentId: string): boolean {
+        return this._subagentManager?.stop(agentId) ?? false;
+    }
+
+    async steerSubagent(agentId: string, message: string): Promise<boolean> {
+        return this._subagentManager?.steer(agentId, message) ?? false;
+    }
+
+    async resumeSubagent(agentId: string, task: string): Promise<SubagentForegroundResult> {
+        const manager = this._subagentManager;
+        if (!manager) throw new Error('Subagent runtime is not ready.');
+        return manager.resumeForeground(agentId, task);
+    }
+
+    async dismissSubagent(agentId: string): Promise<boolean> {
+        return this._subagentManager?.dismiss(agentId) ?? false;
+    }
+
+    clearSubagentIsolationPath(agentId: string): boolean {
+        return this._subagentManager?.clearIsolationPath(agentId) ?? false;
+    }
+
+    async readSubagentTranscript(agentId: string): Promise<string | undefined> {
+        const parentSessionId = this._session?.sessionId;
+        if (!parentSessionId || !this._subagentStore) return undefined;
+        return this._subagentStore.readTranscript(parentSessionId, agentId);
+    }
+
+    setSubagentParentTabId(tabId: string): void {
+        this._subagentParentTabId = tabId;
+        this._subagentManager?.setParentTabId(tabId);
+    }
+
+    private async _executeSubagentInvocation(
+        registry: AgentRegistry,
+        invocation: SubagentInvocation,
+        signal: AbortSignal | undefined,
+        onProgress: (details: SubagentToolDetails) => void,
+    ): Promise<SubagentExecutionResult> {
+        const manager = this._subagentManager;
+        const session = this._session;
+        const parentModel = this.getCurrentModel();
+        if (!manager || !session || !parentModel || !this._modelRegistry) {
+            throw new Error('Subagent runtime is not ready for this parent session.');
+        }
+        const snapshot = await registry.reload();
+        for (const diagnostic of snapshot.diagnostics) {
+            this._outputChannel.appendLine(
+                `[subagent definition] severity=${diagnostic.severity} code=${diagnostic.code} ` +
+                `path=${diagnostic.filePath ?? '(none)'} message=${diagnostic.message}`,
+            );
+        }
+
+        const config = vscode.workspace.getConfiguration('pi-code');
+        const defaultModel = config.get<string>('subagents.defaultModel', '').trim();
+        const spec = resolveAgentSpec(registry, invocation, {
+            availableModels: getAvailableModels(this._modelRegistry),
+            parentModel: { provider: parentModel.provider, id: parentModel.id },
+            parentThinkingLevel: session.thinkingLevel,
+            ...(defaultModel ? { defaultModel } : {}),
+            allowedModels: config.get<string[]>('subagents.allowedModels', []),
+            allowInvocationModelOverride: config.get<boolean>('subagents.allowInvocationModelOverride', true),
+            registeredTools: [
+                ...session.getAllTools().map((tool) => tool.name),
+                ...(this._childToolFactories?.listNames() ?? []),
+            ],
+            activeTools: [
+                ...session.getActiveToolNames(),
+                ...(this._childToolFactories?.listNames() ?? []),
+            ],
+            childSafeTools: [...CHILD_SAFE_TOOLS, ...(this._childToolFactories?.listNames() ?? [])],
+            nonChildSafeTools: ['subagent'],
+            defaultMaxTurns: config.get<number>('subagents.defaultMaxTurns', 30),
+            maxTurns: 100,
+            defaultTimeoutMinutes: config.get<number>('subagents.defaultTimeoutMinutes', 10),
+            maxTimeoutMinutes: 120,
+            defaultContextMode: 'fresh',
+            defaultIsolation: 'shared-workspace',
+        });
+        for (const diagnostic of spec.diagnostics) {
+            this._outputChannel.appendLine(`[subagent resolution] code=${diagnostic.code} message=${diagnostic.message}`);
+        }
+        if (spec.background) return manager.runBackground(spec);
+        return manager.runForeground(spec, signal, (run: SubagentRun) => {
+            onProgress({
+                agentId: run.agentId,
+                name: run.name,
+                status: run.status,
+                ...(run.model ? { model: { provider: run.model.provider, id: run.model.id } } : {}),
+                turnCount: run.turnCount,
+            });
+        });
+    }
+
+    private async _executeSubagentControl(
+        action: 'resume' | 'send' | 'stop' | 'inspect' | 'dismiss',
+        params: SubagentToolParams,
+        signal: AbortSignal | undefined,
+        onProgress: (details: SubagentToolDetails) => void,
+    ): Promise<SubagentControlResult> {
+        const manager = this._subagentManager;
+        const agentId = params.agentId?.trim();
+        if (!manager || !agentId) throw new Error('Subagent lifecycle control requires a ready runtime and agentId.');
+        const existing = manager.getSnapshot().runs.find((run) => run.agentId === agentId);
+        if (!existing) throw new Error(`Unknown or stale subagent id: ${agentId}.`);
+        const detailsFor = (run: SubagentRun): SubagentToolDetails => ({
+            agentId: run.agentId,
+            name: run.name,
+            status: run.status,
+            ...(run.model ? { model: { provider: run.model.provider, id: run.model.id } } : {}),
+            turnCount: run.turnCount,
+        });
+
+        if (action === 'resume') {
+            const task = params.task?.trim();
+            if (!task) throw new Error('Subagent resume requires a non-empty follow-up task.');
+            const result = await manager.resumeForeground(agentId, task, signal, (run) => onProgress(detailsFor(run)));
+            return {
+                text: result.result,
+                details: {
+                    agentId,
+                    name: existing.name,
+                    status: 'completed',
+                    model: { provider: result.model.provider, id: result.model.id },
+                    turnCount: result.turnCount,
+                    truncated: result.truncated,
+                },
+            };
+        }
+        if (action === 'send') {
+            const message = params.message?.trim();
+            if (!message) throw new Error('Subagent send requires a non-empty message.');
+            if (!await manager.steer(agentId, message)) throw new Error(`Subagent ${agentId} is not accepting steering.`);
+            const updated = manager.getSnapshot().runs.find((run) => run.agentId === agentId) ?? existing;
+            return { text: `Steering guidance sent to subagent ${agentId}.`, details: detailsFor(updated) };
+        }
+        if (action === 'stop') {
+            if (!manager.stop(agentId)) throw new Error(`Subagent ${agentId} is not running.`);
+            return { text: `Stop requested for subagent ${agentId}.`, details: detailsFor(existing) };
+        }
+        if (action === 'inspect') {
+            const transcript = await this.readSubagentTranscript(agentId);
+            if (!transcript) throw new Error(`Persistent transcript for subagent ${agentId} is unavailable.`);
+            const maximum = 50 * 1024;
+            const bounded = transcript.length > maximum
+                ? `${transcript.slice(0, maximum)}\n… transcript truncated …`
+                : transcript;
+            return { text: bounded, details: detailsFor(existing) };
+        }
+        if (!await manager.dismiss(agentId)) throw new Error(`Subagent ${agentId} cannot be dismissed while running.`);
+        return { text: `Subagent ${agentId} was dismissed from retained runs.`, details: detailsFor(existing) };
+    }
+
+    private _deliverBackgroundSubagentNotification(
+        run: SubagentRun,
+        result: SubagentForegroundResult | undefined,
+        error: Error | undefined,
+    ): void {
+        const outcome = result ? 'completed' : run.status;
+        const body = result?.result ?? error?.message ?? run.error ?? 'No result was returned.';
+        const content = [
+            '<subagent-notification>',
+            `Background subagent ${run.name} (${run.agentId}) ${outcome}.`,
+            `Model: ${run.model ? `${run.model.provider}/${run.model.id}` : 'unknown'}`,
+            'Result:',
+            body,
+            '</subagent-notification>',
+        ].join('\n');
+        const details = {
+            agentId: run.agentId,
+            status: outcome,
+            model: run.model,
+            turnCount: run.turnCount,
+        };
+        if (this._session?.isStreaming) {
+            this._pendingBackgroundNotifications.push({ content, details });
+        } else {
+            this._appendBackgroundSubagentNotification(content, details);
+        }
+        this._outputChannel.appendLine(
+            `[subagent parent notification] agentId=${run.agentId} status=${outcome} bytes=${Buffer.byteLength(content, 'utf8')}`,
+        );
+    }
+
+    private _appendBackgroundSubagentNotification(content: string, details: Record<string, unknown>): void {
+        this._sessionManager?.appendCustomMessageEntry(
+            'pi-code.subagent-notification', content, false, details,
+        );
+    }
+
+    private _flushBackgroundSubagentNotifications(): void {
+        for (const notification of this._pendingBackgroundNotifications.splice(0)) {
+            this._appendBackgroundSubagentNotification(notification.content, notification.details);
+        }
+    }
+
+    private async _resetSubagentManager(cwd: string, session: AgentSession): Promise<void> {
+        this._subagentManagerUnsubscribe?.();
+        this._subagentManagerUnsubscribe = undefined;
+        await this._subagentManager?.dispose();
+        this._subagentManager = undefined;
+        if (!this._subagentCoordinator || !this._modelRegistry) return;
+        const authStorage = await getAuthStorage(this._secrets);
+        const parentSessionPath = this._sessionManager?.getSessionFile();
+        const restoredRecords = this._subagentStore
+            ? await this._subagentStore.loadParent(session.sessionId)
+            : [];
+        const transcriptDirectory = this._subagentStore
+            ? await this._subagentStore.ensureTranscriptDirectory(session.sessionId)
+            : undefined;
+        const childFactory = new PiChildSessionFactory({
+            cwd,
+            workspaceTrusted: vscode.workspace.isTrusted,
+            authStorage,
+            modelRegistry: this._modelRegistry,
+            ...(transcriptDirectory ? { transcriptDirectory } : {}),
+            ...(parentSessionPath ? { parentSessionPath } : {}),
+            ...(this._writeIsolation ? { writeIsolation: this._writeIsolation } : {}),
+            ...(this._childToolFactories ? { childToolFactories: this._childToolFactories } : {}),
+            log: (message) => this._outputChannel.appendLine(message),
+        });
+        this._subagentManager = new SubagentManager(this._subagentCoordinator, childFactory, {
+            parentSessionId: session.sessionId,
+            parentTabId: this._subagentParentTabId,
+            maxConcurrentRuns: vscode.workspace.getConfiguration('pi-code')
+                .get<number>('subagents.maxConcurrentPerChat', 2),
+            restoredRecords,
+            ...(this._subagentStore ? {
+                persistRun: (run, spec) => this._subagentStore!.save(
+                    session.sessionId, parentSessionPath, run, spec,
+                ),
+                dismissRun: async (agentId) => {
+                    await this._subagentStore!.dismiss(session.sessionId, agentId);
+                },
+            } : {}),
+            onMutationEvent: (event) => this._onSubagentMutation.fire(event),
+            onBackgroundSettled: async (run, result, error) => {
+                this._deliverBackgroundSubagentNotification(run, result, error);
+            },
+            log: (message) => this._outputChannel.appendLine(message),
+        });
+        this._subagentManagerUnsubscribe = this._subagentManager.onDidChange((snapshot) => {
+            this._onSubagentStateChanged.fire(snapshot);
+        });
+    }
+
     async dispose(): Promise<void> {
+        this._subagentManagerUnsubscribe?.();
+        this._subagentManagerUnsubscribe = undefined;
+        await this._subagentManager?.dispose();
+        this._subagentManager = undefined;
+        this._flushBackgroundSubagentNotifications();
+        this._backgroundNotificationUnsubscribe?.();
+        this._backgroundNotificationUnsubscribe = undefined;
         this._unsubscribe?.();
         this._session?.dispose();
         this._session = undefined;
+        this._onSubagentStateChanged.dispose();
+        this._onSubagentMutation.dispose();
         this.events.clear();
     }
 

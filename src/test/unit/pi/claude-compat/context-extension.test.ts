@@ -433,7 +433,7 @@ describe('Claude context extension', () => {
         const annotation = result.content.at(-1).text;
         expect(annotation).toContain('mcp__build__compile → build_compile [mapped]');
         expect(annotation).toContain('Read → read [mapped]');
-        expect(annotation).toContain('Agent [deferred-agent]');
+        expect(annotation).toContain('Agent [unavailable]');
     });
 
     it('registers no context or rule hooks when those capabilities have no resources', () => {

@@ -190,7 +190,7 @@ function formatStatusReport(
     const pathInstructions = target ? buildPathInstructions(ctx.cwd, [target], new Set(), options) : undefined;
     const branch = ctx.sessionManager.getBranch();
     const entries = getEntriesSinceLastCompaction(branch);
-    const currentTurnId = getCurrentAssistantTurnId(entries, ctx.sessionManager.getLeafId?.());
+    const currentTurnId = getCurrentAssistantTurnId(entries, ctx.sessionManager.getLeafId?.() ?? undefined);
     const userClaudeDirectory = getUserClaudeDirectory(options);
     const ruleIndex = indexClaudeRules(ctx.cwd, { userClaudeDirectory });
     const excludes = loadClaudeMdExcludes(ctx.cwd, userClaudeDirectory);

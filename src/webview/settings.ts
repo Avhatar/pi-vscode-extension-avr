@@ -107,6 +107,25 @@ function render(data: SettingsData): void {
         ),
     ]));
 
+    container.appendChild(buildSection('Subagents', [
+        buildToggle('subagents.defaultEnabled', 'Enable for new chats', data.subagentsDefaultEnabled,
+            'Expose subagent delegation to new chats by default. Existing chats keep their own persisted opt-in state.'),
+        buildTextInput('subagents.defaultModel', 'Default child model', data.subagentsDefaultModel,
+            'Canonical provider/id model used after the selected agent definition and before inheriting the parent. Leave empty to inherit.'),
+        buildTextarea('subagents.allowedModels', 'Allowed child models', data.subagentsAllowedModels.join(', '),
+            'Comma-separated provider/id allowlist. Leave empty to permit every configured model.'),
+        buildToggle('subagents.allowInvocationModelOverride', 'Allow per-call model override', data.subagentsAllowInvocationModelOverride,
+            'Allow the parent orchestrator to choose an exact child provider/model for each delegation.'),
+        buildNumberInput('subagents.defaultMaxTurns', 'Default maximum turns', data.subagentsDefaultMaxTurns, 1, 100,
+            'Maximum child turns unless a stricter agent or invocation value is used.'),
+        buildNumberInput('subagents.defaultTimeoutMinutes', 'Default timeout (minutes)', data.subagentsDefaultTimeoutMinutes, 1, 120,
+            'Child execution timeout unless a stricter agent or invocation value is used.'),
+        buildNumberInput('subagents.maxConcurrentGlobal', 'Global concurrent children', data.subagentsMaxConcurrentGlobal, 1, 16,
+            'Maximum child agents running across all Pi Code chats. Applies after window reload.'),
+        buildNumberInput('subagents.maxConcurrentPerChat', 'Concurrent children per chat', data.subagentsMaxConcurrentPerChat, 1, 8,
+            'Maximum children from one parent chat occupying execution slots. Applies to new or reloaded sessions.'),
+    ]));
+
     const skillsSection = buildSection('Skills', [buildSkillsPlaceholder()]);
     skillsSection.id = 'skills-section';
     container.appendChild(skillsSection);
@@ -172,6 +191,25 @@ function buildTextarea(key: string, label: string, value: string, description: s
             <label for="setting-${key}">${escHtml(label)}</label>
         </div>
         <input type="text" id="setting-${key}" class="setting-input" data-key="${key}" value="${escHtml(value)}" placeholder="e.g. read, grep, bash">
+        <p class="setting-description">${escHtml(description)}</p>
+    `;
+    return row;
+}
+
+function buildNumberInput(
+    key: string,
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    description: string,
+): HTMLElement {
+    const row = el('div', 'setting-row');
+    row.innerHTML = `
+        <div class="setting-label-row">
+            <label for="setting-${key}">${escHtml(label)}</label>
+        </div>
+        <input type="number" id="setting-${key}" class="setting-input" data-key="${key}" value="${value}" min="${min}" max="${max}" step="1">
         <p class="setting-description">${escHtml(description)}</p>
     `;
     return row;
@@ -600,8 +638,10 @@ function bindEvents(): void {
             debounce = setTimeout(() => {
                 const key = (input as HTMLInputElement).dataset.key!;
                 let value: any = (input as HTMLInputElement).value;
-                if (key === 'allowedTools') {
+                if (key === 'allowedTools' || key === 'subagents.allowedModels') {
                     value = value.split(',').map((s: string) => s.trim()).filter(Boolean);
+                } else if ((input as HTMLInputElement).type === 'number') {
+                    value = Number(value);
                 }
                 vscode.postMessage({ type: 'updateSetting', key, value });
             }, 500);

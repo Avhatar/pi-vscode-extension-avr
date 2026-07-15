@@ -166,6 +166,7 @@ body {
 }
 
 .todo-heading,
+.subagents-heading,
 .history-section > .section-heading,
 .tools-heading {
     /* These framed panels share Plan Mode's compact heading geometry.
@@ -336,6 +337,147 @@ body {
     font-size: 0.85em;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* ── Subagents section ── */
+
+.subagents-section {
+    border: 1px solid var(--vscode-widget-border, transparent);
+    border-radius: var(--row-radius);
+    padding: 4px 6px 6px;
+    background: var(--vscode-sideBarSectionHeader-background, transparent);
+}
+
+.subagent-smoke-dismiss {
+    padding: 1px 5px;
+    border-radius: var(--row-radius);
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.9em;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+}
+.subagent-smoke-dismiss:hover,
+.subagent-smoke-dismiss:focus-visible {
+    color: var(--vscode-foreground);
+    background: var(--vscode-toolbar-hoverBackground);
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.subagent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 2px;
+}
+
+.subagent-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 5px 6px;
+    border-radius: var(--row-radius);
+    background: var(--vscode-list-inactiveSelectionBackground, transparent);
+}
+.subagent-row:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.subagent-row-header,
+.subagent-metadata {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.subagent-status-glyph {
+    width: 13px;
+    flex-shrink: 0;
+    text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--vscode-descriptionForeground);
+}
+.subagent-row-running .subagent-status-glyph,
+.subagent-row-starting .subagent-status-glyph {
+    color: var(--vscode-charts-blue, var(--vscode-progressBar-background));
+}
+.subagent-row-retrying .subagent-status-glyph,
+.subagent-row-waiting_for_permission .subagent-status-glyph {
+    color: var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground));
+}
+.subagent-row-completed .subagent-status-glyph {
+    color: var(--vscode-charts-green, var(--vscode-testing-iconPassed));
+}
+.subagent-row-failed .subagent-status-glyph {
+    color: var(--vscode-charts-red, var(--vscode-testing-iconFailed));
+}
+
+.subagent-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-weight: 600;
+}
+
+.subagent-status-label {
+    flex-shrink: 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.82em;
+    text-transform: lowercase;
+}
+
+.subagent-controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 3px;
+    padding-top: 2px;
+}
+.subagent-control {
+    flex-shrink: 0;
+    padding: 1px 5px;
+    border: 1px solid var(--vscode-button-border, var(--vscode-widget-border));
+    border-radius: var(--row-radius);
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    font: inherit;
+    font-size: 0.8em;
+    cursor: pointer;
+}
+.subagent-control:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.subagent-control:disabled { opacity: 0.5; cursor: wait; }
+
+.subagent-metadata {
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.82em;
+}
+.subagent-model {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+}
+.subagent-elapsed { flex-shrink: 0; }
+.subagent-activity,
+.subagent-error {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.86em;
+    padding-left: 18px;
+}
+.subagent-error { color: var(--vscode-errorForeground); }
+.subagent-row-completed,
+.subagent-row-cancelled { opacity: 0.78; }
 
 /* ── History section ── */
 

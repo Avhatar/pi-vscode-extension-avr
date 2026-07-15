@@ -10,6 +10,7 @@ import { ChatController } from '../controllers/chat-controller';
 export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposable {
     private static readonly HISTORY_COLLAPSED_KEY = 'pi-code.launcher.historyCollapsed';
     private static readonly TODO_COLLAPSED_KEY = 'pi-code.launcher.todoCollapsed';
+    private static readonly SUBAGENTS_COLLAPSED_KEY = 'pi-code.launcher.subagentsCollapsed';
     private static readonly TOOLS_COLLAPSED_KEY = 'pi-code.launcher.toolsCollapsed';
 
     private _view?: vscode.WebviewView;
@@ -96,6 +97,80 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                 case 'setTodoEnabled':
                     await this._controller.setActiveTabTodoEnabled(msg.enabled);
                     break;
+                case 'setSubagentsCollapsed':
+                    await this._globalState.update(LauncherView.SUBAGENTS_COLLAPSED_KEY, msg.collapsed);
+                    await this._sendState();
+                    break;
+                case 'setSubagentsEnabled':
+                    await this._controller.setActiveTabSubagentsEnabled(msg.enabled);
+                    break;
+                case 'stopSubagent':
+                    if (!this._controller.stopActiveTabSubagent(msg.agentId)) {
+                        vscode.window.setStatusBarMessage('Pi Code: subagent is no longer running.', 2500);
+                    }
+                    break;
+                case 'inspectSubagent':
+                    if (!await this._controller.inspectActiveTabSubagent(msg.agentId)) {
+                        vscode.window.showWarningMessage('Pi Code: persistent subagent transcript is unavailable.');
+                    }
+                    break;
+                case 'resumeSubagent': {
+                    const task = await vscode.window.showInputBox({
+                        title: 'Resume subagent',
+                        prompt: 'Enter a self-contained follow-up task for the existing child transcript.',
+                        ignoreFocusOut: true,
+                        validateInput: (value) => value.trim() ? undefined : 'A follow-up task is required.',
+                    });
+                    if (task?.trim()) await this._controller.resumeActiveTabSubagent(msg.agentId, task.trim());
+                    break;
+                }
+                case 'steerSubagent': {
+                    const guidance = await vscode.window.showInputBox({
+                        title: 'Steer running subagent',
+                        prompt: 'Send additional guidance to the active child run.',
+                        ignoreFocusOut: true,
+                        validateInput: (value) => value.trim() ? undefined : 'Guidance is required.',
+                    });
+                    if (guidance?.trim() && !await this._controller.steerActiveTabSubagent(msg.agentId, guidance.trim())) {
+                        vscode.window.showWarningMessage('Pi Code: subagent is no longer accepting steering.');
+                    }
+                    break;
+                }
+                case 'dismissSubagent':
+                    if (!await this._controller.dismissActiveTabSubagent(msg.agentId)) {
+                        vscode.window.setStatusBarMessage('Pi Code: only completed subagent rows can be dismissed.', 2500);
+                    }
+                    break;
+                case 'reviewSubagentWorktree':
+                    if (!await this._controller.reviewActiveTabSubagentWorktree(msg.agentId)) {
+                        vscode.window.showWarningMessage('Pi Code: preserved subagent worktree is unavailable.');
+                    }
+                    break;
+                case 'applySubagentWorktree': {
+                    const confirmed = await vscode.window.showWarningMessage(
+                        'Apply this subagent worktree patch to the primary workspace and stage the changes?',
+                        { modal: true },
+                        'Apply patch',
+                    );
+                    if (confirmed === 'Apply patch' && !await this._controller.applyActiveTabSubagentWorktree(msg.agentId)) {
+                        vscode.window.showWarningMessage('Pi Code: worktree patch is unavailable.');
+                    }
+                    break;
+                }
+                case 'cleanupSubagentWorktree': {
+                    const confirmed = await vscode.window.showWarningMessage(
+                        'Remove this preserved subagent worktree? Unapplied changes will be discarded.',
+                        { modal: true },
+                        'Remove worktree',
+                    );
+                    if (confirmed === 'Remove worktree') {
+                        await this._controller.cleanupActiveTabSubagentWorktree(msg.agentId);
+                    }
+                    break;
+                }
+                case 'dismissSubagentSmoke':
+                    this._controller.dismissSubagentSmokeSnapshot();
+                    break;
                 case 'setPlanModeEnabled':
                     await this._controller.setActiveTabPlanModeEnabled(msg.enabled);
                     break;
@@ -137,6 +212,7 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                 ...state,
                 historyCollapsed: this._globalState.get<boolean>(LauncherView.HISTORY_COLLAPSED_KEY, true),
                 todoCollapsed: this._globalState.get<boolean>(LauncherView.TODO_COLLAPSED_KEY, false),
+                subagentsCollapsed: this._globalState.get<boolean>(LauncherView.SUBAGENTS_COLLAPSED_KEY, false),
                 toolsCollapsed: this._globalState.get<boolean>(LauncherView.TOOLS_COLLAPSED_KEY, true),
             },
         });

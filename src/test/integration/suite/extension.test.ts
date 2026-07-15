@@ -14,6 +14,7 @@ suite('Extension', () => {
         assert.ok(commands.includes('pi-code.abort'), 'abort command should exist');
         assert.ok(commands.includes('pi-code.selectModel'), 'selectModel command should exist');
         assert.ok(commands.includes('pi-code.focusChat'), 'focusChat command should exist');
+        assert.ok(commands.includes('pi-code.runSubagentSmokeTest'), 'subagent smoke-test command should exist');
         assert.ok(!commands.includes('pi-code.claudeCompatSmoke'), 'disabled Claude compatibility smoke command should not exist');
         assert.ok(!commands.includes('pi-code.lspSmoke'), 'disabled LSP smoke command should not exist');
     });

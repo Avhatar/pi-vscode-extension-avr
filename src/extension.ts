@@ -12,8 +12,14 @@ import { refreshModelRegistry } from './pi/models';
 
 import { DiffManager, DiffContentProvider } from './providers/diff';
 import { CheckpointManager } from './providers/checkpoint';
+import { registerSubagentSmokeCommand } from './pi/subagents/smoke/runner';
+import { SubagentCoordinator } from './pi/subagents/coordinator';
+import { SubagentRunStore } from './pi/subagents/persistence';
+import { WriteIsolationManager } from './pi/subagents/write-isolation';
+import { ChildToolFactoryRegistry } from './pi/subagents/child-tools';
 
 let controllerRef: ChatController | undefined;
+let subagentCoordinatorRef: SubagentCoordinator | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     const outputChannel = vscode.window.createOutputChannel('Pi Code');
@@ -22,7 +28,25 @@ export async function activate(context: vscode.ExtensionContext) {
     try {
         getCodexUsageStore().init(context.globalState);
 
-        const initialSession = new PiSessionManager(outputChannel, context.secrets);
+        const subagentCoordinator = new SubagentCoordinator(
+            vscode.workspace.getConfiguration('pi-code').get<number>('subagents.maxConcurrentGlobal', 4),
+        );
+        subagentCoordinatorRef = subagentCoordinator;
+        const subagentStore = new SubagentRunStore(context.globalStorageUri.fsPath);
+        await subagentStore.initialize();
+        const subagentCleanup = await subagentStore.cleanup(30 * 24 * 60 * 60_000);
+        outputChannel.appendLine(
+            `[subagent storage cleanup] records=${subagentCleanup.recordsRemoved} ` +
+            `transcripts=${subagentCleanup.transcriptsRemoved} parents=${subagentCleanup.parentDirectoriesRemoved}`,
+        );
+        const writeIsolation = new WriteIsolationManager(
+            context.globalStorageUri.fsPath,
+            (message) => outputChannel.appendLine(message),
+        );
+        const childToolFactories = new ChildToolFactoryRegistry();
+        const initialSession = new PiSessionManager(
+            outputChannel, context.secrets, subagentCoordinator, subagentStore, writeIsolation, childToolFactories,
+        );
         await initialSession.initialize();
 
         context.subscriptions.push(
@@ -44,6 +68,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         const controller = new ChatController(
             context, initialSession, diffManager, checkpointManager, outputChannel,
+            subagentCoordinator, subagentStore, writeIsolation, childToolFactories,
         );
         controllerRef = controller;
 
@@ -71,6 +96,11 @@ export async function activate(context: vscode.ExtensionContext) {
             diffManager,
             checkpointManager,
             outputChannel,
+            registerSubagentSmokeCommand(
+                context,
+                () => controller.activeSession,
+                (snapshot, transcripts) => controller.showSubagentSmokeSnapshot(snapshot, transcripts),
+            ),
 
             vscode.commands.registerCommand('pi-code.newChat', async () => {
                 // "New Chat" now means a fresh session in a fresh editor tab,
@@ -127,6 +157,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
         outputChannel.appendLine('Pi Code extension activated.');
     } catch (err: any) {
+        subagentCoordinatorRef?.dispose();
+        subagentCoordinatorRef = undefined;
         outputChannel.appendLine(`Failed to activate: ${err.message}`);
         vscode.window.showErrorMessage(`Pi Code failed to activate: ${err.message}`);
     }
@@ -134,5 +166,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 export async function deactivate() {
     controllerRef = undefined;
+    subagentCoordinatorRef?.dispose();
+    subagentCoordinatorRef = undefined;
     await PiSessionManager.disposeGlobal();
 }

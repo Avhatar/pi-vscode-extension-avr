@@ -12,8 +12,9 @@ const NATIVE_TOOL_CANDIDATES: Record<string, string[]> = {
     WebFetch: ['fetch_content'],
     WebSearch: ['web_search'],
     TodoWrite: ['todo'],
+    Agent: ['subagent'],
+    Task: ['subagent'],
 };
-const DEFERRED_AGENT_TOOLS = new Set(['Agent', 'Task']);
 const RUNTIME_ONLY_TOOLS = new Set(['Skill', 'AskUserQuestion', 'NotebookEdit']);
 
 export interface ClaudeToolResolution {
@@ -83,13 +84,6 @@ export function resolveClaudeToolReference(reference: string, availableTools: It
         return { reference, status: 'unavailable', message: 'No matching direct tool or Pi mcp proxy is active.' };
     }
 
-    if (DEFERRED_AGENT_TOOLS.has(reference)) {
-        return {
-            reference,
-            status: 'deferred-agent',
-            message: 'Claude subagent execution is intentionally deferred; continue in the current Pi agent when possible.',
-        };
-    }
     if (RUNTIME_ONLY_TOOLS.has(reference)) {
         const alternatives: Record<string, string> = {
             Skill: 'Load the applicable adapted skill with read or invoke its Pi slash command.',

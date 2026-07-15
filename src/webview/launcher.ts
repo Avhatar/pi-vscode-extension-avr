@@ -1,7 +1,8 @@
 import type {
     LauncherClientMessage, LauncherServerMessage, LauncherState,
     LauncherSessionInfo, TaskInfo, TaskStatus, TodoSnapshot,
-    RegisteredToolInfo, ToolSelectionSnapshot,
+    RegisteredToolInfo, ToolSelectionSnapshot, LauncherSubagentRun,
+    LauncherSubagentStatus, LauncherSubagentSnapshot,
 } from '../shared/protocol';
 
 declare function acquireVsCodeApi(): {
@@ -19,8 +20,10 @@ let currentState: LauncherState = {
     recentSessions: [],
     historyCollapsed: true,
     todoCollapsed: false,
+    subagentsCollapsed: false,
     toolsCollapsed: true,
 };
+let stateReceivedAt = Date.now();
 
 // UI-local state for the Tools panel (search filter + per-group collapse).
 // Not persisted — resets on window reload, but survives launcher re-renders.
@@ -31,6 +34,7 @@ window.addEventListener('message', (event) => {
     const msg = event.data as LauncherServerMessage;
     if (msg.type === 'launcherState') {
         currentState = msg.state;
+        stateReceivedAt = Date.now();
         render();
     }
 });
@@ -76,6 +80,7 @@ function formatRelative(ts?: number): string {
  *  wiping the DOM and restored on the fresh tree so a state push from the
  *  host doesn't yank the user's scroll position or steal focus mid-typing. */
 interface RenderPreservation {
+    subagentsBodyScrollTop: number;
     toolsBodyScrollTop: number;
     toolsSearchFocused: boolean;
     toolsSearchSelectionStart: number | null;
@@ -84,10 +89,12 @@ interface RenderPreservation {
 
 function captureRenderState(): RenderPreservation {
     const root = document.getElementById('launcher');
+    const subagentsBody = root?.querySelector('.subagent-list') as HTMLElement | null;
     const body = root?.querySelector('.tools-body') as HTMLElement | null;
     const search = root?.querySelector('.tools-search') as HTMLInputElement | null;
     const searchFocused = search !== null && document.activeElement === search;
     return {
+        subagentsBodyScrollTop: subagentsBody?.scrollTop ?? 0,
         toolsBodyScrollTop: body?.scrollTop ?? 0,
         toolsSearchFocused: searchFocused,
         toolsSearchSelectionStart: searchFocused ? search!.selectionStart : null,
@@ -98,6 +105,10 @@ function captureRenderState(): RenderPreservation {
 function restoreRenderState(prev: RenderPreservation): void {
     const root = document.getElementById('launcher');
     if (!root) return;
+    const subagentsBody = root.querySelector('.subagent-list') as HTMLElement | null;
+    if (subagentsBody && prev.subagentsBodyScrollTop > 0) {
+        subagentsBody.scrollTop = prev.subagentsBodyScrollTop;
+    }
     const body = root.querySelector('.tools-body') as HTMLElement | null;
     if (body && prev.toolsBodyScrollTop > 0) {
         body.scrollTop = prev.toolsBodyScrollTop;
@@ -127,6 +138,8 @@ function render(): void {
     if (fileUndoView) root.appendChild(fileUndoView);
     const todos = renderTodos();
     if (todos) root.appendChild(todos);
+    const subagents = renderSubagents();
+    if (subagents) root.appendChild(subagents);
     root.appendChild(renderRecentSessions());
     const tools = renderTools();
     if (tools) root.appendChild(tools);
@@ -274,6 +287,193 @@ function renderFileUndoViewToggle(enabled: boolean): HTMLElement {
 
     return wrap;
 }
+
+// ── Subagents section ──
+
+const SUBAGENT_STATUS_GLYPH: Record<LauncherSubagentStatus, string> = {
+    queued: '◷',
+    starting: '◌',
+    running: '●',
+    waiting_for_permission: '!',
+    retrying: '↻',
+    completed: '✓',
+    failed: '×',
+    cancelled: '–',
+};
+
+function setSubagentsCollapsed(collapsed: boolean): void {
+    currentState = { ...currentState, subagentsCollapsed: collapsed };
+    render();
+    vscode.postMessage({ type: 'setSubagentsCollapsed', collapsed });
+}
+
+function renderSubagents(): HTMLElement | undefined {
+    const snapshot: LauncherSubagentSnapshot | undefined = currentState.subagents;
+    if (!snapshot) return undefined;
+    const collapsed = currentState.subagentsCollapsed === true;
+
+    const section = el('div', 'section subagents-section');
+    const heading = el('button', 'section-heading section-heading-button subagents-heading');
+    heading.type = 'button';
+    heading.setAttribute('aria-expanded', String(!collapsed));
+    heading.title = collapsed ? 'Expand Subagents' : 'Collapse Subagents';
+    heading.appendChild(el('span', 'section-chevron', collapsed ? '▶' : '▼'));
+    heading.appendChild(el('span', 'section-title', 'Subagents'));
+    if (snapshot.activeCount > 0) {
+        heading.appendChild(el('span', 'section-count', `${snapshot.activeCount} active`));
+    }
+    if (snapshot.smokeSimulation) {
+        const dismiss = el('span', 'subagent-smoke-dismiss', 'Reset');
+        dismiss.setAttribute('role', 'button');
+        dismiss.setAttribute('tabindex', '0');
+        dismiss.title = 'Dismiss simulated lifecycle rows and return to live state';
+        const reset = (): void => vscode.postMessage({ type: 'dismissSubagentSmoke' });
+        dismiss.addEventListener('click', (event) => {
+            event.stopPropagation();
+            reset();
+        });
+        dismiss.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                event.stopPropagation();
+                reset();
+            }
+        });
+        heading.appendChild(dismiss);
+    }
+    const toggleHost = el('span', 'todo-toggle-host');
+    toggleHost.addEventListener('click', (event) => event.stopPropagation());
+    toggleHost.appendChild(renderSubagentsToggle(snapshot));
+    heading.appendChild(toggleHost);
+    heading.addEventListener('click', () => setSubagentsCollapsed(!collapsed));
+    section.appendChild(heading);
+
+    if (collapsed || !snapshot.enabled) return section;
+    if (snapshot.runs.length === 0) {
+        section.appendChild(el('div', 'empty', 'No subagent runs yet.'));
+        return section;
+    }
+
+    const list = el('div', 'subagent-list');
+    for (const run of snapshot.runs) list.appendChild(renderSubagentRow(run));
+    section.appendChild(list);
+    return section;
+}
+
+function renderSubagentsToggle(snapshot: LauncherSubagentSnapshot): HTMLElement {
+    const disabled = snapshot.toggleDisabled || snapshot.smokeSimulation === true;
+    const wrap = el('label', `todo-toggle${disabled ? ' todo-toggle-disabled' : ''}`);
+    wrap.title = snapshot.smokeSimulation
+        ? 'The deterministic smoke snapshot is read-only; click Reset to return to live state'
+        : disabled
+            ? 'Wait for the parent agent to finish before changing subagent access'
+            : snapshot.enabled
+                ? 'Disable subagent delegation for this chat'
+                : 'Enable subagent delegation for this chat';
+    const input = el('input', 'todo-toggle-input') as HTMLInputElement;
+    input.type = 'checkbox';
+    input.checked = snapshot.enabled;
+    input.disabled = disabled;
+    input.setAttribute('aria-label', 'Enable subagent delegation');
+    input.addEventListener('change', () => {
+        if (disabled) return;
+        const enabled = input.checked;
+        currentState = {
+            ...currentState,
+            subagents: { ...snapshot, enabled },
+        };
+        render();
+        vscode.postMessage({ type: 'setSubagentsEnabled', enabled });
+    });
+    wrap.appendChild(input);
+    const track = el('span', 'todo-toggle-track');
+    track.appendChild(el('span', 'todo-toggle-thumb'));
+    wrap.appendChild(track);
+    return wrap;
+}
+
+function renderSubagentRow(run: LauncherSubagentRun): HTMLElement {
+    const row = el('div', `subagent-row subagent-row-${run.status}`);
+    row.title = run.error ?? run.taskPreview;
+
+    const header = el('div', 'subagent-row-header');
+    const glyph = el('span', 'subagent-status-glyph', SUBAGENT_STATUS_GLYPH[run.status]);
+    glyph.title = run.status.replaceAll('_', ' ');
+    header.appendChild(glyph);
+    header.appendChild(el('span', 'subagent-name', run.name));
+    header.appendChild(el('span', 'subagent-status-label', run.status.replaceAll('_', ' ')));
+    row.appendChild(header);
+
+    const metadata = el('div', 'subagent-metadata');
+    const model = el('span', 'subagent-model', run.modelLabel ?? 'resolving model…');
+    model.title = run.modelLabel ?? 'Model is not resolved yet';
+    metadata.appendChild(model);
+    const elapsed = el('span', 'subagent-elapsed', formatElapsed(run.elapsedMs));
+    elapsed.dataset.elapsedBase = String(run.elapsedMs);
+    elapsed.dataset.active = String(run.canStop);
+    metadata.appendChild(elapsed);
+    if (run.queueWaitMs !== undefined && run.queueWaitMs > 0) {
+        const queued = el('span', 'subagent-queue-wait', `queue ${formatElapsed(run.queueWaitMs)}`);
+        queued.title = 'Time spent waiting for per-chat and global execution capacity';
+        metadata.appendChild(queued);
+    }
+    row.appendChild(metadata);
+
+    const activityText = run.currentTool
+        ? `${run.activity ?? 'Running tool'} · ${run.currentTool}`
+        : run.activity ?? (run.turnCount > 0 ? `${run.turnCount} turn${run.turnCount === 1 ? '' : 's'}` : run.taskPreview);
+    row.appendChild(el('div', 'subagent-activity', activityText));
+    if (run.error) row.appendChild(el('div', 'subagent-error', run.error));
+
+    const controls = el('div', 'subagent-controls');
+    if (run.canInspect) controls.appendChild(subagentControl('Inspect', 'inspectSubagent', run.agentId));
+    if (run.canSteer) controls.appendChild(subagentControl('Send', 'steerSubagent', run.agentId));
+    if (run.canStop) controls.appendChild(subagentControl('Stop', 'stopSubagent', run.agentId));
+    if (run.canResume) controls.appendChild(subagentControl('Resume', 'resumeSubagent', run.agentId));
+    if (run.hasWorktree) {
+        controls.appendChild(subagentControl('Review', 'reviewSubagentWorktree', run.agentId));
+        controls.appendChild(subagentControl('Apply', 'applySubagentWorktree', run.agentId));
+        controls.appendChild(subagentControl('Clean', 'cleanupSubagentWorktree', run.agentId));
+    }
+    if (run.canDismiss) controls.appendChild(subagentControl('Dismiss', 'dismissSubagent', run.agentId));
+    if (controls.childElementCount > 0) row.appendChild(controls);
+    return row;
+}
+
+function subagentControl(
+    label: string,
+    type: 'inspectSubagent' | 'steerSubagent' | 'stopSubagent' | 'resumeSubagent' | 'dismissSubagent'
+        | 'reviewSubagentWorktree' | 'applySubagentWorktree' | 'cleanupSubagentWorktree',
+    agentId: string,
+): HTMLButtonElement {
+    const button = el('button', 'subagent-control', label);
+    button.type = 'button';
+    button.addEventListener('click', () => {
+        if (type === 'stopSubagent' || type === 'dismissSubagent') button.disabled = true;
+        vscode.postMessage({ type, agentId });
+    });
+    return button;
+}
+
+function formatElapsed(milliseconds: number): string {
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes < 60) return `${minutes}m ${seconds}s`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ${minutes % 60}m`;
+}
+
+function updateSubagentElapsedLabels(): void {
+    const delta = Date.now() - stateReceivedAt;
+    document.querySelectorAll<HTMLElement>('.subagent-elapsed').forEach((node) => {
+        const base = Number(node.dataset.elapsedBase ?? 0);
+        const active = node.dataset.active === 'true';
+        node.textContent = formatElapsed(base + (active ? delta : 0));
+    });
+}
+window.setInterval(updateSubagentElapsedLabels, 1_000);
 
 // ── ToDo section ──
 //

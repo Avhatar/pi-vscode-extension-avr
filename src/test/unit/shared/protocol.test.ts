@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import type { ClientMessage, ServerMessage, SerializedAgentState } from '../../../shared/protocol';
+import type {
+    ClientMessage, ServerMessage, SerializedAgentState, LauncherState, LauncherClientMessage,
+} from '../../../shared/protocol';
 
 describe('Protocol types', () => {
     it('client messages serialize correctly', () => {
@@ -42,6 +44,42 @@ describe('Protocol types', () => {
             const roundTripped = JSON.parse(JSON.stringify(msg)) as ServerMessage;
             expect(roundTripped.type).toBe(msg.type);
         }
+    });
+
+    it('launcher subagent lifecycle state and actions serialize', () => {
+        const state: LauncherState = {
+            tabs: [], recentSessions: [], historyCollapsed: true, todoCollapsed: false,
+            subagentsCollapsed: false, toolsCollapsed: true,
+            subagents: {
+                enabled: true, toggleDisabled: false, activeCount: 1, queuedCount: 0,
+                runs: [{
+                    agentId: 'child', name: 'reviewer', taskPreview: 'Review', status: 'running',
+                    modelLabel: 'deepseek/reasoner', currentTool: 'grep', activity: 'Running grep',
+                    elapsedMs: 5_000, turnCount: 1, canStop: true,
+                    canInspect: true, canResume: false, canSteer: true, canDismiss: false, hasWorktree: false,
+                }],
+            },
+        };
+        const actions: LauncherClientMessage[] = [
+            { type: 'setSubagentsEnabled', enabled: true },
+            { type: 'setSubagentsCollapsed', collapsed: false },
+            { type: 'stopSubagent', agentId: 'child' },
+            { type: 'inspectSubagent', agentId: 'child' },
+            { type: 'resumeSubagent', agentId: 'child' },
+            { type: 'steerSubagent', agentId: 'child' },
+            { type: 'dismissSubagent', agentId: 'child' },
+            { type: 'reviewSubagentWorktree', agentId: 'child' },
+            { type: 'applySubagentWorktree', agentId: 'child' },
+            { type: 'cleanupSubagentWorktree', agentId: 'child' },
+            { type: 'dismissSubagentSmoke' },
+        ];
+        expect(JSON.parse(JSON.stringify(state)).subagents.runs[0].modelLabel).toBe('deepseek/reasoner');
+        expect(actions.map((action) => action.type)).toEqual([
+            'setSubagentsEnabled', 'setSubagentsCollapsed', 'stopSubagent',
+            'inspectSubagent', 'resumeSubagent', 'steerSubagent', 'dismissSubagent',
+            'reviewSubagentWorktree', 'applySubagentWorktree', 'cleanupSubagentWorktree',
+            'dismissSubagentSmoke',
+        ]);
     });
 
     it('state with streaming message serializes', () => {

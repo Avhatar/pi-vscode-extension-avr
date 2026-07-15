@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.43.9",
+  "version": "0.51.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -70,6 +70,10 @@
         "command": "pi-code.createTab",
         "title": "Pi Code: New Agent Tab",
         "icon": "$(add)"
+      },
+      {
+        "command": "pi-code.runSubagentSmokeTest",
+        "title": "Pi Code: Run Subagent Smoke Test"
       }
     ],
     "keybindings": [
@@ -168,6 +172,57 @@
           "type": "boolean",
           "default": true,
           "description": "Enable the per-chat persistent ToDo for new chats by default. Each chat keeps its own toggle state once you flip it; this setting only affects chats you have not customized yet."
+        },
+        "pi-code.subagents.defaultEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Expose the subagent delegation tool to new chats by default. Each chat keeps its own opt-in state; disabled chats have no subagent schema or prompt guidelines."
+        },
+        "pi-code.subagents.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Default child model in canonical provider/id format. Leave empty to use the agent definition and then the parent model."
+        },
+        "pi-code.subagents.allowedModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Exact provider/id models allowed for child agents. Leave empty to allow every configured model."
+        },
+        "pi-code.subagents.allowInvocationModelOverride": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow the parent orchestrator to select an exact child provider/model in a subagent tool call."
+        },
+        "pi-code.subagents.defaultMaxTurns": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Default maximum number of turns for a foreground child agent."
+        },
+        "pi-code.subagents.defaultTimeoutMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 120,
+          "description": "Default execution timeout in minutes for a child agent."
+        },
+        "pi-code.subagents.maxConcurrentGlobal": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Maximum child agents running across all Pi Code chats."
+        },
+        "pi-code.subagents.maxConcurrentPerChat": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Maximum child agents from one parent chat occupying global execution slots."
         },
         "pi-code.lsp.enabled": {
           "type": "boolean",

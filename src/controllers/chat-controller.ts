@@ -4,7 +4,7 @@ import { PiSessionManager } from '../pi/session';
 import type {
     ClientMessage, ServerMessage, TabInfo,
     LauncherState, LauncherTabInfo, LauncherSessionInfo,
-    CacheMode, CacheEffective, TodoSnapshot,
+    CacheMode, CacheEffective, TodoSnapshot, LauncherSubagentSnapshot,
 } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 import { DiffManager } from '../providers/diff';
@@ -14,6 +14,13 @@ import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { computeCodexTurnUsage, isCodexUsageStale } from '../shared/codex-usage';
 import { WorkspaceFileMentions } from '../workspace/file-mentions';
 import type { CodexTurnUsage, CodexUsageSnapshot } from '../shared/protocol';
+import type { SubagentCoordinator } from '../pi/subagents/coordinator';
+import { SubagentCapabilityGate } from '../pi/subagents/gating';
+import { projectSubagentLauncherSnapshot } from '../pi/subagents/launcher-state';
+import type { SubagentRunStore } from '../pi/subagents/persistence';
+import type { WriteIsolationManager } from '../pi/subagents/write-isolation';
+import type { ChildToolFactoryRegistry } from '../pi/subagents/child-tools';
+import { routeSubagentMutation } from '../pi/subagents/mutations';
 
 interface MessageMeta {
     thinkingDurationSec: number;
@@ -308,6 +315,10 @@ export class ChatController implements vscode.Disposable {
 
     /** Wired by the host (extension.ts) to construct a `ChatPanel` for a tab. */
     private _panelOpener?: (tabId: string) => void;
+    private readonly _subagentCoordinator: SubagentCoordinator;
+    private readonly _subagentGate: SubagentCapabilityGate;
+    private _subagentSmokeSnapshot?: LauncherSubagentSnapshot;
+    private _subagentSmokeTranscripts = new Map<string, string>();
 
     constructor(
         context: vscode.ExtensionContext,
@@ -315,9 +326,18 @@ export class ChatController implements vscode.Disposable {
         initialDiffManager: DiffManager,
         initialCheckpointManager: CheckpointManager,
         outputChannel: vscode.OutputChannel,
+        subagentCoordinator: SubagentCoordinator,
+        private readonly _subagentStore: SubagentRunStore,
+        private readonly _writeIsolation: WriteIsolationManager,
+        private readonly _childToolFactories: ChildToolFactoryRegistry,
     ) {
         this._context = context;
         this._outputChannel = outputChannel;
+        this._subagentCoordinator = subagentCoordinator;
+        this._subagentGate = new SubagentCapabilityGate(
+            context.workspaceState,
+            () => vscode.workspace.getConfiguration('pi-code').get<boolean>('subagents.defaultEnabled', false),
+        );
         const storedMode = context.globalState.get<CacheMode>('pi-code.cacheMode');
         if (storedMode === 'short' || storedMode === 'long' || storedMode === 'auto') {
             this._cacheMode = storedMode;
@@ -477,7 +497,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     /** Build a snapshot of launcher state (panel tabs + recent sessions). */
-    async computeLauncherState(): Promise<Omit<LauncherState, 'historyCollapsed' | 'todoCollapsed' | 'toolsCollapsed'>> {
+    async computeLauncherState(): Promise<Omit<LauncherState, 'historyCollapsed' | 'todoCollapsed' | 'subagentsCollapsed' | 'toolsCollapsed'>> {
         // Track only tabs with a visible editor panel. A bare TabState without
         // a panel is an internal placeholder (e.g. the initial empty tab), not
         // something the user thinks of as open.
@@ -526,6 +546,7 @@ export class ChatController implements vscode.Disposable {
         let planModeEnabled: boolean | undefined;
         let planModeToggleDisabled: boolean | undefined;
         let fileUndoViewEnabled: boolean | undefined;
+        let subagents: LauncherSubagentSnapshot | undefined;
         let toolSelection: LauncherState['toolSelection'];
         const activeTab = this._tabs.get(this._activeTabId);
         if (activeTab && this._openPanels.has(activeTab.id)) {
@@ -536,6 +557,10 @@ export class ChatController implements vscode.Disposable {
             planModeEnabled = this._isPlanModeEnabledFor(activeTab);
             planModeToggleDisabled = this._isTabBusy(activeTab);
             fileUndoViewEnabled = this._isFileUndoViewEnabledFor(activeTab);
+            subagents = projectSubagentLauncherSnapshot(activeTab.session.getSubagentSnapshot(), {
+                enabled: this._isSubagentsEnabledFor(activeTab),
+                toggleDisabled: this._isTabBusy(activeTab),
+            });
             toolSelection = {
                 registered: activeTab.session.getRegisteredToolsInfo(),
                 disabled: this._effectiveDisabledTools(activeTab),
@@ -546,6 +571,7 @@ export class ChatController implements vscode.Disposable {
         return {
             tabs, recentSessions, todos, todoEnabled, todoToggleDisabled,
             planModeEnabled, planModeToggleDisabled, fileUndoViewEnabled,
+            subagents: this._subagentSmokeSnapshot ?? subagents,
             toolSelection,
         };
     }
@@ -607,6 +633,7 @@ export class ChatController implements vscode.Disposable {
             }
         }
 
+        await this._subagentStore.deleteByParentSessionPath(sessionPath);
         await unlink(sessionPath);
         this._persistTabs();
         this._onLauncherStateChanged.fire();
@@ -619,7 +646,10 @@ export class ChatController implements vscode.Disposable {
      * is not currently represented by any tab.
      */
     async createTabFromSessionPath(sessionPath: string): Promise<string> {
-        const session = new PiSessionManager(this._outputChannel, this._context.secrets);
+        const session = new PiSessionManager(
+            this._outputChannel, this._context.secrets, this._subagentCoordinator,
+            this._subagentStore, this._writeIsolation, this._childToolFactories,
+        );
         await session.initializeFromPath(sessionPath);
 
         const checkpoint = new CheckpointManager();
@@ -744,6 +774,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _subscribeTab(tab: TabState): void {
+        tab.session.setSubagentParentTabId(tab.id);
         const unsubs: (() => void)[] = [];
 
         unsubs.push(
@@ -769,6 +800,17 @@ export class ChatController implements vscode.Disposable {
                 }
             }),
         );
+
+        const subagentStateSubscription = tab.session.onSubagentStateChanged(() => {
+            if (tab.id === this._activeTabId && !this._subagentSmokeSnapshot) {
+                this._onLauncherStateChanged.fire();
+            }
+        });
+        unsubs.push(() => subagentStateSubscription.dispose());
+        const subagentMutationSubscription = tab.session.onSubagentMutation((event) => {
+            routeSubagentMutation(event, tab.diffManager);
+        });
+        unsubs.push(() => subagentMutationSubscription.dispose());
 
         // Apply the persisted tool selection (ToDo toggle + per-tab
         // Tools panel denylist, folded into a single `disabled` set).
@@ -801,6 +843,131 @@ export class ChatController implements vscode.Disposable {
         // config default — so once the user toggled OFF for a chat,
         // it stays OFF even if `defaultEnabled` is `true`.
         return this._context.workspaceState.get<boolean>(key, fallback);
+    }
+
+    private _isSubagentsEnabledFor(tab: TabState): boolean {
+        return this._subagentGate.isEnabled(tab.session.sessionPath);
+    }
+
+    private async _setSubagentsEnabledFor(tab: TabState, enabled: boolean): Promise<boolean> {
+        const changed = await this._subagentGate.setEnabled(
+            tab.session.sessionPath,
+            enabled,
+            this._isTabBusy(tab),
+        );
+        if (!changed) return false;
+        this._applyPersistedToolSelection(tab);
+        this._onLauncherStateChanged.fire();
+        return true;
+    }
+
+    async setActiveTabSubagentsEnabled(enabled: boolean): Promise<void> {
+        if (this._subagentSmokeSnapshot) {
+            this._subagentSmokeSnapshot = undefined;
+            this._subagentSmokeTranscripts.clear();
+        }
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return;
+        await this._setSubagentsEnabledFor(tab, enabled);
+    }
+
+    stopActiveTabSubagent(agentId: string): boolean {
+        if (this._subagentSmokeSnapshot) return false;
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) return false;
+        const stopped = tab.session.stopSubagent(agentId);
+        if (stopped) this._onLauncherStateChanged.fire();
+        return stopped;
+    }
+
+    async inspectActiveTabSubagent(agentId: string): Promise<boolean> {
+        const smokeTranscript = this._subagentSmokeTranscripts.get(agentId);
+        const tab = this._tabs.get(this._activeTabId);
+        const transcript = smokeTranscript ?? await tab?.session.readSubagentTranscript(agentId);
+        if (!transcript) return false;
+        const document = await vscode.workspace.openTextDocument({
+            language: 'markdown',
+            content: formatSubagentTranscript(agentId, transcript),
+        });
+        await vscode.window.showTextDocument(document, { preview: true });
+        return true;
+    }
+
+    async resumeActiveTabSubagent(agentId: string, task: string): Promise<void> {
+        if (this._subagentSmokeSnapshot) throw new Error('Dismiss the smoke snapshot before resuming a subagent.');
+        const tab = this._tabs.get(this._activeTabId);
+        if (!tab) throw new Error('No active chat.');
+        if (this._isTabBusy(tab)) throw new Error('Wait for the parent agent to finish before resuming a subagent.');
+        await tab.session.resumeSubagent(agentId, task);
+    }
+
+    async steerActiveTabSubagent(agentId: string, message: string): Promise<boolean> {
+        if (this._subagentSmokeSnapshot) return false;
+        const tab = this._tabs.get(this._activeTabId);
+        return tab ? tab.session.steerSubagent(agentId, message) : false;
+    }
+
+    async dismissActiveTabSubagent(agentId: string): Promise<boolean> {
+        if (this._subagentSmokeSnapshot) return false;
+        const tab = this._tabs.get(this._activeTabId);
+        return tab ? tab.session.dismissSubagent(agentId) : false;
+    }
+
+    async reviewActiveTabSubagentWorktree(agentId: string): Promise<boolean> {
+        const run = this._tabs.get(this._activeTabId)?.session.getSubagentRun(agentId);
+        if (!run?.isolationPath) return false;
+        const diff = await this._writeIsolation.getWorktreeDiff(run.isolationPath);
+        const document = await vscode.workspace.openTextDocument({
+            language: 'diff',
+            content: diff || '# No worktree changes.\n',
+        });
+        await vscode.window.showTextDocument(document, { preview: true });
+        return true;
+    }
+
+    async applyActiveTabSubagentWorktree(agentId: string): Promise<boolean> {
+        const run = this._tabs.get(this._activeTabId)?.session.getSubagentRun(agentId);
+        const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!run?.isolationPath || !workspace) return false;
+        await this._writeIsolation.applyWorktree(workspace, run.isolationPath);
+        return true;
+    }
+
+    async cleanupActiveTabSubagentWorktree(agentId: string): Promise<boolean> {
+        const run = this._tabs.get(this._activeTabId)?.session.getSubagentRun(agentId);
+        const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!run?.isolationPath || !workspace) return false;
+        await this._writeIsolation.cleanupWorktree(workspace, run.isolationPath);
+        this._tabs.get(this._activeTabId)?.session.clearSubagentIsolationPath(agentId);
+        return true;
+    }
+
+    showSubagentSmokeSnapshot(
+        snapshot: LauncherSubagentSnapshot,
+        transcripts?: Readonly<Record<string, string>>,
+    ): void {
+        this._subagentSmokeTranscripts = new Map(Object.entries(transcripts ?? {}));
+        this._subagentSmokeSnapshot = {
+            ...snapshot,
+            smokeSimulation: true,
+            runs: snapshot.runs.map((run) => ({
+                ...run,
+                canStop: false,
+                canInspect: this._subagentSmokeTranscripts.has(run.agentId),
+                canResume: false,
+                canSteer: false,
+                canDismiss: false,
+            })),
+        };
+        this._onLauncherStateChanged.fire();
+        void vscode.commands.executeCommand('pi-code.chat.focus');
+    }
+
+    dismissSubagentSmokeSnapshot(): void {
+        if (!this._subagentSmokeSnapshot) return;
+        this._subagentSmokeSnapshot = undefined;
+        this._subagentSmokeTranscripts.clear();
+        this._onLauncherStateChanged.fire();
     }
 
     // ── Per-tab tool selection ──
@@ -839,13 +1006,13 @@ export class ChatController implements vscode.Disposable {
     }
 
     /** The full effective denylist for this tab: everything in the Tools
-     *  panel denylist, PLUS `todo` when the ToDo toggle is OFF. Kept in
-     *  one place so callers can't accidentally forget the ToDo half. */
+     *  panel denylist, plus dedicated capability gates such as ToDo and
+     *  Subagents. Kept in one place so callers cannot bypass those gates. */
     private _effectiveDisabledTools(tab: TabState): string[] {
-        const base = this._getDisabledToolsFor(tab);
-        const todoEnabled = this._isTodoEnabledFor(tab);
-        if (todoEnabled) return base;
-        return base.includes('todo') ? base : [...base, 'todo'];
+        const base = new Set(this._getDisabledToolsFor(tab));
+        if (this._isTodoEnabledFor(tab)) base.delete('todo');
+        else base.add('todo');
+        return this._subagentGate.composeDisabledTools([...base], tab.session.sessionPath);
     }
 
     /** Read persisted state (ToDo toggle + Tools panel denylist) and
@@ -856,8 +1023,9 @@ export class ChatController implements vscode.Disposable {
     private _applyPersistedToolSelection(tab: TabState): void {
         const disabled = this._effectiveDisabledTools(tab);
         const todoEnabled = this._isTodoEnabledFor(tab);
+        const subagentsEnabled = this._isSubagentsEnabledFor(tab);
         this._outputChannel.appendLine(
-            `[tool apply] tab="${tab.name || tab.id}" todoEnabled=${todoEnabled} ` +
+            `[tool apply] tab="${tab.name || tab.id}" todoEnabled=${todoEnabled} subagentsEnabled=${subagentsEnabled} ` +
             `disabled=[${disabled.join(', ')}]`,
         );
         tab.session.applyToolSelection(disabled);
@@ -869,10 +1037,14 @@ export class ChatController implements vscode.Disposable {
     private _logPromptToolState(tab: TabState, source: 'prompt' | 'queued' | 'steer' | 'followUp' | 'auto-continue'): void {
         const snap = tab.session.debugSnapshotTools();
         const uiEnabled = this._isTodoEnabledFor(tab);
+        const subagentsEnabled = this._isSubagentsEnabledFor(tab);
         this._outputChannel.appendLine(
-            `[${source}] tab="${tab.name || tab.id}" ui-toggle=${uiEnabled} ` +
-            `todo-in-active=${snap.hasTodo} todo-registered=${snap.todoRegistered} active-count=${snap.active.length}` +
-            (uiEnabled && !snap.hasTodo ? ' ⚠ UI shows ON but todo is NOT in active tools' : ''),
+            `[${source}] tab="${tab.name || tab.id}" todo-toggle=${uiEnabled} subagents-toggle=${subagentsEnabled} ` +
+            `todo-in-active=${snap.hasTodo} subagent-in-active=${snap.hasSubagent} ` +
+            `todo-registered=${snap.todoRegistered} subagent-registered=${snap.subagentRegistered} ` +
+            `active-count=${snap.active.length}` +
+            (uiEnabled && !snap.hasTodo ? ' ⚠ UI shows ToDo ON but todo is NOT in active tools' : '') +
+            (subagentsEnabled && !snap.hasSubagent ? ' ⚠ Subagents enabled but subagent is NOT in active tools' : ''),
         );
     }
 
@@ -907,6 +1079,10 @@ export class ChatController implements vscode.Disposable {
             await this._setTodoEnabledFor(tab, !disabled);
             return;
         }
+        if (toolName === 'subagent') {
+            await this._setSubagentsEnabledFor(tab, !disabled);
+            return;
+        }
 
         const current = new Set(this._getDisabledToolsFor(tab));
         if (disabled) current.add(toolName);
@@ -924,15 +1100,17 @@ export class ChatController implements vscode.Disposable {
         if (this._isTabBusy(tab)) return;
 
         const filtered = disabled.filter((t) => typeof t === 'string' && t.length > 0);
-        // Split off `todo` and route it through the ToDo toggle so its
-        // dedicated storage stays authoritative for that entry.
+        // Split dedicated capability tools out of the generic denylist so
+        // their per-chat toggle storage remains authoritative.
         const wantsTodoDisabled = filtered.includes('todo');
-        const others = filtered.filter((t) => t !== 'todo');
+        const wantsSubagentDisabled = filtered.includes('subagent');
+        const others = filtered.filter((t) => t !== 'todo' && t !== 'subagent');
 
         const todoKey = this._todoEnabledKey(tab.session.sessionPath);
         if (todoKey) {
             await this._context.workspaceState.update(todoKey, !wantsTodoDisabled);
         }
+        await this._subagentGate.setEnabled(tab.session.sessionPath, !wantsSubagentDisabled, false);
         await this._setDisabledToolsFor(tab, others);
         this._applyPersistedToolSelection(tab);
         this._onLauncherStateChanged.fire();
@@ -945,10 +1123,12 @@ export class ChatController implements vscode.Disposable {
         if (!tab) return;
         const disabled = this._getDisabledToolsFor(tab);
         const todoEnabled = this._isTodoEnabledFor(tab);
+        const subagentsEnabled = this._isSubagentsEnabledFor(tab);
         const payload = {
             piCodeToolSelection: {
-                version: 1,
+                version: 2,
                 todoEnabled,
+                subagentsEnabled,
                 disabled,
             },
         };
@@ -975,11 +1155,16 @@ export class ChatController implements vscode.Disposable {
             vscode.window.showWarningMessage('Pi Code: clipboard does not contain a valid tool selection.');
             return;
         }
-        const others = cfg.disabled.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0 && t !== 'todo');
+        const others = cfg.disabled.filter((t: unknown): t is string =>
+            typeof t === 'string' && t.length > 0 && t !== 'todo' && t !== 'subagent');
         const todoKey = this._todoEnabledKey(tab.session.sessionPath);
         if (todoKey) {
             await this._context.workspaceState.update(todoKey, cfg.todoEnabled);
         }
+        const subagentsEnabled = typeof cfg.subagentsEnabled === 'boolean'
+            ? cfg.subagentsEnabled
+            : !cfg.disabled.includes('subagent');
+        await this._subagentGate.setEnabled(tab.session.sessionPath, subagentsEnabled, false);
         await this._setDisabledToolsFor(tab, others);
         this._applyPersistedToolSelection(tab);
         this._onLauncherStateChanged.fire();
@@ -1899,7 +2084,10 @@ export class ChatController implements vscode.Disposable {
     }
 
     private async _createTab(): Promise<string> {
-        const newSession = new PiSessionManager(this._outputChannel, this._context.secrets);
+        const newSession = new PiSessionManager(
+            this._outputChannel, this._context.secrets, this._subagentCoordinator,
+            this._subagentStore, this._writeIsolation, this._childToolFactories,
+        );
         await newSession.initialize();
 
         const newCheckpoint = new CheckpointManager();
@@ -1993,7 +2181,10 @@ export class ChatController implements vscode.Disposable {
 
         for (const { name, sessionPath } of persisted.tabs) {
             try {
-                const session = new PiSessionManager(this._outputChannel, this._context.secrets);
+                const session = new PiSessionManager(
+                    this._outputChannel, this._context.secrets, this._subagentCoordinator,
+                    this._subagentStore, this._writeIsolation, this._childToolFactories,
+                );
                 await session.initializeFromPath(sessionPath);
 
                 const checkpoint = new CheckpointManager();
@@ -2060,6 +2251,37 @@ export class ChatController implements vscode.Disposable {
         this._onTabRenamed.dispose();
         this._onLauncherStateChanged.dispose();
     }
+}
+
+function formatSubagentTranscript(agentId: string, transcript: string): string {
+    const sections = [`# Subagent transcript`, '', `**Agent ID:** \`${agentId}\``, ''];
+    for (const line of transcript.split(/\r?\n/).filter(Boolean)) {
+        try {
+            const entry = JSON.parse(line) as any;
+            if (entry.type === 'session') {
+                sections.push('## Session', '', `- Session ID: \`${entry.id ?? 'unknown'}\``, `- Created: ${entry.timestamp ?? 'unknown'}`, '');
+                continue;
+            }
+            if (entry.type === 'message') {
+                const role = String(entry.message?.role ?? 'message');
+                sections.push(`## ${role[0]?.toUpperCase() ?? ''}${role.slice(1)}`, '', renderTranscriptContent(entry.message?.content), '');
+                continue;
+            }
+            sections.push(`## ${String(entry.type ?? 'entry')}`, '', '```json', JSON.stringify(entry, null, 2), '```', '');
+        } catch {
+            sections.push('## Unparsed entry', '', '```text', line, '```', '');
+        }
+    }
+    return `${sections.join('\n')}\n`;
+}
+
+function renderTranscriptContent(content: unknown): string {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return `\`\`\`json\n${JSON.stringify(content, null, 2)}\n\`\`\``;
+    return content.map((part: any) => {
+        if (part?.type === 'text') return String(part.text ?? '');
+        return `\`\`\`json\n${JSON.stringify(part, null, 2)}\n\`\`\``;
+    }).join('\n\n');
 }
 
 function lastAssistantOrdinal(messages: any[]): number {

@@ -84,6 +84,14 @@ export interface SettingsData {
     thinkingLevel: string;
     allowedTools: string[];
     todoPromptGuidelines: string;
+    subagentsDefaultEnabled: boolean;
+    subagentsDefaultModel: string;
+    subagentsAllowedModels: string[];
+    subagentsAllowInvocationModelOverride: boolean;
+    subagentsDefaultMaxTurns: number;
+    subagentsDefaultTimeoutMinutes: number;
+    subagentsMaxConcurrentGlobal: number;
+    subagentsMaxConcurrentPerChat: number;
     lspEnabled: boolean;
     userMessageGlowColor: string;
     userMessageGlowOpacity: number;
@@ -324,6 +332,46 @@ export interface ToolSelectionSnapshot {
     toggleDisabled: boolean;
 }
 
+export type LauncherSubagentStatus =
+    | 'queued'
+    | 'starting'
+    | 'running'
+    | 'waiting_for_permission'
+    | 'retrying'
+    | 'completed'
+    | 'failed'
+    | 'cancelled';
+
+export interface LauncherSubagentRun {
+    agentId: string;
+    name: string;
+    taskPreview: string;
+    status: LauncherSubagentStatus;
+    modelLabel?: string;
+    currentTool?: string;
+    activity?: string;
+    elapsedMs: number;
+    queueWaitMs?: number;
+    turnCount: number;
+    error?: string;
+    canStop: boolean;
+    canInspect: boolean;
+    canResume: boolean;
+    canSteer: boolean;
+    canDismiss: boolean;
+    hasWorktree: boolean;
+}
+
+export interface LauncherSubagentSnapshot {
+    enabled: boolean;
+    toggleDisabled: boolean;
+    activeCount: number;
+    queuedCount: number;
+    runs: LauncherSubagentRun[];
+    /** True for deterministic smoke rows rather than live child runs. */
+    smokeSimulation?: boolean;
+}
+
 export interface LauncherState {
     tabs: LauncherTabInfo[];
     recentSessions: LauncherSessionInfo[];
@@ -355,6 +403,12 @@ export interface LauncherState {
      *  files the agent changed (with Undo/Redo/Review buttons) is
      *  shown above the chat input. */
     fileUndoViewEnabled?: boolean;
+    /** Active tab's subagent capability and retained lifecycle rows.
+     *  Absent when no chat panel is active. */
+    subagents?: LauncherSubagentSnapshot;
+    /** Whether the Subagents section is collapsed. This is a global UI
+     *  preference and does not change per-chat capability state. */
+    subagentsCollapsed: boolean;
     /** Active tab's tool selection (registered + disabled). Absent when
      *  no active tab. Drives the Tools panel in the launcher. */
     toolSelection?: ToolSelectionSnapshot;
@@ -373,6 +427,17 @@ export type LauncherClientMessage =
     | { type: 'setHistoryCollapsed'; collapsed: boolean }
     | { type: 'setTodoEnabled'; enabled: boolean }
     | { type: 'setTodoCollapsed'; collapsed: boolean }
+    | { type: 'setSubagentsEnabled'; enabled: boolean }
+    | { type: 'setSubagentsCollapsed'; collapsed: boolean }
+    | { type: 'stopSubagent'; agentId: string }
+    | { type: 'inspectSubagent'; agentId: string }
+    | { type: 'resumeSubagent'; agentId: string }
+    | { type: 'steerSubagent'; agentId: string }
+    | { type: 'dismissSubagent'; agentId: string }
+    | { type: 'reviewSubagentWorktree'; agentId: string }
+    | { type: 'applySubagentWorktree'; agentId: string }
+    | { type: 'cleanupSubagentWorktree'; agentId: string }
+    | { type: 'dismissSubagentSmoke' }
     | { type: 'setPlanModeEnabled'; enabled: boolean }
     | { type: 'setFileUndoViewEnabled'; enabled: boolean }
     | { type: 'setToolDisabled'; toolName: string; disabled: boolean }

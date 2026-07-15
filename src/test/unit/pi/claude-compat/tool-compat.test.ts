@@ -32,8 +32,9 @@ describe('Claude tool-reference compatibility', () => {
         expect(resolveClaudeToolReference('mcp__missing__tool', [])).toMatchObject({ status: 'unavailable' });
     });
 
-    it('classifies subagent and Claude-runtime-only tools without emulating them', () => {
-        expect(resolveClaudeToolReference('Agent', ['read'])).toMatchObject({ status: 'deferred-agent' });
+    it('maps subagent references only when the native capability is active', () => {
+        expect(resolveClaudeToolReference('Agent', ['read'])).toMatchObject({ status: 'unavailable' });
+        expect(resolveClaudeToolReference('Agent', ['read', 'subagent'])).toMatchObject({ status: 'mapped', target: 'subagent' });
         expect(resolveClaudeToolReference('Skill', ['read'])).toMatchObject({ status: 'runtime-only' });
         expect(resolveClaudeToolReference('AskUserQuestion', ['read'])).toMatchObject({ status: 'runtime-only' });
     });
@@ -46,7 +47,7 @@ describe('Claude tool-reference compatibility', () => {
         expect(references).toEqual(['mcp__build__compile', 'Read', 'Agent', 'Bash', 'mcp__catalog__search']);
         const rendered = formatClaudeToolCompatibility(references, ['read', 'bash', 'build_compile', 'mcp']);
         expect(rendered).toContain('mcp__build__compile → build_compile [mapped]');
-        expect(rendered).toContain('Agent [deferred-agent]');
+        expect(rendered).toContain('Agent [unavailable]');
         expect(rendered).toContain('The mappings do not grant permissions or add tools.');
     });
 });
