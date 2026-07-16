@@ -8,6 +8,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- MCP calls in chat now use the dedicated MCP icon.
 - The extension package no longer includes unused legacy interface icons.
 
 ## [0.54.2] - 2026-07-16

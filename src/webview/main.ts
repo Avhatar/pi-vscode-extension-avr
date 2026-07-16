@@ -2367,6 +2367,7 @@ function getToolIcon(name: string): string {
         grep: 'magnifying-glass.png',
         list: 'folder.png',
         todo: 'todo.png',
+        mcp: 'mcp.png',
         subagent: 'subagents2.png',
         web_search: 'web.png',
         fetch_content: 'web.png',
@@ -2408,6 +2409,8 @@ function getToolDescription(name: string): string {
             return 'List — lists the contents of a directory.';
         case 'todo':
             return 'Todo — updates the agent\'s task list: adds, completes, or reorders the items it is tracking for this turn. The list survives /compact.';
+        case 'mcp':
+            return 'MCP — connects to configured Model Context Protocol servers and invokes their tools.';
         case 'subagent':
             return 'Subagent — delegates a bounded task to an isolated child agent and returns its result to the parent.';
         case 'web_search':
