@@ -7,11 +7,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- The extension package no longer includes unused legacy interface icons.
+
+## [0.54.2] - 2026-07-16
+
+### Changed
+- Chat now uses the unified `subagents2.png` icon for both delegated tasks and returned subagent results.
+
+## [0.54.1] - 2026-07-16
+
+### Fixed
+- Subagents that finish with a usable final response on their last allowed turn no longer lose their completed work to a misleading maximum-turn failure.
+
+## [0.54.0] - 2026-07-16
+
 ### Added
 - User and project skills in the cross-client `.agents/skills/` locations now appear in Pi Code alongside existing skill sources.
 
 ### Changed
 - Project and user named-agent discovery now prefers neutral `.agents/agents/` directories while retaining legacy Pi directory fallback.
+- Chat delegation cards and launcher subagent statuses now use dedicated monochrome icons for new tasks, completed results, active work, success, and failure.
 
 ## [0.53.0] - 2026-07-16
 

@@ -2367,6 +2367,7 @@ function getToolIcon(name: string): string {
         grep: 'magnifying-glass.png',
         list: 'folder.png',
         todo: 'todo.png',
+        subagent: 'subagents2.png',
         web_search: 'web.png',
         fetch_content: 'web.png',
         get_search_content: 'web.png',
@@ -2407,6 +2408,8 @@ function getToolDescription(name: string): string {
             return 'List — lists the contents of a directory.';
         case 'todo':
             return 'Todo — updates the agent\'s task list: adds, completes, or reorders the items it is tracking for this turn. The list survives /compact.';
+        case 'subagent':
+            return 'Subagent — delegates a bounded task to an isolated child agent and returns its result to the parent.';
         case 'web_search':
             return 'Web search — runs a public web search and returns result titles, snippets, and URLs.';
         case 'fetch_content':
@@ -3047,10 +3050,10 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
     const args = matchingCall?.arguments ?? matchingCall?.args ?? matchingCall?.input ?? matchingCall?.function?.arguments ?? {};
     const parsedArgs = typeof args === 'string' ? tryParseJSON(args) : args;
     const label = toolName ? getToolLabel(toolName, parsedArgs) : 'Tool Result';
-    const iconHtml = getToolIconHtml(toolName ?? '');
     const isRead = nameLower === 'read';
     const isCommandLike = isCommandLikeTool(toolName, parsedArgs);
     const isSubagent = isSubagentTool(toolName);
+    const iconHtml = getToolIconHtml(toolName ?? '');
     const isToolIo = isCommandLike || isSubagent;
     const filePath = parsedArgs?.path ?? parsedArgs?.file_path ?? '';
 
@@ -3065,7 +3068,7 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
         if (isToolIo) {
             const input = getToolIoInputText(toolName, parsedArgs);
             const headerHtml = `
-                ${isSubagent ? getToolIconHtml(toolName) : getToolIconHtmlForCommand(toolName, input)}
+                ${isSubagent ? iconHtml : getToolIconHtmlForCommand(toolName, input)}
                 <span class="tool-name">${escHtml(label)}</span>
                 ${isSubagent ? '' : buildScriptLangChipHtml(input)}
                 ${buildStatusHtml(isError ? 'error' : 'done')}

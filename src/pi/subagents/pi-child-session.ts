@@ -241,8 +241,14 @@ class PiChildSessionHandle implements ChildSessionHandle {
 
 function mapSessionEvent(event: AgentSessionEvent): ChildSessionEvent | undefined {
     switch (event.type) {
-        case 'turn_end':
-            return { type: 'turn-ended', assistantText: extractAssistantText((event as any).message) };
+        case 'turn_end': {
+            const message = (event as any).message;
+            return {
+                type: 'turn-ended',
+                assistantText: extractAssistantText(message),
+                hasToolCalls: hasAssistantToolCalls(message),
+            };
+        }
         case 'tool_execution_start':
             return {
                 type: 'tool-started',
@@ -278,6 +284,11 @@ function extractAssistantText(message: any): string | undefined {
         .join('\n')
         .trim();
     return text || undefined;
+}
+
+function hasAssistantToolCalls(message: any): boolean {
+    return message?.role === 'assistant' && Array.isArray(message.content)
+        && message.content.some((part: any) => part?.type === 'toolCall' || part?.type === 'tool_call');
 }
 
 function buildChildSystemInstructions(spec: ResolvedAgentSpec): string {

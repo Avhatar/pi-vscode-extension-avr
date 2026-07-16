@@ -361,7 +361,12 @@ export class SubagentManager {
                                     currentTool: undefined,
                                     activity: `Completed turn ${turnCount}`,
                                 });
-                                if (!child?.getCompletion() && run.turnCount >= spec.maxTurns && !signal.aborted) {
+                                if (
+                                    !child?.getCompletion()
+                                    && run.turnCount >= spec.maxTurns
+                                    && event.hasToolCalls !== false
+                                    && !signal.aborted
+                                ) {
                                     active.reason = 'max-turns';
                                     active.controller.abort();
                                     void child?.abort();
@@ -430,22 +435,29 @@ export class SubagentManager {
                     await child.prompt(spec.task);
                     if (signal.aborted) throw this.abortFailure(active, run);
                     let completion = child.getCompletion();
+                    let recoveredPlainText = false;
                     if (!completion) {
                         if (run.turnCount >= spec.maxTurns) {
-                            active.reason = 'max-turns';
-                            throw this.abortFailure(active, run);
+                            const finalText = child.getLastAssistantText()?.trim();
+                            if (!finalText) {
+                                active.reason = 'max-turns';
+                                throw this.abortFailure(active, run);
+                            }
+                            completion = { result: finalText };
+                            recoveredPlainText = true;
+                        } else {
+                            this.updateRun(run, {
+                                status: 'running',
+                                currentTool: undefined,
+                                activity: 'Requesting structured completion',
+                            });
+                            await child.prompt(
+                                'Your previous response did not call complete_subagent. ' +
+                                'Call complete_subagent now, by itself, with the complete final result. Do not call any other tool.',
+                            );
+                            if (signal.aborted) throw this.abortFailure(active, run);
+                            completion = child.getCompletion();
                         }
-                        this.updateRun(run, {
-                            status: 'running',
-                            currentTool: undefined,
-                            activity: 'Requesting structured completion',
-                        });
-                        await child.prompt(
-                            'Your previous response did not call complete_subagent. ' +
-                            'Call complete_subagent now, by itself, with the complete final result. Do not call any other tool.',
-                        );
-                        if (signal.aborted) throw this.abortFailure(active, run);
-                        completion = child.getCompletion();
                     }
                     if (!completion?.result.trim()) {
                         throw new SubagentRunError(
@@ -468,14 +480,16 @@ export class SubagentManager {
                     this.updateRun(run, {
                         status: 'completed',
                         currentTool: undefined,
-                        activity: bounded.truncated ? 'Completed (result truncated)' : 'Completed',
+                        activity: recoveredPlainText
+                            ? 'Completed (final text recovered)'
+                            : bounded.truncated ? 'Completed (result truncated)' : 'Completed',
                         finishedAt: this.now(),
                         result: result.result,
                         resultPreview: preview(result.result, 500),
                     });
                     this.log(
                         `[subagent end] agentId=${run.agentId} status=completed turns=${run.turnCount} ` +
-                        `model=${child.model.provider}/${child.model.id}`,
+                        `model=${child.model.provider}/${child.model.id} recoveredPlainText=${recoveredPlainText}`,
                     );
                     return result;
                 } finally {

@@ -438,26 +438,13 @@ body {
 
 .subagent-row-header { padding-left: 14px; }
 
-.subagent-status-glyph {
+.subagent-status-icon {
+    display: block;
     width: 13px;
+    height: 13px;
     flex-shrink: 0;
-    text-align: center;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: var(--vscode-descriptionForeground);
-}
-.subagent-row-running .subagent-status-glyph,
-.subagent-row-starting .subagent-status-glyph {
-    color: var(--vscode-charts-blue, var(--vscode-progressBar-background));
-}
-.subagent-row-retrying .subagent-status-glyph,
-.subagent-row-waiting_for_permission .subagent-status-glyph {
-    color: var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground));
-}
-.subagent-row-completed .subagent-status-glyph {
-    color: var(--vscode-charts-green, var(--vscode-testing-iconPassed));
-}
-.subagent-row-failed .subagent-status-glyph {
-    color: var(--vscode-charts-red, var(--vscode-testing-iconFailed));
+    object-fit: contain;
+    filter: brightness(0) invert(0.8);
 }
 
 .subagent-name {

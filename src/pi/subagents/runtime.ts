@@ -12,7 +12,7 @@ export interface SubagentCompletion {
 }
 
 export type ChildSessionEvent =
-    | { type: 'turn-ended'; assistantText?: string }
+    | { type: 'turn-ended'; assistantText?: string; hasToolCalls?: boolean }
     | { type: 'tool-started'; toolName: string; toolCallId: string; args?: unknown }
     | { type: 'tool-ended'; toolName: string; toolCallId: string; isError: boolean; args?: unknown }
     | { type: 'retrying'; attempt: number; delayMs: number; error?: string }

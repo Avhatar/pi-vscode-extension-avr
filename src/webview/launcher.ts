@@ -290,15 +290,15 @@ function renderFileUndoViewToggle(enabled: boolean): HTMLElement {
 
 // ── Subagents section ──
 
-const SUBAGENT_STATUS_GLYPH: Record<LauncherSubagentStatus, string> = {
-    queued: '◷',
-    starting: '◌',
-    running: '●',
-    waiting_for_permission: '!',
-    retrying: '↻',
-    completed: '✓',
-    failed: '×',
-    cancelled: '–',
+const SUBAGENT_STATUS_ICON: Record<LauncherSubagentStatus, string> = {
+    queued: 'agentinprogress.png',
+    starting: 'agentinprogress.png',
+    running: 'agentinprogress.png',
+    waiting_for_permission: 'agentinprogress.png',
+    retrying: 'agentinprogress.png',
+    completed: 'check.png',
+    failed: 'cross.png',
+    cancelled: 'cross.png',
 };
 const ACTIVE_SUBAGENT_STATUSES = new Set<LauncherSubagentStatus>([
     'queued', 'starting', 'running', 'waiting_for_permission', 'retrying',
@@ -401,9 +401,12 @@ function renderSubagentRow(run: LauncherSubagentRun): HTMLElement {
 
     const summary = el('summary', 'subagent-row-summary');
     const header = el('div', 'subagent-row-header');
-    const glyph = el('span', 'subagent-status-glyph', SUBAGENT_STATUS_GLYPH[run.status]);
-    glyph.title = run.status.replaceAll('_', ' ');
-    header.appendChild(glyph);
+    const statusIcon = document.createElement('img');
+    statusIcon.className = 'subagent-status-icon';
+    statusIcon.src = `${iconsBaseUri}/${SUBAGENT_STATUS_ICON[run.status]}`;
+    statusIcon.alt = '';
+    statusIcon.title = run.status.replaceAll('_', ' ');
+    header.appendChild(statusIcon);
     header.appendChild(el('span', 'subagent-name', run.name));
     header.appendChild(el('span', 'subagent-status-label', run.status.replaceAll('_', ' ')));
     summary.appendChild(header);
