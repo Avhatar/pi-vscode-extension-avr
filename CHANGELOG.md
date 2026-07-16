@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.56.2] - 2026-07-16
+
+### Security
+- Disabled direct MCP tools can no longer be invoked through the generic MCP gateway.
+
 ## [0.56.1] - 2026-07-16
 
 ### Fixed

@@ -23,6 +23,7 @@ import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
 import { createLspExtension } from './lsp/extension';
 import { installEditToolPreflight } from './tools/preflight-edit';
+import { createToolSelectionGuard } from './tool-selection-guard';
 import { isContextUsageEstimated } from './context-usage';
 import type { SubagentCoordinator } from './subagents/coordinator';
 import { SubagentManager } from './subagents/manager';
@@ -314,6 +315,11 @@ export class PiSessionManager {
             }),
             createTodoExtension(this.todoStore, todoGuidelines),
             createLspExtension({ enabled: lspEnabled }),
+            createToolSelectionGuard((gateway, target) => {
+                this._outputChannel.appendLine(
+                    `[tool selection] blocked gateway=${gateway} target=${target} reason=disabled`,
+                );
+            }),
             createSubagentExtension({
                 definitions: subagentRegistrySnapshot.definitions,
                 execute: (invocation, signal, onProgress) =>
