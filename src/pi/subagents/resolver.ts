@@ -41,6 +41,7 @@ export function resolveAgentSpec(
 
     const invocationInstructions = invocation.instructions?.trim();
     const instructions = [definition?.instructions, invocationInstructions].filter(Boolean).join('\n\n') || undefined;
+    const transientName = invocation.name?.trim() || 'ad-hoc';
     const diagnostics: ResolutionDiagnostic[] = [];
     const { model, source: modelSource } = resolveModel(definition, invocation, policy, diagnostics);
     const { tools, trace } = resolveTools(definition, invocation, policy, diagnostics);
@@ -67,7 +68,7 @@ export function resolveAgentSpec(
         );
     }
     return {
-        name: definition?.name ?? 'ad-hoc',
+        name: definition?.name ?? transientName,
         ...(definition?.description ? { description: definition.description } : {}),
         source: definition?.source ?? 'invocation',
         ...(definition?.filePath ? { filePath: definition.filePath } : {}),
@@ -111,7 +112,14 @@ function resolveModel(
                 'This subagent invocation cannot override the model because invocation model overrides are disabled.',
             );
         }
-        candidates.push({ model: parseModelRef(invocation.model, 'invocation model'), source: 'invocation', explicit: true });
+        const invocationModel = invocation.model === 'inherit'
+            ? parseModelRef(policy.parentModel, 'parent model')
+            : parseModelRef(invocation.model, 'invocation model');
+        candidates.push({
+            model: invocationModel,
+            source: invocation.model === 'inherit' ? 'parent' : 'invocation',
+            explicit: true,
+        });
     }
 
     if (definition?.model === 'inherit') {

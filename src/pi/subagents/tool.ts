@@ -7,7 +7,7 @@ import type { SubagentExecutionResult } from './runtime';
 export const SUBAGENT_TOOL_NAME = 'subagent';
 
 const ModelSchema = Type.Union([
-    Type.String({ description: 'Exact child model in canonical provider/id format.' }),
+    Type.String({ description: 'Exact child model in canonical provider/id format, or "inherit" to use the parent model.' }),
     Type.Object({
         provider: Type.String(),
         id: Type.String(),
@@ -24,6 +24,7 @@ export const SubagentParamsSchema = Type.Object({
     agentId: Type.Optional(Type.String({ description: 'Persistent child id required by lifecycle actions.' })),
     message: Type.Optional(Type.String({ description: 'Additional guidance for send.' })),
     agent: Type.Optional(Type.String({ description: 'Name of a reusable agent definition from user or trusted project agent files.' })),
+    name: Type.Optional(Type.String({ description: 'Transient display name for an ad-hoc child without a persistent definition.' })),
     instructions: Type.Optional(Type.String({ description: 'Ad-hoc specialized instructions, appended after named-agent instructions when both are provided.' })),
     model: Type.Optional(ModelSchema),
     thinkingLevel: Type.Optional(Type.String()),
@@ -42,7 +43,10 @@ export interface SubagentToolParams {
     agentId?: string;
     message?: string;
     agent?: string;
+    /** Transient display name for an ad-hoc child. Named definitions override this. */
+    name?: string;
     instructions?: string;
+    /** Exact provider/id, {provider,id}, or "inherit" to use the parent model. */
     model?: string | ModelRef;
     thinkingLevel?: string;
     tools?: string[];
@@ -89,8 +93,9 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
         description: [
             'Delegate one self-contained task to an isolated child agent.',
             'Children use fresh context, may select an exact cross-provider model, and receive only policy-approved tools.',
-            'Use `agent` for a reusable file definition or provide ad-hoc `instructions`.',
+            'Use `agent` for a reusable file definition or omit it and provide `name` plus ad-hoc `instructions` for a temporary role.',
             'Choose matching named agents from their descriptions automatically; users may also request a specific named agent.',
+            'Use `model: "inherit"` to select the parent model explicitly instead of the configured child default.',
             'Spawn and resume wait for the child and return only its bounded final result.',
             'Persistent agent IDs support inspect, send, stop, resume, dismiss, review, apply, and cleanup lifecycle actions.',
             'Use `review` to return the isolated worktree patch from a completed child.',
@@ -99,16 +104,18 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
         ].filter(Boolean).join('\n'),
         promptSnippet: 'Delegate a task to an isolated child agent, optionally on another provider/model',
         promptGuidelines: [
-            'Use `subagent` when an independent investigation, review, or specialized analysis can be delegated with a self-contained task.',
-            'Select a named agent automatically when its catalog description matches the task; do not make the user manage child selection or lifecycle.',
-            'Pass one child per tool call. To run independent children concurrently, emit multiple sibling `subagent` calls in one response.',
-            'State the expected output and relevant paths in `task`; the child does not see the parent conversation.',
-            'Use exact `provider/id` model references. An unavailable explicit model fails and never silently falls back.',
+            'When `subagent` is active, the user has already opted into autonomous delegation. Do not ask permission before spawning a useful child.',
+            'Before non-trivial work, identify independent, bounded slices that can be delegated without transferring architecture or final ownership.',
+            'Use a loaded named agent when its catalog description matches the slice. If none fits, omit `agent` and synthesize a temporary role with a concise `name` and focused `instructions`.',
+            'Pass one child per tool call. Emit sibling `subagent` calls in the same response for independent slices so they run concurrently; keep dependent work sequential.',
+            'Keep fan-out to the minimum useful number, normally two or three children, and do not delegate work whose coordination cost exceeds doing it directly.',
+            'Give each child a self-contained outcome, relevant paths, invariants, acceptance criteria, expected report, and a narrow child-safe tool allowlist when practical; the child does not see the parent conversation.',
+            'Use exact `provider/id` model references, or `model: "inherit"` for an explicit parent-model clone. An unavailable explicit model fails and never silently falls back.',
+            'Use worktree isolation for parallel or background writers. Do not send overlapping write tasks to siblings unless the parent is prepared to resolve their conflicts.',
             'Use lifecycle actions only with an agentId returned by an earlier call; stale IDs fail explicitly.',
             'Call `review` to retrieve and inspect the child\'s isolated raw diff before requesting `apply`.',
-            'Call `apply` when the reviewed patch is ready; apply stages it in the primary workspace without involving the user in subagent lifecycle management.',
-            'Call `cleanup` after apply, or when discarding a rejected patch; cleanup permanently removes the preserved child worktree.',
-            'Do not delegate trivial work when the coordination cost exceeds the benefit.',
+            'Call `apply` only when the reviewed patch is ready, then run parent-owned verification and call `cleanup`; discard rejected work with `cleanup`.',
+            'The parent owns synthesis, conflict resolution, review, apply, verification, cleanup, and the final user-facing report.',
         ],
         parameters: SubagentParamsSchema,
         executionMode: 'parallel',
@@ -117,7 +124,7 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
             const action = params.action ?? 'spawn';
             let latest: SubagentToolDetails = {
                 agentId: params.agentId,
-                name: params.agent?.trim() || (params.agentId ? `subagent ${params.agentId}` : 'ad-hoc'),
+                name: params.agent?.trim() || params.name?.trim() || (params.agentId ? `subagent ${params.agentId}` : 'ad-hoc'),
                 status: 'queued',
             };
             const publish = (details: SubagentToolDetails): void => {
@@ -137,6 +144,7 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
             if (!params.task?.trim()) throw new Error('Subagent spawn requires a non-empty task.');
             const result = await services.execute({
                 task: params.task,
+                ...(params.name ? { name: params.name } : {}),
                 ...(params.agent ? { agent: params.agent } : {}),
                 ...(params.instructions ? { instructions: params.instructions } : {}),
                 ...(params.model ? { model: params.model } : {}),

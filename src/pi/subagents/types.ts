@@ -71,7 +71,10 @@ export interface AgentRegistrySnapshot {
 export interface SubagentInvocation {
     task: string;
     agent?: string;
+    /** Transient display name for ad-hoc spawns. Named definitions override this. */
+    name?: string;
     instructions?: string;
+    /** Exact provider/id, {provider,id}, or "inherit" to use the parent model. */
     model?: ModelRef | string;
     thinkingLevel?: string;
     tools?: string[];

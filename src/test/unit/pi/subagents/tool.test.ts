@@ -20,7 +20,11 @@ describe('parent subagent tool', () => {
         expect(tool.executionMode).toBe('parallel');
         expect(tool.description).toContain('reviewer');
         expect(tool.description).toContain('deepseek/reasoner');
-        expect(tool.promptGuidelines.join('\n')).toContain('provider/id');
+        const guidelines = tool.promptGuidelines.join('\n');
+        expect(guidelines).toContain('already opted into autonomous delegation');
+        expect(guidelines).toContain('If none fits');
+        expect(guidelines).toContain('sibling `subagent` calls');
+        expect(guidelines).toContain('model: "inherit"');
     });
 
     it('returns a persistent id immediately for a background spawn', async () => {
@@ -90,6 +94,37 @@ describe('parent subagent tool', () => {
         );
         expect(result.content).toEqual([{ type: 'text', text: '[review patch] auth.ts: +12 / -3' }]);
         expect(result.details).toMatchObject({ agentId: 'child-1', status: 'completed' });
+    });
+
+    it('forwards transient name and uses it for initial progress display', async () => {
+        let tool: any;
+        const execute = vi.fn(async (_invocation, _signal, progress) => {
+            progress({ agentId: 'child-1', name: 'summarizer', status: 'running' });
+            return {
+                agentId: 'child-1',
+                result: 'Done.',
+                model: { provider: 'openai', id: 'parent' },
+                turnCount: 1,
+                truncated: false,
+            };
+        });
+        registerSubagentTool({ registerTool(value: any) { tool = value; } } as any, {
+            definitions: [],
+            execute,
+        });
+        const updates: unknown[] = [];
+
+        const result = await tool.execute('call-1', {
+            task: 'Summarize.',
+            name: 'summarizer',
+        }, undefined, (update: unknown) => updates.push(update), {});
+
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+            task: 'Summarize.',
+            name: 'summarizer',
+        }), undefined, expect.any(Function));
+        expect(result.details.name).toBe('summarizer');
+        expect((updates[0] as any).details.name).toBe('summarizer');
     });
 
     it('forwards named and ad-hoc parameters and returns the bounded child result', async () => {

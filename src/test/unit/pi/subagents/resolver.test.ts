@@ -131,10 +131,12 @@ describe('subagent specification resolution', () => {
             tools: ['invented'],
         }, policy())).toThrowError(expect.objectContaining({ code: 'unknown-tool' }));
 
-        expect(() => resolveAgentSpec(lookup, {
-            task: 'Investigate.',
-            model: 'anthropic/reviewer',
-        }, policy({ allowInvocationModelOverride: false }))).toThrowError(expect.objectContaining({ code: 'model-override-disabled' }));
+        for (const model of ['anthropic/reviewer', 'inherit']) {
+            expect(() => resolveAgentSpec(lookup, {
+                task: 'Investigate.',
+                model,
+            }, policy({ allowInvocationModelOverride: false }))).toThrowError(expect.objectContaining({ code: 'model-override-disabled' }));
+        }
     });
 
     it('resolves anonymous ad-hoc runs without a built-in profile', () => {
@@ -152,6 +154,66 @@ describe('subagent specification resolution', () => {
             contextMode: 'fresh',
             isolation: 'shared-workspace',
         });
+    });
+
+    it('uses invocation name for ad-hoc display when no definition matches', () => {
+        const resolved = resolveAgentSpec(lookup, {
+            task: 'Summarize.',
+            name: 'summarizer',
+        }, policy());
+
+        expect(resolved.name).toBe('summarizer');
+        expect(resolved.source).toBe('invocation');
+    });
+
+    it('lets a named definition override the transient invocation name', () => {
+        const resolved = resolveAgentSpec(lookup, {
+            task: 'Investigate.',
+            agent: 'research',
+            name: 'researcher-tmp',
+        }, policy());
+
+        expect(resolved.name).toBe('research');
+        expect(resolved.source).toBe('project');
+    });
+
+    it('defaults to ad-hoc when neither definition nor transient name is provided', () => {
+        const resolved = resolveAgentSpec(lookup, {
+            task: 'Summarize.',
+        }, policy());
+
+        expect(resolved.name).toBe('ad-hoc');
+    });
+
+    it('defaults to ad-hoc when transient name is empty or whitespace', () => {
+        const resolved = resolveAgentSpec(lookup, {
+            task: 'Summarize.',
+            name: '   ',
+        }, policy());
+
+        expect(resolved.name).toBe('ad-hoc');
+    });
+
+    it('treats invocation model: inherit as an explicit parent choice ahead of defaults', () => {
+        const resolved = resolveAgentSpec(lookup, {
+            task: 'Summarize.',
+            model: 'inherit',
+        }, policy({ defaultModel: 'anthropic/reviewer' }));
+
+        expect(resolved.modelSource).toBe('parent');
+        expect(resolved.model).toMatchObject({ provider: 'openai', id: 'parent' });
+    });
+
+    it('fails with no fallback when invocation model: inherit targets an unavailable parent', () => {
+        expect(() => resolveAgentSpec(lookup, {
+            task: 'Summarize.',
+            model: 'inherit',
+        }, policy({
+            availableModels: [
+                { provider: 'deepseek', id: 'reasoner', name: 'Reasoner' },
+            ],
+            parentModel: { provider: 'openai', id: 'parent' },
+        }))).toThrowError(expect.objectContaining({ code: 'model-unavailable' }));
     });
 
     it('reports unknown named definitions clearly', () => {

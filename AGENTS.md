@@ -91,10 +91,13 @@ Subagents are implementation hands owned by the parent agent. The user defines r
 
 ### Discovery and routing
 
+- Treat an active `subagent` tool as the user's opt-in to autonomous delegation; do not ask for per-child permission when delegation is useful.
 - Treat each loaded agent definition's `description` as its routing contract. Select a matching named agent automatically when the delegated task fits that description.
+- If no named definition fits, synthesize a temporary ad-hoc role with focused instructions instead of asking the user to define or select an agent.
 - Honor an explicitly requested named agent when it is available and policy-allowed.
 - Do not hardcode assumptions that `scout`, `planner`, `reviewer`, or any other profile must exist. Definitions may come from trusted `.agents/agents/**/*.md`, legacy or user agent files, adapted harness resources, packages, or ad-hoc invocation instructions.
-- Use exact `provider/id` model references. Never silently fall back when a named definition or invocation selected an unavailable model.
+- Run independent children concurrently through sibling tool calls in one response; keep dependent work sequential and keep fan-out to the minimum useful number.
+- Use exact `provider/id` model references or explicit parent-model inheritance. Never silently fall back when a named definition or invocation selected an unavailable model.
 - Keep delegation depth at one: child agents never receive the `subagent` tool.
 
 ### Current project agent

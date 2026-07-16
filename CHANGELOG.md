@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-07-16
+
+### Added
+- Enabled parent agents to autonomously route independent work to matching named agents or temporary ad-hoc roles, including concurrent sibling delegation, transient role names, and explicit parent-model inheritance.
+
 ## [0.54.5] - 2026-07-16
 
 ### Fixed
