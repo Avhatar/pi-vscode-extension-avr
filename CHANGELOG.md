@@ -7,6 +7,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- User and project skills in the cross-client `.agents/skills/` locations now appear in Pi Code alongside existing skill sources.
+
+### Changed
+- Project and user named-agent discovery now prefers neutral `.agents/agents/` directories while retaining legacy Pi directory fallback.
+
+## [0.53.0] - 2026-07-16
+
+### Changed
+- Subagent worktree review, apply, and cleanup are now owned entirely by the parent orchestrator, without asking users to make child lifecycle decisions.
+- The launcher now presents expandable delegated tasks and final results with only a Dismiss action, while chat subagent cards show a truncated task/result preview and the full content when expanded.
+
+## [0.52.0] - 2026-07-16
+
+### Added
+- Added a project-scoped DeepSeek V4 Pro implementation agent for small, concrete coding tasks, with fresh context, explicit worktree isolation, bounded turns, and handoff guidance for GPT-led architecture and verification.
+- Added orchestrator-driven `review`, `apply`, and `cleanup` subagent actions, with mandatory modal confirmation before applying or discarding isolated worktree changes.
+
+### Fixed
+- Worktree review and apply now include new files created by isolated subagents, not only modifications to already tracked files.
+
 ## [0.51.0] - 2026-07-15
 
 ### Added

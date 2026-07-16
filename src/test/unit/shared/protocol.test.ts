@@ -53,10 +53,10 @@ describe('Protocol types', () => {
             subagents: {
                 enabled: true, toggleDisabled: false, activeCount: 1, queuedCount: 0,
                 runs: [{
-                    agentId: 'child', name: 'reviewer', taskPreview: 'Review', status: 'running',
-                    modelLabel: 'deepseek/reasoner', currentTool: 'grep', activity: 'Running grep',
-                    elapsedMs: 5_000, turnCount: 1, canStop: true,
-                    canInspect: true, canResume: false, canSteer: true, canDismiss: false, hasWorktree: false,
+                    agentId: 'child', name: 'reviewer', task: 'Review authentication', taskPreview: 'Review',
+                    result: 'No critical issues.', resultPreview: 'No critical issues.', status: 'completed',
+                    modelLabel: 'deepseek/reasoner', activity: 'Completed',
+                    elapsedMs: 5_000, turnCount: 1, canDismiss: true,
                 }],
             },
         };

@@ -108,7 +108,7 @@ Each assistant message footer shows the elapsed wall-clock time for that turn pl
 While the agent is streaming, you can **queue** follow-up messages that will be sent automatically once the current generation finishes. Queued messages appear in a collapsible list above the input with inline edit and delete controls. You can also **steer** the agent mid-generation (Ctrl+Enter) to inject guidance into the current response without waiting.
 
 ### Slash Commands & Skills
-Type `/` in the input to trigger a slash-command menu that surfaces available Pi skills from `~/.pi/agent/skills/` and workspace `.pi/skills/`. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` appear alongside them, with nested skills activated only in their directory scope.
+Type `/` in the input to trigger a slash-command menu. Cross-client Agent Skills are discovered from `~/.agents/skills/` and workspace `.agents/skills/`; Pi Code also retains legacy `~/.pi/agent/skills/` and workspace `.pi/skills/` discovery. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` appear alongside them, with nested skills activated only in their directory scope.
 
 ### Prompt Cache Retention
 A `cache: …` chip in the chat footer controls prompt cache retention for future requests. Choose `short`, `long`, or `auto`; in `auto`, Pi Code uses provider-aware heuristics. OpenAI-style providers and other free-write cache backends prefer `long`, while Anthropic-style providers switch to `long` only after a meaningful idle gap or a large cached prefix. Providers that do not expose cache controls show the chip faded as informational.

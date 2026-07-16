@@ -144,6 +144,7 @@ export class SubagentManager {
             parentTabId: this.parentTabId,
             name: spec.name,
             source: spec.source,
+            task: truncateUtf8(spec.task, this.resultByteLimit).value,
             taskPreview: preview(spec.task, 200),
             status: 'queued',
             queuedAt: this.now(),
@@ -166,6 +167,7 @@ export class SubagentManager {
             parentTabId: this.parentTabId,
             name: spec.name,
             source: spec.source,
+            task: truncateUtf8(spec.task, this.resultByteLimit).value,
             taskPreview: preview(spec.task, 200),
             status: 'queued',
             queuedAt: this.now(),
@@ -203,6 +205,7 @@ export class SubagentManager {
         if (!this.factory.resume) throw new Error('The configured child runtime does not support resume.');
         const spec = { ...cloneSpec(previousSpec), task };
         Object.assign(run, {
+            task: truncateUtf8(task, this.resultByteLimit).value,
             taskPreview: preview(task, 200),
             status: 'queued' as const,
             currentTool: undefined,
@@ -212,6 +215,7 @@ export class SubagentManager {
             startedAt: undefined,
             finishedAt: undefined,
             error: undefined,
+            result: undefined,
             resultPreview: undefined,
             turnCount: 0,
         });
@@ -466,6 +470,7 @@ export class SubagentManager {
                         currentTool: undefined,
                         activity: bounded.truncated ? 'Completed (result truncated)' : 'Completed',
                         finishedAt: this.now(),
+                        result: result.result,
                         resultPreview: preview(result.result, 500),
                     });
                     this.log(

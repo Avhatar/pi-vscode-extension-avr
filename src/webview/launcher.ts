@@ -300,6 +300,9 @@ const SUBAGENT_STATUS_GLYPH: Record<LauncherSubagentStatus, string> = {
     failed: '×',
     cancelled: '–',
 };
+const ACTIVE_SUBAGENT_STATUSES = new Set<LauncherSubagentStatus>([
+    'queued', 'starting', 'running', 'waiting_for_permission', 'retrying',
+]);
 
 function setSubagentsCollapsed(collapsed: boolean): void {
     currentState = { ...currentState, subagentsCollapsed: collapsed };
@@ -393,16 +396,17 @@ function renderSubagentsToggle(snapshot: LauncherSubagentSnapshot): HTMLElement 
 }
 
 function renderSubagentRow(run: LauncherSubagentRun): HTMLElement {
-    const row = el('div', `subagent-row subagent-row-${run.status}`);
-    row.title = run.error ?? run.taskPreview;
+    const row = document.createElement('details');
+    row.className = `subagent-row subagent-row-${run.status}`;
 
+    const summary = el('summary', 'subagent-row-summary');
     const header = el('div', 'subagent-row-header');
     const glyph = el('span', 'subagent-status-glyph', SUBAGENT_STATUS_GLYPH[run.status]);
     glyph.title = run.status.replaceAll('_', ' ');
     header.appendChild(glyph);
     header.appendChild(el('span', 'subagent-name', run.name));
     header.appendChild(el('span', 'subagent-status-label', run.status.replaceAll('_', ' ')));
-    row.appendChild(header);
+    summary.appendChild(header);
 
     const metadata = el('div', 'subagent-metadata');
     const model = el('span', 'subagent-model', run.modelLabel ?? 'resolving model…');
@@ -410,47 +414,50 @@ function renderSubagentRow(run: LauncherSubagentRun): HTMLElement {
     metadata.appendChild(model);
     const elapsed = el('span', 'subagent-elapsed', formatElapsed(run.elapsedMs));
     elapsed.dataset.elapsedBase = String(run.elapsedMs);
-    elapsed.dataset.active = String(run.canStop);
+    elapsed.dataset.active = String(ACTIVE_SUBAGENT_STATUSES.has(run.status));
     metadata.appendChild(elapsed);
     if (run.queueWaitMs !== undefined && run.queueWaitMs > 0) {
         const queued = el('span', 'subagent-queue-wait', `queue ${formatElapsed(run.queueWaitMs)}`);
-        queued.title = 'Time spent waiting for per-chat and global execution capacity';
+        queued.title = 'Time spent waiting for orchestration capacity';
         metadata.appendChild(queued);
     }
-    row.appendChild(metadata);
+    summary.appendChild(metadata);
 
     const activityText = run.currentTool
         ? `${run.activity ?? 'Running tool'} · ${run.currentTool}`
-        : run.activity ?? (run.turnCount > 0 ? `${run.turnCount} turn${run.turnCount === 1 ? '' : 's'}` : run.taskPreview);
-    row.appendChild(el('div', 'subagent-activity', activityText));
-    if (run.error) row.appendChild(el('div', 'subagent-error', run.error));
+        : run.activity ?? run.taskPreview;
+    summary.appendChild(el('div', 'subagent-activity', activityText));
+    row.appendChild(summary);
 
-    const controls = el('div', 'subagent-controls');
-    if (run.canInspect) controls.appendChild(subagentControl('Inspect', 'inspectSubagent', run.agentId));
-    if (run.canSteer) controls.appendChild(subagentControl('Send', 'steerSubagent', run.agentId));
-    if (run.canStop) controls.appendChild(subagentControl('Stop', 'stopSubagent', run.agentId));
-    if (run.canResume) controls.appendChild(subagentControl('Resume', 'resumeSubagent', run.agentId));
-    if (run.hasWorktree) {
-        controls.appendChild(subagentControl('Review', 'reviewSubagentWorktree', run.agentId));
-        controls.appendChild(subagentControl('Apply', 'applySubagentWorktree', run.agentId));
-        controls.appendChild(subagentControl('Clean', 'cleanupSubagentWorktree', run.agentId));
+    const body = el('div', 'subagent-row-body');
+    body.appendChild(el('div', 'subagent-detail-label', 'Task'));
+    const task = el('pre', 'subagent-detail-value');
+    task.textContent = run.task;
+    body.appendChild(task);
+
+    const result = run.result ?? run.resultPreview;
+    if (result || run.error) {
+        body.appendChild(el('div', 'subagent-detail-label', run.error ? 'Error' : 'Result'));
+        const output = el('pre', `subagent-detail-value${run.error ? ' subagent-error' : ''}`);
+        output.textContent = run.error ?? result ?? '';
+        body.appendChild(output);
     }
-    if (run.canDismiss) controls.appendChild(subagentControl('Dismiss', 'dismissSubagent', run.agentId));
-    if (controls.childElementCount > 0) row.appendChild(controls);
+
+    if (run.canDismiss) {
+        const controls = el('div', 'subagent-controls');
+        controls.appendChild(subagentDismissControl(run.agentId));
+        body.appendChild(controls);
+    }
+    row.appendChild(body);
     return row;
 }
 
-function subagentControl(
-    label: string,
-    type: 'inspectSubagent' | 'steerSubagent' | 'stopSubagent' | 'resumeSubagent' | 'dismissSubagent'
-        | 'reviewSubagentWorktree' | 'applySubagentWorktree' | 'cleanupSubagentWorktree',
-    agentId: string,
-): HTMLButtonElement {
-    const button = el('button', 'subagent-control', label);
+function subagentDismissControl(agentId: string): HTMLButtonElement {
+    const button = el('button', 'subagent-control', 'Dismiss');
     button.type = 'button';
     button.addEventListener('click', () => {
-        if (type === 'stopSubagent' || type === 'dismissSubagent') button.disabled = true;
-        vscode.postMessage({ type, agentId });
+        button.disabled = true;
+        vscode.postMessage({ type: 'dismissSubagent', agentId });
     });
     return button;
 }

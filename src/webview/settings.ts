@@ -602,7 +602,7 @@ function renderSkillsSection(): void {
     if (!container) return;
 
     if (loadedSkills.length === 0) {
-        container.innerHTML = `<p class="setting-description">No skills found. Place <code>SKILL.md</code> files in <code>~/.pi/agent/skills/</code> or <code>.pi/skills/</code> in your workspace.</p>`;
+        container.innerHTML = `<p class="setting-description">No skills found. Place <code>SKILL.md</code> files in <code>~/.agents/skills/</code> or workspace <code>.agents/skills/</code>. Legacy Pi locations remain supported.</p>`;
         return;
     }
 

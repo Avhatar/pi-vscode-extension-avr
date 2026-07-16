@@ -12,6 +12,7 @@ function snapshot(): SubagentManagerSnapshot {
             parentTabId: 'tab',
             name: 'reviewer',
             source: 'project',
+            task: 'Review authentication and report concrete risks.',
             taskPreview: 'Review auth',
             status: 'running',
             model: { provider: 'deepseek', id: 'reasoner' },
@@ -24,7 +25,7 @@ function snapshot(): SubagentManagerSnapshot {
 }
 
 describe('subagent launcher projection', () => {
-    it('projects actual model, tool, elapsed time, and stop capability', () => {
+    it('projects the orchestrator task, actual model, tool, and elapsed time without user controls', () => {
         const projected = projectSubagentLauncherSnapshot(snapshot(), {
             enabled: true,
             toggleDisabled: false,
@@ -34,10 +35,11 @@ describe('subagent launcher projection', () => {
             enabled: true,
             activeCount: 1,
             runs: [{
+                task: 'Review authentication and report concrete risks.',
                 modelLabel: 'deepseek/reasoner',
                 currentTool: 'grep',
                 elapsedMs: 5_000,
-                canStop: true,
+                canDismiss: false,
             }],
         });
     });
@@ -47,16 +49,18 @@ describe('subagent launcher projection', () => {
         value.activeCount = 0;
         value.runs[0].status = 'completed';
         value.runs[0].finishedAt = 4_000;
+        value.runs[0].result = 'Authentication review complete.';
         const projected = projectSubagentLauncherSnapshot(value, {
             enabled: true,
             toggleDisabled: false,
             now: 10_000,
         });
         expect(projected.runs[0].elapsedMs).toBe(3_000);
-        expect(projected.runs[0].canStop).toBe(false);
+        expect(projected.runs[0].result).toBe('Authentication review complete.');
+        expect(projected.runs[0].canDismiss).toBe(true);
     });
 
-    it('marks smoke rows as non-stoppable', () => {
+    it('marks smoke rows as non-dismissible', () => {
         const projected = projectSubagentLauncherSnapshot(snapshot(), {
             enabled: true,
             toggleDisabled: false,
@@ -64,6 +68,6 @@ describe('subagent launcher projection', () => {
             smokeSimulation: true,
         });
         expect(projected.smokeSimulation).toBe(true);
-        expect(projected.runs[0].canStop).toBe(false);
+        expect(projected.runs[0].canDismiss).toBe(false);
     });
 });

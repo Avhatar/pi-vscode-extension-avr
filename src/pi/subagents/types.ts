@@ -145,6 +145,8 @@ export interface SubagentRun {
     parentTabId: string;
     name: string;
     source: AgentDefinitionSource | 'invocation';
+    /** Full bounded delegation task for user-visible orchestration history. */
+    task?: string;
     taskPreview: string;
     status: SubagentRunStatus;
     model?: AvailableModel;
@@ -156,6 +158,8 @@ export interface SubagentRun {
     finishedAt?: number;
     turnCount: number;
     error?: string;
+    /** Full bounded child result for user-visible orchestration history. */
+    result?: string;
     resultPreview?: string;
     transcriptPath?: string;
     isolationPath?: string;

@@ -98,8 +98,10 @@ export const persistenceControlScenario: SmokeScenario = {
             const detailTranscript = transcriptAfterDismiss!;
             const detailRun = {
                 ...firstRun,
+                task: 'Full delegated persistence task.',
+                result: 'Full persisted child result.',
                 status: 'completed' as const,
-                activity: 'Persistent transcript ready for inspection',
+                activity: 'Task and result ready for inspection',
                 transcriptPath: loaded[0].run.transcriptPath,
             };
             const launcher = projectSubagentLauncherSnapshot({
@@ -110,7 +112,6 @@ export const persistenceControlScenario: SmokeScenario = {
                 now: detailRun.finishedAt ?? 50_000,
                 smokeSimulation: true,
             });
-            launcher.runs[0].canInspect = true;
             showLauncherSnapshot?.(launcher, { [first.agentId]: detailTranscript });
             logger.event('persistence-detail-injected', {
                 installedHost: Boolean(showLauncherSnapshot),
@@ -118,11 +119,19 @@ export const persistenceControlScenario: SmokeScenario = {
                 transcriptBytes: Buffer.byteLength(detailTranscript, 'utf8'),
                 availableUntilReset: true,
             });
-            logger.assert('manual-detail-snapshot-remains-until-reset', launcher.smokeSimulation === true && launcher.runs[0].canInspect, true, launcher.runs[0]);
+            logger.assert(
+                'manual-detail-snapshot-shows-task-and-result-until-reset',
+                launcher.smokeSimulation === true
+                    && launcher.runs[0].task === 'Full delegated persistence task.'
+                    && launcher.runs[0].result === 'Full persisted child result.'
+                    && !launcher.runs[0].canDismiss,
+                true,
+                launcher.runs[0],
+            );
             logger.step('persistence-control-ready-for-inspection', {
                 result: 'PASS',
                 instruction: showLauncherSnapshot
-                    ? 'Click Inspect on the retained Subagents row, then Reset.'
+                    ? 'Expand the retained Subagents row to inspect Task and Result, then Reset.'
                     : 'Unit host has no visual launcher.',
             });
         } finally {

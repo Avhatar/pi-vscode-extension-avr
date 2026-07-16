@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-Pi Code is a VS Code extension providing editor-tab chat panels (with an activity-bar launcher sidebar) for the Pi coding agent SDK (`@earendil-works/pi-coding-agent`). It supports multi-tab sessions, inline diffs, checkpoints/rollback, a dedicated settings page, message queuing during streaming, mid-stream steering, slash-command skills, per-chat ToDo, Plan Mode, and opt-in LSP tools.
+Pi Code is a VS Code extension providing editor-tab chat panels (with an activity-bar launcher sidebar) for the Pi coding agent SDK (`@earendil-works/pi-coding-agent`). It supports multi-tab sessions, cross-provider named and ad-hoc subagents, inline diffs, checkpoints/rollback, a dedicated settings page, message queuing during streaming, mid-stream steering, slash-command skills, per-chat ToDo, Plan Mode, and opt-in LSP tools.
 
 ## Language
 
-**English only.** Every artefact that lives in the repository must be written in English: source code, identifiers, comments, commit messages, CHANGELOG entries, READMEs, design docs, agent skills (`.pi/skills/**`), issue templates, configuration files, UI strings — without exception. This applies even when the conversation with the user is in another language.
+**English only.** Every artefact that lives in the repository must be written in English: source code, identifiers, comments, commit messages, CHANGELOG entries, READMEs, design docs, agent skills (`.agents/skills/**`), issue templates, configuration files, UI strings — without exception. This applies even when the conversation with the user is in another language.
 
 The chat with the user can be in any language they prefer; the moment something is being written to a file or commit message in this repo, switch to English.
 
@@ -64,6 +64,81 @@ The Pi SDK packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-agen
 - **Message queuing**: While streaming, user messages are queued (stored in `TabState.queuedMessages`) and auto-dispatched as new prompts on `agent_end`. Steering (mid-stream injection) is a separate path via `AgentSession.steer()`.
 - **Skills / slash commands**: Skills are loaded from the Pi SDK and surfaced in the webview via a `getSkills` message. The webview renders a slash-command menu triggered by `/` in the input.
 
+## Cross-Harness Agent Resources
+
+Keep repository guidance portable across Pi Code, Codex, Cursor, Gemini CLI, GitHub Copilot, Claude Code, Hermes, and other compatible harnesses.
+
+- **Always-on instructions:** This root [`AGENTS.md`](https://agents.md) is the canonical source of project policy. It must remain self-contained because import syntax is not universal. Add nested `AGENTS.md` files only for directory-scoped overrides; the closest applicable file wins.
+- **Reusable workflows:** Store project skills in `.agents/skills/<skill-name>/SKILL.md` following the [Agent Skills](https://agentskills.io) specification. `.agents/skills` is the cross-client discovery convention; do not make `.pi/skills`, `.claude/skills`, `.cursor/skills`, or another vendor directory the source of truth.
+- **Named implementation agents:** Store neutral definitions in `.agents/agents/*.md`. There is not yet a mature cross-harness subagent-definition standard: Claude/Cursor use Markdown with differing fields, Codex uses TOML, and `.agents/agents` remains an emerging draft convention. Therefore `AGENTS.md` must also describe each project agent's routing boundary so a harness can reproduce the role even when it cannot parse the definition natively.
+- **Compatibility shims:** Vendor files may only bridge to canonical resources. `CLAUDE.md` intentionally contains `@AGENTS.md`; it must not accumulate independent policy. Do not duplicate skill bodies or agent instructions across vendor directories because copies drift.
+- **Runtime capability remains local:** Instructions never grant tools, permissions, models, trust, or isolation. A harness must map canonical intent onto capabilities it actually provides and report unsupported constraints rather than silently weakening them.
+
+### Current project skills
+
+Harnesses with native `.agents/skills` discovery use the standard metadata automatically. Other harnesses must use this catalog for routing and read the matching `SKILL.md` before acting.
+
+| Skill | Invoke when | Canonical file |
+|---|---|---|
+| `build-deploy` | The user asks to build, compile, package, deploy, install, create a VSIX, bump/release a version, or supplies the documented standalone test-deploy shortcut. | `.agents/skills/build-deploy/SKILL.md` |
+| `commit` | The user asks to inspect/finalize uncommitted work, draft a commit message, or commit changes. | `.agents/skills/commit/SKILL.md` |
+
+Keep this catalog synchronized when project skills are added, renamed, or removed.
+
+## Subagent Orchestration
+
+Subagents are implementation hands owned by the parent agent. The user defines reusable agent types in Markdown and gives goals to the parent; the parent proactively chooses, delegates to, reviews, and integrates child work. Do not ask the user to select agents or manage child lifecycle operations unless they explicitly requested a particular named agent.
+
+### Discovery and routing
+
+- Treat each loaded agent definition's `description` as its routing contract. Select a matching named agent automatically when the delegated task fits that description.
+- Honor an explicitly requested named agent when it is available and policy-allowed.
+- Do not hardcode assumptions that `scout`, `planner`, `reviewer`, or any other profile must exist. Definitions may come from trusted `.agents/agents/**/*.md`, legacy or user agent files, adapted harness resources, packages, or ad-hoc invocation instructions.
+- Use exact `provider/id` model references. Never silently fall back when a named definition or invocation selected an unavailable model.
+- Keep delegation depth at one: child agents never receive the `subagent` tool.
+
+### Current project agent
+
+| Agent | Use when | Do not use when | Canonical file |
+|---|---|---|---|
+| `deepseek-v4-implementer` | A non-trivial task has already been decomposed into one small, concrete implementation change with explicit target paths, constraints, and acceptance criteria. Good examples: a localized bug fix, one focused refactor, a test addition, protocol plumbing after the parent designed it, or a mechanical documentation/code update. | Architecture is undecided, requirements are ambiguous, the change is cross-cutting, security policy must be designed, or the task is so trivial that delegation costs more than doing it directly. | `.agents/agents/deepseek-v4-implementer.md` |
+
+When more named agents are added, extend this table with a precise routing boundary. Keep the agent file's description and this table consistent.
+
+### Delegation contract
+
+Before spawning a child, the parent must provide:
+
+- one self-contained outcome;
+- relevant file or directory paths;
+- invariants and behavior that must remain unchanged;
+- explicit acceptance criteria;
+- the expected report or artifact;
+- a narrow tool allowlist whenever the full agent tool set is unnecessary.
+
+Prefer delegating at least one suitable implementation slice during non-trivial code work so the subagent path remains continuously exercised. Do not manufacture busywork merely to invoke an agent, and do not delegate tasks the parent cannot review.
+
+### Execution and integration
+
+- Use foreground execution when the parent needs the result before continuing. Use background execution only for genuinely independent work.
+- Narrow read-only investigations to `read`, `grep`, `find`, and `ls`.
+- Write-capable background runs require `isolation: worktree`. Worktree isolation is also the preferred default for substantial child edits. Parallel/background writes must be rejected in non-Git workspaces until an equivalent isolation strategy exists.
+- The parent owns all child lifecycle decisions. Inspect results, steer or stop when needed, review isolated diffs, apply accepted patches, run verification, and clean preserved worktrees without asking the user to manage these steps.
+- Never apply a worktree patch before reviewing it. Never treat a child's claim that tests pass as evidence; children do not have `bash`, and the parent must run the relevant commands.
+- Shared-workspace child writes must remain foreground, use the writer lease, and flow through the parent Diff/Checkpoint pipeline.
+- After integration, report delegation transparently in chat: what task was sent, what the child returned, what the parent accepted or rejected, and which verification the parent ran. The launcher is an observation surface with expandable Task/Result rows and Dismiss only, not a lifecycle control panel.
+
+### Parent-only responsibilities
+
+Do not delegate final ownership of:
+
+- architecture and product behavior;
+- security, trust, permission, model-fallback, or isolation policy;
+- cross-subsystem integration decisions;
+- final diff review and conflict resolution;
+- compilation, tests, packaging, deployment, or release acceptance;
+- changelog/version decisions unless the delegated task names a purely mechanical edit and the parent reviews it afterward.
+
 ## Bundled Pi extensions
 
 Pi extensions (npm packages keyed `pi-package`, e.g. `pi-web-access`) ship **inside the VSIX** and are surfaced to Pi via `DefaultResourceLoader.additionalExtensionPaths`. We do **not** invoke `pi install` at activation, and we do **not** mutate the user's `~/.pi/settings.json`.
@@ -105,6 +180,9 @@ Pi extensions (npm packages keyed `pi-package`, e.g. `pi-web-access`) ship **ins
 | `src/providers/checkpoint.ts` | Per-turn file snapshots, rollback/redo |
 | `src/providers/status-bar.ts` | Status bar item |
 | `src/pi/todo/` | Per-chat persistent ToDo (reducer, replay, store, tool schema) |
+| `src/pi/subagents/` | Agent registry/resolution, child runtime, persistence, lifecycle, worktree isolation, compatibility sources, and smoke scenarios |
+| `.agents/skills/` | Cross-harness project workflows using the Agent Skills `SKILL.md` standard |
+| `.agents/agents/` | Neutral project-scoped named-agent definitions; Pi loads these natively and other harnesses use the routing contract above or adapters |
 | `src/pi/lsp/` | Opt-in Language Server tools (find_references, hover, …) gated by `pi-code.lsp.enabled` |
 | `src/utils/diff.ts` | Myers diff algorithm |
 | `src/webview/main.ts` | Chat UI (runs in webview) |

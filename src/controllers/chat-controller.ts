@@ -811,6 +811,10 @@ export class ChatController implements vscode.Disposable {
             routeSubagentMutation(event, tab.diffManager);
         });
         unsubs.push(() => subagentMutationSubscription.dispose());
+        const subagentNotificationSubscription = tab.session.onSubagentNotification(() => {
+            this.sendStateSync(tab.id);
+        });
+        unsubs.push(() => subagentNotificationSubscription.dispose());
 
         // Apply the persisted tool selection (ToDo toggle + per-tab
         // Tools panel denylist, folded into a single `disabled` set).
@@ -952,10 +956,6 @@ export class ChatController implements vscode.Disposable {
             smokeSimulation: true,
             runs: snapshot.runs.map((run) => ({
                 ...run,
-                canStop: false,
-                canInspect: this._subagentSmokeTranscripts.has(run.agentId),
-                canResume: false,
-                canSteer: false,
                 canDismiss: false,
             })),
         };

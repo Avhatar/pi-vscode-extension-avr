@@ -21,10 +21,10 @@ export const compatibilitySourcesScenario: SmokeScenario = {
         const userClaude = path.join(root, 'user-claude');
         const packageRoot = path.join(root, 'fixture-package');
         try {
-            await writeAgent(path.join(cwd, '.pi', 'agents', 'native.md'), [
-                'name: native-agent', 'description: Native project agent', 'tools: [read]',
-            ], 'Use native Pi instructions.');
-            await writeAgent(path.join(cwd, '.pi', 'agents', 'shared.md'), [
+            await writeAgent(path.join(cwd, '.agents', 'agents', 'native.md'), [
+                'name: native-agent', 'description: Neutral project agent', 'tools: [read]',
+            ], 'Use neutral project instructions.');
+            await writeAgent(path.join(cwd, '.agents', 'agents', 'shared.md'), [
                 'name: shared', 'description: Native collision winner',
             ], 'Native wins.');
             await writeAgent(path.join(cwd, '.claude', 'agents', 'compat.md'), [
@@ -69,7 +69,7 @@ export const compatibilitySourcesScenario: SmokeScenario = {
             const packages = await indexPackageAgents([packageRoot]);
             const registry = new AgentRegistry({
                 cwd, workspaceTrusted: true,
-                userAgentsDirectory: path.join(root, 'empty-pi-user'),
+                userAgentsDirectory: path.join(root, 'empty-neutral-user'),
                 claudeDefinitions: claude.definitions,
                 packageDefinitions: packages.definitions,
                 additionalDiagnostics: [...claude.diagnostics, ...packages.diagnostics],
@@ -96,7 +96,7 @@ export const compatibilitySourcesScenario: SmokeScenario = {
             });
             const untrusted = new AgentRegistry({
                 cwd, workspaceTrusted: false,
-                userAgentsDirectory: path.join(root, 'empty-pi-user'),
+                userAgentsDirectory: path.join(root, 'empty-neutral-user'),
                 claudeDefinitions: untrustedClaude.definitions,
                 additionalDiagnostics: untrustedClaude.diagnostics,
             });

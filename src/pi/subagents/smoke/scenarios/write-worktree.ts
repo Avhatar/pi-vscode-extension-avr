@@ -72,22 +72,48 @@ export const writeWorktreeScenario: SmokeScenario = {
             const worktree = await isolation.prepare(workspace, 'worktree-writer', spec('worktree', true));
             logger.assert('worktree-created-under-extension-storage', Boolean(worktree.isolationPath?.startsWith(path.resolve(storage))), true, worktree.isolationPath);
             await fs.writeFile(path.join(worktree.cwd, 'tracked.txt'), 'changed by isolated child\n', 'utf8');
+            await fs.writeFile(path.join(worktree.cwd, 'new-child-artifact.txt'), 'created by isolated child\n', 'utf8');
             const primaryBeforeApply = await fs.readFile(path.join(workspace, 'tracked.txt'), 'utf8');
-            logger.assert('worktree-change-does-not-touch-primary-workspace', primaryBeforeApply === 'original\n', 'original', primaryBeforeApply.trim());
+            let primaryArtifactExists = true;
+            try { await fs.access(path.join(workspace, 'new-child-artifact.txt')); } catch { primaryArtifactExists = false; }
+            logger.assert(
+                'worktree-change-does-not-touch-primary-workspace',
+                primaryBeforeApply === 'original\n' && !primaryArtifactExists,
+                'tracked file unchanged and child artifact absent',
+                { tracked: primaryBeforeApply.trim(), primaryArtifactExists },
+            );
             const diff = await isolation.getWorktreeDiff(worktree.isolationPath!);
             logger.event('worktree-review', {
                 path: worktree.isolationPath,
                 diffBytes: Buffer.byteLength(diff, 'utf8'),
                 containsTrackedFile: diff.includes('tracked.txt'),
+                containsUntrackedArtifact: diff.includes('new-child-artifact.txt'),
                 autoMerged: false,
             });
-            logger.assert('review-diff-exposes-isolated-change', diff.includes('changed by isolated child') && diff.includes('tracked.txt'), true, diff.slice(0, 200));
+            logger.assert(
+                'review-diff-exposes-isolated-changes-including-new-files',
+                diff.includes('changed by isolated child') && diff.includes('tracked.txt')
+                    && diff.includes('created by isolated child') && diff.includes('new-child-artifact.txt'),
+                true,
+                diff.slice(0, 400),
+            );
 
             await isolation.applyWorktree(workspace, worktree.isolationPath!);
             const primaryAfterApply = await fs.readFile(path.join(workspace, 'tracked.txt'), 'utf8');
-            logger.assert('explicit-apply-updates-primary-workspace', primaryAfterApply.trim() === 'changed by isolated child', 'changed by isolated child', primaryAfterApply.trim());
-            const staged = await git(workspace, ['diff', '--cached', '--name-only']);
-            logger.assert('explicit-apply-stages-reviewable-change', staged.trim() === 'tracked.txt', 'tracked.txt', staged.trim());
+            const primaryArtifact = await fs.readFile(path.join(workspace, 'new-child-artifact.txt'), 'utf8');
+            logger.assert(
+                'explicit-apply-updates-primary-workspace',
+                primaryAfterApply.trim() === 'changed by isolated child' && primaryArtifact.trim() === 'created by isolated child',
+                'tracked and newly created child files applied',
+                { tracked: primaryAfterApply.trim(), artifact: primaryArtifact.trim() },
+            );
+            const staged = (await git(workspace, ['diff', '--cached', '--name-only'])).trim().split(/\r?\n/).sort();
+            logger.assert(
+                'explicit-apply-stages-reviewable-changes',
+                staged.join(',') === 'new-child-artifact.txt,tracked.txt',
+                ['new-child-artifact.txt', 'tracked.txt'],
+                staged,
+            );
 
             await isolation.cleanupWorktree(workspace, worktree.isolationPath!);
             let worktreeExists = true;

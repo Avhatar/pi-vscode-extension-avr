@@ -13,8 +13,8 @@ export interface RegistrySmokeFixture {
 export async function createRegistrySmokeFixture(): Promise<RegistrySmokeFixture> {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'pi-subagent-smoke-'));
     const cwd = path.join(root, 'workspace');
-    const userAgentsDirectory = path.join(root, 'home', '.pi', 'agent', 'agents');
-    const projectAgentsDirectory = path.join(cwd, '.pi', 'agents');
+    const userAgentsDirectory = path.join(root, 'home', '.agents', 'agents');
+    const projectAgentsDirectory = path.join(cwd, '.agents', 'agents');
 
     try {
         await writeAgent(path.join(userAgentsDirectory, 'research.md'), [

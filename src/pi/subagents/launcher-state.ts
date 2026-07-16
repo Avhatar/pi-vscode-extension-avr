@@ -25,12 +25,14 @@ export function projectSubagentLauncherSnapshot(
         queuedCount: snapshot.queuedCount,
         runs: snapshot.runs.map((run) => {
             const active = ACTIVE_STATUSES.has(run.status);
-            const hasTranscript = Boolean(run.transcriptPath);
             const controlsEnabled = !options.smokeSimulation;
             return {
             agentId: run.agentId,
             name: run.name,
+            task: run.task ?? run.taskPreview,
             taskPreview: run.taskPreview,
+            ...(run.result ? { result: run.result } : {}),
+            ...(run.resultPreview ? { resultPreview: run.resultPreview } : {}),
             status: run.status,
             ...(run.model ? { modelLabel: `${run.model.provider}/${run.model.id}` } : {}),
             ...(run.currentTool ? { currentTool: run.currentTool } : {}),
@@ -39,12 +41,7 @@ export function projectSubagentLauncherSnapshot(
             ...(run.queueWaitMs !== undefined ? { queueWaitMs: run.queueWaitMs } : {}),
             turnCount: run.turnCount,
             ...(run.error ? { error: run.error } : {}),
-            canStop: active && controlsEnabled,
-            canInspect: hasTranscript && controlsEnabled,
-            canResume: !active && hasTranscript && controlsEnabled,
-            canSteer: active && controlsEnabled,
             canDismiss: !active && controlsEnabled,
-            hasWorktree: Boolean(run.isolationPath) && controlsEnabled,
         };
         }),
         ...(options.smokeSimulation ? { smokeSimulation: true } : {}),

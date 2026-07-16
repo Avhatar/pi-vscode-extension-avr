@@ -47,6 +47,18 @@ function definitionPriority(definition: AgentDefinition): number {
     return SOURCE_PRIORITY[definition.source];
 }
 
+async function resolveProjectAgentsDirectory(cwd: string): Promise<string> {
+    const canonical = path.join(cwd, '.agents', 'agents');
+    if (await isDirectory(canonical)) return canonical;
+    return path.join(cwd, '.pi', 'agents');
+}
+
+async function resolveUserAgentsDirectory(): Promise<string> {
+    const canonical = path.join(os.homedir(), '.agents', 'agents');
+    if (await isDirectory(canonical)) return canonical;
+    return path.join(os.homedir(), '.pi', 'agent', 'agents');
+}
+
 export interface AgentRegistryOptions {
     cwd: string;
     workspaceTrusted: boolean;
@@ -92,14 +104,14 @@ export class AgentRegistry {
         for (const definition of this.options.packageDefinitions ?? []) addProgrammatic(definition, 'package');
         for (const definition of this.options.claudeDefinitions ?? []) addProgrammatic(definition, 'claude-compat');
 
-        const userDirectory = this.options.userAgentsDirectory ?? path.join(os.homedir(), '.pi', 'agent', 'agents');
+        const userDirectory = this.options.userAgentsDirectory ?? await resolveUserAgentsDirectory();
         for (const filePath of await discoverMarkdownFiles(userDirectory, 'user', diagnostics)) {
             const parsed = await parseAgentFile(filePath, 'user');
             diagnostics.push(...parsed.diagnostics);
             if (parsed.definition) candidates.push({ definition: parsed.definition, order: order++ });
         }
 
-        const projectDirectory = this.options.projectAgentsDirectory ?? path.join(this.options.cwd, '.pi', 'agents');
+        const projectDirectory = this.options.projectAgentsDirectory ?? await resolveProjectAgentsDirectory(this.options.cwd);
         if (this.options.workspaceTrusted) {
             for (const filePath of await discoverMarkdownFiles(projectDirectory, 'project', diagnostics)) {
                 const parsed = await parseAgentFile(filePath, 'project');

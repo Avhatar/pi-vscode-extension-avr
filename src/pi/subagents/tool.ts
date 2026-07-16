@@ -18,6 +18,7 @@ export const SubagentParamsSchema = Type.Object({
     action: Type.Optional(Type.Union([
         Type.Literal('spawn'), Type.Literal('resume'), Type.Literal('send'),
         Type.Literal('stop'), Type.Literal('inspect'), Type.Literal('dismiss'),
+        Type.Literal('review'), Type.Literal('apply'), Type.Literal('cleanup'),
     ], { description: 'Lifecycle action. Defaults to spawn.' })),
     task: Type.Optional(Type.String({ description: 'A complete task for spawn, or a follow-up task for resume.' })),
     agentId: Type.Optional(Type.String({ description: 'Persistent child id required by lifecycle actions.' })),
@@ -26,7 +27,7 @@ export const SubagentParamsSchema = Type.Object({
     instructions: Type.Optional(Type.String({ description: 'Ad-hoc specialized instructions, appended after named-agent instructions when both are provided.' })),
     model: Type.Optional(ModelSchema),
     thinkingLevel: Type.Optional(Type.String()),
-    tools: Type.Optional(Type.Array(Type.String(), { description: 'Optional narrowing allowlist of read-only child tools.' })),
+    tools: Type.Optional(Type.Array(Type.String(), { description: 'Optional narrowing allowlist of child-safe tools.' })),
     maxTurns: Type.Optional(Type.Integer({ minimum: 1 })),
     timeoutMinutes: Type.Optional(Type.Integer({ minimum: 1 })),
     background: Type.Optional(Type.Boolean({ description: 'Return a persistent agentId immediately and notify the parent session when the child settles.' })),
@@ -36,7 +37,7 @@ export const SubagentParamsSchema = Type.Object({
 });
 
 export interface SubagentToolParams {
-    action?: 'spawn' | 'resume' | 'send' | 'stop' | 'inspect' | 'dismiss';
+    action?: 'spawn' | 'resume' | 'send' | 'stop' | 'inspect' | 'dismiss' | 'review' | 'apply' | 'cleanup';
     task?: string;
     agentId?: string;
     message?: string;
@@ -89,17 +90,24 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
             'Delegate one self-contained task to an isolated child agent.',
             'Children use fresh context, may select an exact cross-provider model, and receive only policy-approved tools.',
             'Use `agent` for a reusable file definition or provide ad-hoc `instructions`.',
+            'Choose matching named agents from their descriptions automatically; users may also request a specific named agent.',
             'Spawn and resume wait for the child and return only its bounded final result.',
-            'Persistent agent IDs support inspect, send, stop, resume, and dismiss lifecycle actions.',
+            'Persistent agent IDs support inspect, send, stop, resume, dismiss, review, apply, and cleanup lifecycle actions.',
+            'Use `review` to return the isolated worktree patch from a completed child.',
+            'The parent orchestrator owns review, apply, and cleanup decisions; these lifecycle actions never ask the user to manage child worktrees.',
             catalog,
         ].filter(Boolean).join('\n'),
-        promptSnippet: 'Delegate a task to an isolated read-only child agent, optionally on another provider/model',
+        promptSnippet: 'Delegate a task to an isolated child agent, optionally on another provider/model',
         promptGuidelines: [
             'Use `subagent` when an independent investigation, review, or specialized analysis can be delegated with a self-contained task.',
+            'Select a named agent automatically when its catalog description matches the task; do not make the user manage child selection or lifecycle.',
             'Pass one child per tool call. To run independent children concurrently, emit multiple sibling `subagent` calls in one response.',
             'State the expected output and relevant paths in `task`; the child does not see the parent conversation.',
             'Use exact `provider/id` model references. An unavailable explicit model fails and never silently falls back.',
             'Use lifecycle actions only with an agentId returned by an earlier call; stale IDs fail explicitly.',
+            'Call `review` to retrieve and inspect the child\'s isolated raw diff before requesting `apply`.',
+            'Call `apply` when the reviewed patch is ready; apply stages it in the primary workspace without involving the user in subagent lifecycle management.',
+            'Call `cleanup` after apply, or when discarding a rejected patch; cleanup permanently removes the preserved child worktree.',
             'Do not delegate trivial work when the coordination cost exceeds the benefit.',
         ],
         parameters: SubagentParamsSchema,

@@ -64,6 +64,9 @@ export class WriteIsolationManager {
 
     async getWorktreeDiff(worktreePath: string): Promise<string> {
         this.assertWorktreePath(worktreePath);
+        // Intent-to-add makes untracked child artifacts visible in the review
+        // patch without staging their contents or touching the primary index.
+        await execFileAsync('git', ['-C', worktreePath, 'add', '--intent-to-add', '--', '.']);
         const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'diff', '--binary', 'HEAD'], {
             maxBuffer: 10 * 1024 * 1024,
         });

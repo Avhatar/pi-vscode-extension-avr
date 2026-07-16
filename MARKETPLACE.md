@@ -66,7 +66,7 @@ Root, ancestor, local, explicitly imported, and directory-scoped instructions ar
 Queue follow-up messages while the agent is streaming (they auto-send when the turn finishes), or steer mid-generation with `Ctrl+Enter` to inject guidance into the current response.
 
 ### Slash commands and skills
-Type `/` to open a slash-command menu over Pi skills loaded from `~/.pi/agent/skills/` and your workspace's `.pi/skills/`. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` are surfaced alongside them, with directory-scoped skills activated only when the agent works in their subtree.
+Type `/` to open a slash-command menu. Cross-client Agent Skills are discovered from `~/.agents/skills/` and workspace `.agents/skills/`; Pi Code also retains legacy `~/.pi/agent/skills/` and workspace `.pi/skills/` discovery. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` are surfaced alongside them, with directory-scoped skills activated only when the agent works in their subtree.
 
 ### Per-chat ToDo
 Each chat has its own persistent task list the agent manages via a built-in `todo` tool — pending / in-progress / completed states, dependencies, and inline display in the launcher. Toggle per-tab on or off.

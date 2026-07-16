@@ -49,7 +49,11 @@ describe('subagent terminal row retention', () => {
         await manager.runForeground(spec('first'));
         await manager.runForeground(spec('second'));
         expect(manager.getSnapshot().runs).toHaveLength(1);
-        expect(manager.getSnapshot().runs[0].name).toBe('second');
+        expect(manager.getSnapshot().runs[0]).toMatchObject({
+            name: 'second',
+            task: 'Complete.',
+            result: 'done',
+        });
 
         await new Promise((resolve) => setTimeout(resolve, 20));
         expect(manager.getSnapshot().runs).toHaveLength(0);

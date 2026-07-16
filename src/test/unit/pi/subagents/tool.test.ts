@@ -63,6 +63,35 @@ describe('parent subagent tool', () => {
         expect(result.content).toEqual([{ type: 'text', text: 'Persistent transcript.' }]);
     });
 
+    it('forwards action: review by agentId through services.control', async () => {
+        let tool: any;
+        const control = vi.fn(async () => ({
+            text: '[review patch] auth.ts: +12 / -3',
+            details: { agentId: 'child-1', name: 'reviewer', status: 'completed' as const },
+        }));
+        registerSubagentTool({ registerTool(value: any) { tool = value; } } as any, {
+            definitions: [{
+                name: 'reviewer',
+                description: 'Review evidence',
+                model: { provider: 'deepseek', id: 'reasoner' },
+                source: 'project',
+            }],
+            execute: vi.fn(),
+            control,
+        });
+        const result = await tool.execute('review-1', {
+            action: 'review', agentId: 'child-1',
+        }, undefined, undefined, {});
+        expect(control).toHaveBeenCalledWith(
+            'review',
+            expect.objectContaining({ action: 'review', agentId: 'child-1' }),
+            undefined,
+            expect.any(Function),
+        );
+        expect(result.content).toEqual([{ type: 'text', text: '[review patch] auth.ts: +12 / -3' }]);
+        expect(result.details).toMatchObject({ agentId: 'child-1', status: 'completed' });
+    });
+
     it('forwards named and ad-hoc parameters and returns the bounded child result', async () => {
         let tool: any;
         const execute = vi.fn(async (_invocation, _signal, progress) => {

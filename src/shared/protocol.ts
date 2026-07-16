@@ -345,7 +345,10 @@ export type LauncherSubagentStatus =
 export interface LauncherSubagentRun {
     agentId: string;
     name: string;
+    task: string;
     taskPreview: string;
+    result?: string;
+    resultPreview?: string;
     status: LauncherSubagentStatus;
     modelLabel?: string;
     currentTool?: string;
@@ -354,12 +357,8 @@ export interface LauncherSubagentRun {
     queueWaitMs?: number;
     turnCount: number;
     error?: string;
-    canStop: boolean;
-    canInspect: boolean;
-    canResume: boolean;
-    canSteer: boolean;
+    /** The only user-facing lifecycle action; orchestration controls stay with the parent agent. */
     canDismiss: boolean;
-    hasWorktree: boolean;
 }
 
 export interface LauncherSubagentSnapshot {

@@ -56,7 +56,7 @@ export const launcherLifecycleScenario: SmokeScenario = {
                 currentTool: row.currentTool,
                 activity: row.activity,
                 elapsedMs: row.elapsedMs,
-                canStop: row.canStop,
+                canDismiss: row.canDismiss,
             });
         }
 
@@ -70,7 +70,7 @@ export const launcherLifecycleScenario: SmokeScenario = {
         logger.assert('running-elapsed-time-projected', projected.runs[2].elapsedMs === 5_000, 5_000, projected.runs[2].elapsedMs);
         logger.assert('completed-elapsed-time-is-frozen', projected.runs[4].elapsedMs === 5_000, 5_000, projected.runs[4].elapsedMs);
         logger.assert('failed-error-is-retained', projected.runs[5].error === 'Simulated provider failure', 'Simulated provider failure', projected.runs[5].error);
-        logger.assert('smoke-rows-cannot-route-stop', projected.runs.every((row) => !row.canStop), true, projected.runs.map((row) => row.canStop));
+        logger.assert('smoke-rows-cannot-route-dismiss', projected.runs.every((row) => !row.canDismiss), true, projected.runs.map((row) => row.canDismiss));
         logger.assert('smoke-marker-keeps-rows-until-reset', projected.smokeSimulation === true, true, projected.smokeSimulation);
         logger.assert('toggle-state-projected', projected.enabled && !projected.toggleDisabled, 'enabled and interactive in live state', { enabled: projected.enabled, toggleDisabled: projected.toggleDisabled });
         logger.step('launcher-lifecycle-ready-for-inspection', {
@@ -100,7 +100,9 @@ function run(
         parentTabId: 'smoke-tab',
         name: agentId,
         source: 'invocation',
+        task: `Full deterministic orchestration task for ${agentId}.`,
         taskPreview: `Deterministic task for ${agentId}`,
+        ...(status === 'completed' ? { result: `Full deterministic result for ${agentId}.` } : {}),
         status,
         model,
         ...(currentTool ? { currentTool } : {}),

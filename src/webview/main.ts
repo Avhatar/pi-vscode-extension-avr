@@ -1957,6 +1957,10 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
         return renderErrorMessage(msg);
     }
 
+    if (role === 'custom' && msg.customType === 'pi-code.subagent-notification') {
+        return buildSubagentNotificationCard(msg);
+    }
+
     if (role === 'compactionSummary') {
         return buildCompactionSummaryCard(msg);
     }
@@ -2453,6 +2457,15 @@ function getToolLabel(name: string, args: any): string {
             return args?.pattern ? `Grep ${truncate(args.pattern, 50)}` : 'Search files';
         case 'todo':
             return 'Todo';
+        case 'subagent': {
+            const action = args?.action ?? 'spawn';
+            if (action === 'spawn') {
+                const task = typeof args?.task === 'string' ? args.task.replace(/\s+/g, ' ').trim() : '';
+                return task ? `Delegate: ${truncate(task, 80)}` : 'Delegate subagent task';
+            }
+            const agentId = typeof args?.agentId === 'string' ? ` ${truncate(args.agentId, 24)}` : '';
+            return `${action.charAt(0).toUpperCase()}${action.slice(1)} subagent${agentId}`;
+        }
         case 'web_search':
             return args?.query ? `Search: ${truncate(args.query, 50)}` : 'Web search';
         case 'fetch_content':
@@ -2599,6 +2612,22 @@ function getCommandInputText(args: any): string {
     return '';
 }
 
+function isSubagentTool(name: string): boolean {
+    return (name ?? '').toLowerCase() === 'subagent';
+}
+
+function getSubagentInputText(args: any): string {
+    if (!args || typeof args !== 'object') return '';
+    const action = args.action ?? 'spawn';
+    if (action === 'spawn' || action === 'resume') return typeof args.task === 'string' ? args.task : '';
+    if (action === 'send') return typeof args.message === 'string' ? args.message : '';
+    return [action, args.agentId].filter(Boolean).join(' ');
+}
+
+function getToolIoInputText(toolName: string, args: any): string {
+    return isSubagentTool(toolName) ? getSubagentInputText(args) : getCommandInputText(args);
+}
+
 // Heuristic: when a shell command is really a script interpreter one-liner
 // or an in-place text munger, surface that fact so the user can tell at a
 // glance that the model ran Python / Node / sed / etc. against their
@@ -2666,8 +2695,8 @@ function buildToolIoPreview(input: string, output: string): { input: string; out
     const inputLimit = Math.min(inputLines.length, Math.min(2, TOOL_IO_PREVIEW_LINE_LIMIT - 1));
     const outputLimit = Math.max(1, TOOL_IO_PREVIEW_LINE_LIMIT - inputLimit);
     return {
-        input: takeToolIoLines(inputLines, inputLimit),
-        output: takeToolIoLines(outputLines, outputLimit),
+        input: truncate(takeToolIoLines(inputLines, inputLimit), 320),
+        output: truncate(takeToolIoLines(outputLines, outputLimit), 500),
     };
 }
 
@@ -2988,6 +3017,26 @@ function findPrecedingAssistant(messages: any[], beforeIndex: number): any | nul
     return null;
 }
 
+function buildSubagentNotificationCard(msg: any): HTMLElement {
+    const details = msg.details ?? {};
+    const task = typeof details.task === 'string' ? details.task : '(task unavailable)';
+    const result = typeof details.result === 'string' ? details.result : extractText(msg);
+    const status = typeof details.status === 'string' ? details.status : 'completed';
+    const model = details.model?.provider && details.model?.id
+        ? `${details.model.provider}/${details.model.id}`
+        : undefined;
+    const label = getToolLabel('subagent', { task });
+    const headerHtml = `
+        ${getToolIconHtml('subagent')}
+        <span class="tool-name">${escHtml(label)}</span>
+        ${model ? `<span class="script-lang-chip">${escHtml(model)}</span>` : ''}
+        ${buildStatusHtml(status === 'failed' || status === 'cancelled' ? 'error' : 'done')}
+    `;
+    const wrapper = el('div', 'tool-card-wrapper');
+    wrapper.appendChild(buildToolIoCard(headerHtml, task, result));
+    return wrapper;
+}
+
 function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HTMLElement {
     const isError = msg.isError ?? false;
     const toolName = msg.toolName ?? '';
@@ -3001,25 +3050,27 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
     const iconHtml = getToolIconHtml(toolName ?? '');
     const isRead = nameLower === 'read';
     const isCommandLike = isCommandLikeTool(toolName, parsedArgs);
+    const isSubagent = isSubagentTool(toolName);
+    const isToolIo = isCommandLike || isSubagent;
     const filePath = parsedArgs?.path ?? parsedArgs?.file_path ?? '';
 
     const resultContent = extractText(msg);
-    const hasBody = !!(resultContent || isCommandLike) && !isRead;
+    const hasBody = !!(resultContent || isToolIo) && !isRead;
 
     const footer = buildToolFooter(msg, allMessages, msgIndex);
 
     if (hasBody) {
         const wrapper = el('div', 'tool-card-wrapper');
 
-        if (isCommandLike) {
-            const commandInput = getCommandInputText(parsedArgs);
+        if (isToolIo) {
+            const input = getToolIoInputText(toolName, parsedArgs);
             const headerHtml = `
-                ${getToolIconHtmlForCommand(toolName, commandInput)}
+                ${isSubagent ? getToolIconHtml(toolName) : getToolIconHtmlForCommand(toolName, input)}
                 <span class="tool-name">${escHtml(label)}</span>
-                ${buildScriptLangChipHtml(commandInput)}
+                ${isSubagent ? '' : buildScriptLangChipHtml(input)}
                 ${buildStatusHtml(isError ? 'error' : 'done')}
             `;
-            const details = buildToolIoCard(headerHtml, commandInput, resultContent);
+            const details = buildToolIoCard(headerHtml, input, resultContent);
             wrapper.appendChild(details);
         } else {
             const details = document.createElement('details');
@@ -3108,19 +3159,21 @@ function renderToolStart(event: any): void {
     const isRead = nameLower === 'read';
     const filePath = parsedArgs?.path ?? parsedArgs?.file_path ?? '';
     const isCommandLike = isCommandLikeTool(event.toolName, parsedArgs);
+    const isSubagent = isSubagentTool(event.toolName);
+    const isToolIo = isCommandLike || isSubagent;
 
-    if (isCommandLike) {
-        const input = getCommandInputText(parsedArgs);
+    if (isToolIo) {
+        const input = getToolIoInputText(event.toolName, parsedArgs);
         const headerHtml = `
-            ${getToolIconHtmlForCommand(event.toolName, input)}
+            ${isSubagent ? getToolIconHtml(event.toolName) : getToolIconHtmlForCommand(event.toolName, input)}
             <span class="tool-name">${escHtml(getToolLabel(event.toolName, parsedArgs))}</span>
-            ${buildScriptLangChipHtml(input)}
+            ${isSubagent ? '' : buildScriptLangChipHtml(input)}
             <span class="tool-status running">running</span>
         `;
         const details = buildToolIoCard(headerHtml, input, '');
         details.id = `tool-${event.toolCallId}`;
         details.dataset.toolName = event.toolName;
-        details.dataset.commandLike = 'true';
+        details.dataset.toolIo = 'true';
         details.dataset.toolInput = input;
         details.dataset.startedAt = String(Date.now());
         insertIntoStreamingContainer(details);
@@ -3156,7 +3209,7 @@ function renderToolUpdate(event: any): void {
     const text = extractToolResultText(event.partialResult);
     if (!text) return;
 
-    if (card.dataset.commandLike === 'true' || card.classList.contains('tool-io-card')) {
+    if (card.dataset.toolIo === 'true' || card.classList.contains('tool-io-card')) {
         liveToolOutputs.set(event.toolCallId, text);
         if (card instanceof HTMLDetailsElement) {
             refreshToolIoCard(card, card.dataset.toolInput ?? '', text);
@@ -3213,8 +3266,11 @@ function renderToolEnd(event: any): void {
     const toolName = (card as HTMLElement).dataset.toolName ?? '';
     const text = extractToolResultText(event.result) || liveToolOutputs.get(event.toolCallId) || '';
     liveToolOutputs.delete(event.toolCallId);
-    const isCommandLike = (card as HTMLElement).dataset.commandLike === 'true' || isCommandLikeTool(toolName, undefined);
-    const hasBody = !!(text || isCommandLike);
+    const isToolIo = (card as HTMLElement).dataset.toolIo === 'true'
+        || card.classList.contains('tool-io-card')
+        || isCommandLikeTool(toolName, undefined)
+        || isSubagentTool(toolName);
+    const hasBody = !!(text || isToolIo);
 
     if (hasBody) {
         const headerEl = card.querySelector('.tool-header') as HTMLElement | null;
@@ -3229,14 +3285,14 @@ function renderToolEnd(event: any): void {
         }
         const nameHtml = headerEl?.innerHTML ?? '';
 
-        if (isCommandLike && card instanceof HTMLDetailsElement && card.classList.contains('tool-io-card')) {
+        if (isToolIo && card instanceof HTMLDetailsElement && card.classList.contains('tool-io-card')) {
             refreshToolIoCard(card, (card as HTMLElement).dataset.toolInput ?? '', text);
             bindToolClickable();
             return;
         }
 
         let details: HTMLDetailsElement;
-        if (isCommandLike) {
+        if (isToolIo) {
             details = buildToolIoCard(nameHtml, (card as HTMLElement).dataset.toolInput ?? '', text, card.className.replace('tool-card', 'tool-card tool-expandable'));
         } else {
             details = document.createElement('details');

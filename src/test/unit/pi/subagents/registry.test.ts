@@ -145,4 +145,57 @@ describe('native subagent definition registry', () => {
         expect(registry.get('duplicate')).toBeUndefined();
         expect(snapshot.diagnostics.filter((diagnostic) => diagnostic.code === 'duplicate-name')).toHaveLength(2);
     });
+
+    it('prefers canonical project agent directory when it exists', async () => {
+        const fixture = createFixture();
+        const canonicalDir = path.join(fixture.cwd, '.agents', 'agents');
+        const legacyDir = path.join(fixture.cwd, '.pi', 'agents');
+        writeAgent(path.join(canonicalDir, 'review.md'), ['name: review', 'description: Canonical review']);
+        writeAgent(path.join(legacyDir, 'review.md'), ['name: review', 'description: Legacy review']);
+
+        const registry = new AgentRegistry({
+            cwd: fixture.cwd,
+            workspaceTrusted: true,
+            userAgentsDirectory: fixture.user,
+        });
+
+        await registry.reload();
+
+        expect(registry.get('review')).toMatchObject({ source: 'project', description: 'Canonical review' });
+    });
+
+    it('falls back to legacy project agent directory when canonical does not exist', async () => {
+        const fixture = createFixture();
+        const legacyDir = path.join(fixture.cwd, '.pi', 'agents');
+        writeAgent(path.join(legacyDir, 'review.md'), ['name: review', 'description: Legacy review']);
+
+        const registry = new AgentRegistry({
+            cwd: fixture.cwd,
+            workspaceTrusted: true,
+            userAgentsDirectory: fixture.user,
+        });
+
+        await registry.reload();
+
+        expect(registry.get('review')).toMatchObject({ source: 'project', description: 'Legacy review' });
+    });
+
+    it('never loads both defaults so same-name definitions cannot collide across canonical and legacy roots', async () => {
+        const fixture = createFixture();
+        const canonicalDir = path.join(fixture.cwd, '.agents', 'agents');
+        const legacyDir = path.join(fixture.cwd, '.pi', 'agents');
+        writeAgent(path.join(canonicalDir, 'canonical-only.md'), ['name: canonical-only', 'description: From canonical']);
+        writeAgent(path.join(legacyDir, 'also-legacy.md'), ['name: also-legacy', 'description: From legacy']);
+
+        const registry = new AgentRegistry({
+            cwd: fixture.cwd,
+            workspaceTrusted: true,
+            userAgentsDirectory: fixture.user,
+        });
+
+        await registry.reload();
+
+        expect(registry.get('canonical-only')).toBeDefined();
+        expect(registry.get('also-legacy')).toBeUndefined();
+    });
 });

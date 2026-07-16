@@ -8,6 +8,7 @@ import { getModelRegistry, getAvailableModels, findModel, refreshModelRegistry, 
 import { createCodexMonitorExtension } from './codex-monitor';
 import { getCodexUsageStore } from './codex-usage-store';
 import { getBundledPiPackagePaths } from './bundled-packages';
+import { getStandardSkillPaths } from './standard-resources';
 import { createClaudeContextExtension } from './claude-compat/context-extension';
 import { getRootClaudeFiles } from './claude-compat/context';
 import { retainNativePiContextFiles } from './claude-compat/boundary';
@@ -55,6 +56,8 @@ export class PiSessionManager {
     readonly onSubagentStateChanged = this._onSubagentStateChanged.event;
     private readonly _onSubagentMutation = new vscode.EventEmitter<any>();
     readonly onSubagentMutation = this._onSubagentMutation.event;
+    private readonly _onSubagentNotification = new vscode.EventEmitter<void>();
+    readonly onSubagentNotification = this._onSubagentNotification.event;
     private readonly _pendingBackgroundNotifications: Array<{ content: string; details: Record<string, unknown> }> = [];
     private _backgroundNotificationUnsubscribe?: () => void;
     private _subagentParentTabId = 'unbound';
@@ -261,6 +264,7 @@ export class PiSessionManager {
             .getConfiguration('pi-code')
             .get<boolean>('lsp.enabled', false);
         const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
+        const standardSkillPaths = getStandardSkillPaths(cwd);
         const claudeInfrastructure = await detectClaudeInfrastructure(cwd, {
             collectNestedClaudeFiles: true,
             collectNestedClaudeSkillFiles: true,
@@ -343,6 +347,9 @@ export class PiSessionManager {
             settingsManager,
             extensionFactories: factories,
             additionalExtensionPaths: bundledPackagePaths,
+            // Agent Skills recommends .agents/skills as the cross-client user
+            // and project location. Keep Pi's native .pi/skills discovery as a legacy path.
+            additionalSkillPaths: standardSkillPaths,
             // Pi natively treats CLAUDE.md as an AGENTS.md-equivalent system
             // context file. Always remove only Claude-authored files from that
             // unbounded path: active projects receive them through the bridge,
@@ -879,7 +886,7 @@ export class PiSessionManager {
     }
 
     private async _executeSubagentControl(
-        action: 'resume' | 'send' | 'stop' | 'inspect' | 'dismiss',
+        action: 'resume' | 'send' | 'stop' | 'inspect' | 'dismiss' | 'review' | 'apply' | 'cleanup',
         params: SubagentToolParams,
         signal: AbortSignal | undefined,
         onProgress: (details: SubagentToolDetails) => void,
@@ -933,6 +940,38 @@ export class PiSessionManager {
                 : transcript;
             return { text: bounded, details: detailsFor(existing) };
         }
+        if (action === 'review' || action === 'apply' || action === 'cleanup') {
+            if (['queued', 'starting', 'running', 'waiting_for_permission', 'retrying'].includes(existing.status)) {
+                throw new Error(`Subagent ${agentId} is still active; wait for it to finish before managing its worktree.`);
+            }
+            const isolation = this._writeIsolation;
+            const worktreePath = existing.isolationPath;
+            const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!isolation || !worktreePath || !workspace) {
+                throw new Error(`Preserved worktree for subagent ${agentId} is unavailable.`);
+            }
+            if (action === 'review') {
+                const diff = await isolation.getWorktreeDiff(worktreePath);
+                const maximum = 50 * 1024;
+                const bounded = diff.length > maximum
+                    ? `${diff.slice(0, maximum)}\n… worktree diff truncated; inspect the preserved worktree directly for additional context …`
+                    : diff;
+                return {
+                    text: bounded || 'The preserved worktree has no changes.',
+                    details: detailsFor(existing),
+                };
+            }
+            if (action === 'apply') {
+                await isolation.applyWorktree(workspace, worktreePath);
+                return {
+                    text: `Applied and staged subagent ${agentId}'s worktree patch. The worktree remains available until cleanup.`,
+                    details: detailsFor(existing),
+                };
+            }
+            await isolation.cleanupWorktree(workspace, worktreePath);
+            manager.clearIsolationPath(agentId);
+            return { text: `Removed subagent ${agentId}'s preserved worktree.`, details: detailsFor(existing) };
+        }
         if (!await manager.dismiss(agentId)) throw new Error(`Subagent ${agentId} cannot be dismissed while running.`);
         return { text: `Subagent ${agentId} was dismissed from retained runs.`, details: detailsFor(existing) };
     }
@@ -954,6 +993,9 @@ export class PiSessionManager {
         ].join('\n');
         const details = {
             agentId: run.agentId,
+            name: run.name,
+            task: run.task ?? run.taskPreview,
+            result: body,
             status: outcome,
             model: run.model,
             turnCount: run.turnCount,
@@ -970,8 +1012,9 @@ export class PiSessionManager {
 
     private _appendBackgroundSubagentNotification(content: string, details: Record<string, unknown>): void {
         this._sessionManager?.appendCustomMessageEntry(
-            'pi-code.subagent-notification', content, false, details,
+            'pi-code.subagent-notification', content, true, details,
         );
+        this._onSubagentNotification.fire();
     }
 
     private _flushBackgroundSubagentNotifications(): void {
@@ -1043,6 +1086,7 @@ export class PiSessionManager {
         this._session = undefined;
         this._onSubagentStateChanged.dispose();
         this._onSubagentMutation.dispose();
+        this._onSubagentNotification.dispose();
         this.events.clear();
     }
 

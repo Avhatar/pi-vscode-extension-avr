@@ -385,6 +385,48 @@ body {
 .subagent-row:hover {
     background: var(--vscode-list-hoverBackground);
 }
+.subagent-row-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: relative;
+    min-width: 0;
+    cursor: pointer;
+    list-style: none;
+}
+.subagent-row-summary::-webkit-details-marker { display: none; }
+.subagent-row-summary::before {
+    content: '›';
+    position: absolute;
+    margin-left: -1px;
+    color: var(--vscode-descriptionForeground);
+    transition: transform 0.12s ease;
+}
+.subagent-row[open] > .subagent-row-summary::before { transform: rotate(90deg); }
+.subagent-row-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 5px 0 0 18px;
+    padding-top: 5px;
+    border-top: 1px solid var(--vscode-widget-border, transparent);
+}
+.subagent-detail-label {
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.subagent-detail-value {
+    max-height: 180px;
+    margin: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--vscode-foreground);
+    font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+    font-size: 0.82em;
+}
 
 .subagent-row-header,
 .subagent-metadata {
@@ -393,6 +435,8 @@ body {
     gap: 5px;
     min-width: 0;
 }
+
+.subagent-row-header { padding-left: 14px; }
 
 .subagent-status-glyph {
     width: 13px;
