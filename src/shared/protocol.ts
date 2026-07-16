@@ -371,10 +371,19 @@ export interface LauncherSubagentSnapshot {
     smokeSimulation?: boolean;
 }
 
+export interface TurnNotificationSettings {
+    showPopup: boolean;
+    playSound: boolean;
+}
+
 export interface LauncherState {
     tabs: LauncherTabInfo[];
     recentSessions: LauncherSessionInfo[];
     historyCollapsed: boolean;
+    /** Global turn-completion effects. Both default to disabled. */
+    notificationSettings: TurnNotificationSettings;
+    /** Whether the Notifications panel is collapsed in the launcher. */
+    notificationsCollapsed: boolean;
     /** Active tab's todo snapshot. Absent when there is no active tab. */
     todos?: TodoSnapshot;
     /** Per-tab toggle state for the active tab. Absent when there is
@@ -424,6 +433,9 @@ export type LauncherClientMessage =
     | { type: 'openSession'; sessionPath: string }
     | { type: 'deleteSession'; sessionPath: string }
     | { type: 'setHistoryCollapsed'; collapsed: boolean }
+    | { type: 'setNotificationsCollapsed'; collapsed: boolean }
+    | { type: 'setNotificationShowPopup'; enabled: boolean }
+    | { type: 'setNotificationPlaySound'; enabled: boolean }
     | { type: 'setTodoEnabled'; enabled: boolean }
     | { type: 'setTodoCollapsed'; collapsed: boolean }
     | { type: 'setSubagentsEnabled'; enabled: boolean }
@@ -444,6 +456,7 @@ export type LauncherClientMessage =
     | { type: 'setToolsCollapsed'; collapsed: boolean }
     | { type: 'copyToolSelection' }
     | { type: 'pasteToolSelection' }
+    | { type: 'setToolSelectionAsProjectDefault' }
     | { type: 'openSettings' };
 
 export type LauncherServerMessage =

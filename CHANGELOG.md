@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.56.1] - 2026-07-16
+
+### Fixed
+- Show Popup now uses native Windows notifications outside VS Code instead of editor-local messages.
+
+## [0.56.0] - 2026-07-16
+
+### Added
+- Tool selections can now be saved as the project default so every newly created agent starts with the same enabled tools.
+- Turn completion can now show an optional popup and play the standard Windows notification sound, controlled from the new Notifications launcher panel.
+
 ## [0.55.1] - 2026-07-16
 
 ### Changed

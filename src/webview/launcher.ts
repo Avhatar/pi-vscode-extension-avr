@@ -19,6 +19,8 @@ let currentState: LauncherState = {
     tabs: [],
     recentSessions: [],
     historyCollapsed: true,
+    notificationSettings: { showPopup: false, playSound: false },
+    notificationsCollapsed: false,
     todoCollapsed: false,
     subagentsCollapsed: false,
     toolsCollapsed: true,
@@ -136,6 +138,7 @@ function render(): void {
     if (planMode) root.appendChild(planMode);
     const fileUndoView = renderFileUndoView();
     if (fileUndoView) root.appendChild(fileUndoView);
+    root.appendChild(renderNotifications());
     const todos = renderTodos();
     if (todos) root.appendChild(todos);
     const subagents = renderSubagents();
@@ -286,6 +289,87 @@ function renderFileUndoViewToggle(enabled: boolean): HTMLElement {
     wrap.appendChild(track);
 
     return wrap;
+}
+
+// ── Notifications section ──
+
+function setNotificationsCollapsed(collapsed: boolean): void {
+    currentState = { ...currentState, notificationsCollapsed: collapsed };
+    render();
+    vscode.postMessage({ type: 'setNotificationsCollapsed', collapsed });
+}
+
+function renderNotifications(): HTMLElement {
+    const collapsed = currentState.notificationsCollapsed === true;
+    const section = el('div', 'section notifications-section');
+    const heading = el('button', 'section-heading section-heading-button notifications-heading');
+    heading.type = 'button';
+    heading.setAttribute('aria-expanded', String(!collapsed));
+    heading.title = collapsed
+        ? 'Expand turn-completion notifications'
+        : 'Collapse turn-completion notifications';
+    heading.appendChild(el('span', 'section-chevron', collapsed ? '▶' : '▼'));
+    heading.appendChild(el('span', 'section-title', 'Notifications'));
+    heading.addEventListener('click', () => setNotificationsCollapsed(!collapsed));
+    section.appendChild(heading);
+
+    if (collapsed) return section;
+
+    const list = el('div', 'notifications-list');
+    list.appendChild(renderNotificationRow(
+        'Show Popup',
+        'Show a native Windows notification outside VS Code when an agent turn finishes',
+        currentState.notificationSettings.showPopup,
+        'setNotificationShowPopup',
+    ));
+    list.appendChild(renderNotificationRow(
+        'Play Sound',
+        'Play the standard Windows notification sound when an agent turn finishes',
+        currentState.notificationSettings.playSound,
+        'setNotificationPlaySound',
+    ));
+    section.appendChild(list);
+    return section;
+}
+
+function renderNotificationRow(
+    label: string,
+    description: string,
+    enabled: boolean,
+    messageType: 'setNotificationShowPopup' | 'setNotificationPlaySound',
+): HTMLElement {
+    const row = el('div', 'notification-row');
+    row.title = description;
+    row.appendChild(el('span', 'notification-label', label));
+
+    const toggleHost = el('span', 'todo-toggle-host');
+    const toggle = el('label', 'todo-toggle');
+    toggle.title = description;
+    const input = el('input', 'todo-toggle-input') as HTMLInputElement;
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.setAttribute('aria-label', label);
+    input.addEventListener('change', () => {
+        const next = input.checked;
+        currentState = {
+            ...currentState,
+            notificationSettings: {
+                ...currentState.notificationSettings,
+                ...(messageType === 'setNotificationShowPopup'
+                    ? { showPopup: next }
+                    : { playSound: next }),
+            },
+        };
+        render();
+        vscode.postMessage({ type: messageType, enabled: next });
+    });
+    toggle.appendChild(input);
+    const track = el('span', 'todo-toggle-track');
+    track.appendChild(el('span', 'todo-toggle-thumb'));
+    toggle.appendChild(track);
+    toggleHost.appendChild(toggle);
+    row.appendChild(toggleHost);
+    return row;
 }
 
 // ── Subagents section ──
@@ -758,9 +842,8 @@ function renderSessionRow(s: LauncherSessionInfo): HTMLElement {
 //
 // Under History. Lists every tool registered for the active chat with a
 // checkbox to toggle it on/off. Grouped by shared prefix so a project with
-// 100+ MCP tools (unity_*, blueprint_*, ...) stays browseable. Copy/Paste
-// buttons in the heading move the whole selection between chats/windows
-// via the system clipboard.
+// 100+ MCP tools (unity_*, blueprint_*, ...) stays browseable. Heading actions
+// copy/paste selections or save the current enabled list as the project default.
 
 function setToolsCollapsed(collapsed: boolean): void {
     currentState = { ...currentState, toolsCollapsed: collapsed };
@@ -927,12 +1010,13 @@ function renderTools(): HTMLElement | undefined {
     heading.type = 'button';
     heading.setAttribute('aria-expanded', String(!collapsed));
     heading.title = (collapsed ? 'Expand Tools' : 'Collapse Tools') +
-        ' — Choose which tools the agent can call in this chat. Fewer tools = clearer prompt for the model. Selection is per-chat; use Copy/Paste to move it between chats.';
+        ' — Choose which tools the agent can call in this chat. Fewer tools = clearer prompt for the model. Selection is per-chat; use Copy/Paste to move it or DefaultForProject for new agents in this project.';
     heading.appendChild(el('span', 'section-chevron', collapsed ? '▶' : '▼'));
     heading.appendChild(el('span', 'section-title', 'Tools'));
     heading.appendChild(el('span', 'section-count', `${enabledCount}/${sel.registered.length}`));
     heading.appendChild(renderToolsCopyButton());
     heading.appendChild(renderToolsPasteButton(sel.toggleDisabled));
+    heading.appendChild(renderToolsDefaultForProjectButton());
     heading.addEventListener('click', () => setToolsCollapsed(!collapsed));
     section.appendChild(heading);
 
@@ -1124,6 +1208,30 @@ function renderToolsCopyButton(): HTMLElement {
         btn.classList.add('tools-action-btn-flash');
         setTimeout(() => btn.classList.remove('tools-action-btn-flash'), 700);
         vscode.postMessage({ type: 'copyToolSelection' });
+    };
+    btn.addEventListener('click', invoke);
+    btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); invoke(e); }
+    });
+    return btn;
+}
+
+function renderToolsDefaultForProjectButton(): HTMLElement {
+    const btn = el('span', 'tools-action-btn');
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.title = 'DefaultForProject — use this chat\'s enabled tools for every new agent in this project';
+    btn.setAttribute('aria-label', 'DefaultForProject: save tool selection');
+    btn.innerHTML =
+        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<path d="M1.8 4.2h4l1.3 1.5h7.1v7.1a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2z"/>'
+        + '<path d="m6 10 1.4 1.4L10.8 8"/>'
+        + '</svg>';
+    const invoke = (e: Event): void => {
+        e.stopPropagation();
+        btn.classList.add('tools-action-btn-flash');
+        setTimeout(() => btn.classList.remove('tools-action-btn-flash'), 700);
+        vscode.postMessage({ type: 'setToolSelectionAsProjectDefault' });
     };
     btn.addEventListener('click', invoke);
     btn.addEventListener('keydown', (e) => {

@@ -9,6 +9,7 @@ import { ChatController } from '../controllers/chat-controller';
  */
 export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposable {
     private static readonly HISTORY_COLLAPSED_KEY = 'pi-code.launcher.historyCollapsed';
+    private static readonly NOTIFICATIONS_COLLAPSED_KEY = 'pi-code.launcher.notificationsCollapsed';
     private static readonly TODO_COLLAPSED_KEY = 'pi-code.launcher.todoCollapsed';
     private static readonly SUBAGENTS_COLLAPSED_KEY = 'pi-code.launcher.subagentsCollapsed';
     private static readonly TOOLS_COLLAPSED_KEY = 'pi-code.launcher.toolsCollapsed';
@@ -89,6 +90,16 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                 case 'setHistoryCollapsed':
                     await this._globalState.update(LauncherView.HISTORY_COLLAPSED_KEY, msg.collapsed);
                     await this._sendState();
+                    break;
+                case 'setNotificationsCollapsed':
+                    await this._globalState.update(LauncherView.NOTIFICATIONS_COLLAPSED_KEY, msg.collapsed);
+                    await this._sendState();
+                    break;
+                case 'setNotificationShowPopup':
+                    await this._controller.setNotificationShowPopup(msg.enabled);
+                    break;
+                case 'setNotificationPlaySound':
+                    await this._controller.setNotificationPlaySound(msg.enabled);
                     break;
                 case 'setTodoCollapsed':
                     await this._globalState.update(LauncherView.TODO_COLLAPSED_KEY, msg.collapsed);
@@ -193,6 +204,9 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                 case 'pasteToolSelection':
                     await this._controller.pasteActiveTabToolSelection();
                     break;
+                case 'setToolSelectionAsProjectDefault':
+                    await this._controller.setActiveTabToolSelectionAsProjectDefault();
+                    break;
                 case 'openSettings':
                     vscode.commands.executeCommand('pi-code.openSettings');
                     break;
@@ -211,6 +225,7 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
             state: {
                 ...state,
                 historyCollapsed: this._globalState.get<boolean>(LauncherView.HISTORY_COLLAPSED_KEY, true),
+                notificationsCollapsed: this._globalState.get<boolean>(LauncherView.NOTIFICATIONS_COLLAPSED_KEY, false),
                 todoCollapsed: this._globalState.get<boolean>(LauncherView.TODO_COLLAPSED_KEY, false),
                 subagentsCollapsed: this._globalState.get<boolean>(LauncherView.SUBAGENTS_COLLAPSED_KEY, false),
                 toolsCollapsed: this._globalState.get<boolean>(LauncherView.TOOLS_COLLAPSED_KEY, true),

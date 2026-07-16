@@ -48,7 +48,9 @@ describe('Protocol types', () => {
 
     it('launcher subagent lifecycle state and actions serialize', () => {
         const state: LauncherState = {
-            tabs: [], recentSessions: [], historyCollapsed: true, todoCollapsed: false,
+            tabs: [], recentSessions: [], historyCollapsed: true,
+            notificationSettings: { showPopup: false, playSound: false },
+            notificationsCollapsed: false, todoCollapsed: false,
             subagentsCollapsed: false, toolsCollapsed: true,
             subagents: {
                 enabled: true, toggleDisabled: false, activeCount: 1, queuedCount: 0,
@@ -61,6 +63,9 @@ describe('Protocol types', () => {
             },
         };
         const actions: LauncherClientMessage[] = [
+            { type: 'setNotificationShowPopup', enabled: true },
+            { type: 'setNotificationPlaySound', enabled: true },
+            { type: 'setNotificationsCollapsed', collapsed: true },
             { type: 'setSubagentsEnabled', enabled: true },
             { type: 'setSubagentsCollapsed', collapsed: false },
             { type: 'stopSubagent', agentId: 'child' },
@@ -72,13 +77,15 @@ describe('Protocol types', () => {
             { type: 'applySubagentWorktree', agentId: 'child' },
             { type: 'cleanupSubagentWorktree', agentId: 'child' },
             { type: 'dismissSubagentSmoke' },
+            { type: 'setToolSelectionAsProjectDefault' },
         ];
         expect(JSON.parse(JSON.stringify(state)).subagents.runs[0].modelLabel).toBe('deepseek/reasoner');
         expect(actions.map((action) => action.type)).toEqual([
+            'setNotificationShowPopup', 'setNotificationPlaySound', 'setNotificationsCollapsed',
             'setSubagentsEnabled', 'setSubagentsCollapsed', 'stopSubagent',
             'inspectSubagent', 'resumeSubagent', 'steerSubagent', 'dismissSubagent',
             'reviewSubagentWorktree', 'applySubagentWorktree', 'cleanupSubagentWorktree',
-            'dismissSubagentSmoke',
+            'dismissSubagentSmoke', 'setToolSelectionAsProjectDefault',
         ]);
     });
 
