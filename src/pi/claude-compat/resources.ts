@@ -472,12 +472,16 @@ export function renderClaudeInvocableResource(
         ? `\n\nCompatibility note: Claude runtime fields (${resource.ignoredRuntimeFields.join(', ')}) do not alter the current Pi identity, permissions, model, or tool contract.`
         : '';
     const toolCompatibility = formatClaudeToolCompatibility(resource.toolReferences, availableTools);
-    return wrapClaudeCompatibilityContent(
+    const content = wrapClaudeCompatibilityContent(
         `# Adapted Claude ${resource.kind}: ${resource.name}\n\n` +
         `Source: ${source.startsWith('..') ? resource.path.replace(/\\/g, '/') : source}\n` +
         `Resolve relative file references against: ${resource.baseDir.replace(/\\/g, '/')}\n\n${body}${unsupported}` +
         (toolCompatibility ? `\n\n---\n\n${toolCompatibility}` : ''),
     );
+    if (resource.kind !== 'skill') return content;
+
+    const location = resource.path.replace(/\\/g, '/');
+    return `<skill name="${resource.name}" location="${location}">\n${content}\n</skill>`;
 }
 
 function renderSkillCatalog(skills: ClaudeSkillResource[], cwd: string, heading: string): string {

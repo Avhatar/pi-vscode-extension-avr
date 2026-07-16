@@ -375,6 +375,43 @@ body[data-mode="panel"] .tab-strip,
     overflow: hidden;
 }
 
+.message-group-current-user.message-group-user-expanded {
+    position: relative;
+}
+
+.message-group-current-user.message-group-user-expanded .message-user {
+    max-height: none;
+    overflow: visible;
+}
+
+.prompt-expand-btn {
+    display: block;
+    width: 100%;
+    padding: 5px 12px;
+    border: none;
+    border-top: 1px solid var(--border);
+    background: var(--input-bg);
+    color: var(--link);
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.prompt-expand-btn[hidden] {
+    display: none;
+}
+
+.prompt-expand-btn:hover {
+    color: var(--vscode-textLink-activeForeground, var(--link));
+    text-decoration: underline;
+}
+
+.prompt-expand-btn:focus-visible {
+    outline: 1px solid var(--focus-border);
+    outline-offset: -1px;
+}
+
 .message-group-assistant {
     background: transparent;
     border: none;

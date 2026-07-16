@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { parseSkillBlock } from '@earendil-works/pi-coding-agent';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -92,7 +93,11 @@ describe('Claude skill and command resources', () => {
 
         const rendered = renderClaudeInvocableResource(resource, 'SearchBar React Vue', cwd, 'session-42', 'high');
 
-        expect(rendered).toContain('Remain the current Pi agent');
+        const skillBlock = parseSkillBlock(rendered);
+        expect(skillBlock?.name).toBe('migrate');
+        expect(skillBlock?.location).toBe(resource.path.replace(/\\/g, '/'));
+        expect(skillBlock?.userMessage).toBeUndefined();
+        expect(skillBlock?.content).toContain('Remain the current Pi agent');
         expect(rendered).toContain('Migrate SearchBar from React to Vue. First=SearchBar indexed=React all=SearchBar React Vue.');
         expect(rendered).toContain(`Skill=${resource.baseDir.replace(/\\/g, '/')}`);
         expect(rendered).toContain(`Project=${cwd.replace(/\\/g, '/')}`);
@@ -114,7 +119,9 @@ describe('Claude skill and command resources', () => {
         const command = indexClaudeResources(cwd, { userClaudeDirectory: user }).commands[0];
 
         expect(command.name).toBe('issue:fix');
-        expect(renderClaudeInvocableResource(command, '123', cwd)).toContain('Fix 123 with all input: 123. Missing=.');
+        const rendered = renderClaudeInvocableResource(command, '123', cwd);
+        expect(parseSkillBlock(rendered)).toBeNull();
+        expect(rendered).toContain('Fix 123 with all input: 123. Missing=.');
     });
 
     it('qualifies nested skills and activates them only for paths in their directory scope', () => {

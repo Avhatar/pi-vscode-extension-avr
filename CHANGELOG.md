@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.54.5] - 2026-07-16
+
+### Fixed
+- Long current prompts now show an explicit control to expand the full text and collapse it again.
+
+## [0.54.4] - 2026-07-16
+
+### Fixed
+- Adapted Claude skills now appear as compact skill invocations instead of exposing their full compatibility instructions as user-authored chat text.
+
+## [0.54.3] - 2026-07-16
+
 ### Changed
 - MCP calls in chat now use the dedicated MCP icon.
 - The extension package no longer includes unused legacy interface icons.

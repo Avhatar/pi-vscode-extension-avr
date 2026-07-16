@@ -32,6 +32,7 @@ const panelTabId: string | undefined = appEl?.dataset.tabId || undefined;
 const draftTexts = new Map<string, string>();
 const draftImages = new Map<string, ImageAttachment[]>();
 const draftFiles = new Map<string, FileAttachment[]>();
+const expandedUserPrompts = new Set<string>();
 let currentImageAttachments: ImageAttachment[] = [];
 let currentFileAttachments: FileAttachment[] = [];
 
@@ -674,6 +675,7 @@ function updateMessages(): void {
     }
 
     bindCopyButtons();
+    bindCurrentPromptToggles();
     bindCheckpointButtons();
     bindRedoButtons();
     bindDiffButtons();
@@ -1966,7 +1968,15 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
     }
 
     if (role === 'user') {
-        const group = el('div', `message-group-user${isStickyPrompt ? ' message-group-current-user' : ''}`);
+        const promptKey = `${state.activeTabId}:${index}`;
+        const isPromptExpanded = isStickyPrompt && expandedUserPrompts.has(promptKey);
+        const group = el(
+            'div',
+            `message-group-user${isStickyPrompt ? ' message-group-current-user' : ''}${isPromptExpanded ? ' message-group-user-expanded' : ''}`,
+        );
+        if (isStickyPrompt) {
+            group.dataset.promptKey = promptKey;
+        }
 
         const wrapper = el('div', `message message-${role}`);
         if (turnNumber !== undefined && !state.isStreaming) {
@@ -1997,6 +2007,14 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
             wrapper.appendChild(buildMessageImageGrid(images));
         }
         group.appendChild(wrapper);
+
+        if (isStickyPrompt) {
+            const expandBtn = el('button', 'prompt-expand-btn');
+            expandBtn.type = 'button';
+            expandBtn.hidden = !isPromptExpanded;
+            updatePromptToggleLabel(expandBtn, isPromptExpanded);
+            group.appendChild(expandBtn);
+        }
 
         const footer = buildMessageFooter(msg, index);
         if (footer) {
@@ -4159,6 +4177,39 @@ function bindTabEvents(): void {
             if (tabId) {
                 vscode.postMessage({ type: 'closeTab', tabId });
             }
+        });
+    });
+}
+
+function updatePromptToggleLabel(button: HTMLButtonElement, expanded: boolean): void {
+    button.textContent = expanded ? 'Collapse prompt' : 'Show full prompt';
+    button.title = expanded ? 'Collapse prompt' : 'Show the full prompt';
+    button.setAttribute('aria-expanded', String(expanded));
+}
+
+function bindCurrentPromptToggles(): void {
+    document.querySelectorAll<HTMLElement>('.message-group-current-user').forEach((group) => {
+        const message = group.querySelector<HTMLElement>('.message-user');
+        const button = group.querySelector<HTMLButtonElement>('.prompt-expand-btn');
+        if (!message || !button) return;
+
+        const expanded = group.classList.contains('message-group-user-expanded');
+        const isCollapsible = expanded || message.scrollHeight > message.clientHeight + 1;
+        group.classList.toggle('message-group-user-collapsible', isCollapsible);
+        button.hidden = !isCollapsible;
+        updatePromptToggleLabel(button, expanded);
+
+        if (button.dataset.bound) return;
+        button.dataset.bound = '1';
+        button.addEventListener('click', () => {
+            const shouldExpand = !group.classList.contains('message-group-user-expanded');
+            group.classList.toggle('message-group-user-expanded', shouldExpand);
+            const promptKey = group.dataset.promptKey;
+            if (promptKey) {
+                if (shouldExpand) expandedUserPrompts.add(promptKey);
+                else expandedUserPrompts.delete(promptKey);
+            }
+            updatePromptToggleLabel(button, shouldExpand);
         });
     });
 }
