@@ -2008,16 +2008,16 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
         }
         group.appendChild(wrapper);
 
+        const footer = buildMessageFooter(msg, index);
         if (isStickyPrompt) {
+            const promptFooter = footer ?? el('div', 'message-footer');
             const expandBtn = el('button', 'prompt-expand-btn');
             expandBtn.type = 'button';
             expandBtn.hidden = !isPromptExpanded;
             updatePromptToggleLabel(expandBtn, isPromptExpanded);
-            group.appendChild(expandBtn);
-        }
-
-        const footer = buildMessageFooter(msg, index);
-        if (footer) {
+            promptFooter.appendChild(expandBtn);
+            group.appendChild(promptFooter);
+        } else if (footer) {
             group.appendChild(footer);
         }
 

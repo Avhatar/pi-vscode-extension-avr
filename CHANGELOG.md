@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.55.1] - 2026-07-16
+
+### Changed
+- The prompt expansion control now shares the footer row with timestamp and token details instead of taking a separate line.
+
 ## [0.55.0] - 2026-07-16
 
 ### Added

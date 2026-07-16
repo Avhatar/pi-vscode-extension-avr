@@ -385,16 +385,16 @@ body[data-mode="panel"] .tab-strip,
 }
 
 .prompt-expand-btn {
-    display: block;
-    width: 100%;
-    padding: 5px 12px;
+    display: inline-block;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 0;
     border: none;
-    border-top: 1px solid var(--border);
-    background: var(--input-bg);
+    background: transparent;
     color: var(--link);
     font: inherit;
     font-size: 11px;
-    text-align: left;
+    text-align: right;
     cursor: pointer;
 }
 
@@ -503,6 +503,9 @@ body[data-mode="panel"] .tab-strip,
 
 /* ── Message footer (timestamp / stats) ── */
 .message-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 5px 12px;
     font-size: 11px;
     color: var(--muted);
