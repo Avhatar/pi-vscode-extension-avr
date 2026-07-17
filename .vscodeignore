@@ -13,6 +13,7 @@ CLAUDE.md
 README.md
 .dev-notes/**
 docs/**
+standalone/**
 user-reply.txt
 nul
 .claude/**

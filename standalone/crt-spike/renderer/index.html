@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pi CRT Terminal</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="bezel" role="main" aria-label="Pi CRT Terminal">
+    <div class="screen-content">
+      <header class="system-header" role="banner">
+        <span>PIP-OS v3.1 &mdash; PERSONAL INFO PROCESSOR</span>
+        <span id="status-clock" aria-label="Current time">--:--:--</span>
+      </header>
+
+      <div class="telemetry" role="status" aria-live="off" aria-label="Connection and system status">
+        <span id="status-connection" class="telemetry-item" aria-label="Connection status">● DISCONNECTED</span>
+        <span class="telemetry-separator" aria-hidden="true">//</span>
+        <span>MODEL <span id="status-model" class="telemetry-value" aria-label="Model">UNLINKED</span></span>
+        <span class="telemetry-separator" aria-hidden="true">//</span>
+        <span class="workspace-label">ROOT <span id="status-workspace" class="telemetry-value" aria-label="Workspace path">UNMOUNTED</span></span>
+      </div>
+
+      <section
+        id="transcript"
+        class="transcript"
+        role="log"
+        aria-live="polite"
+        aria-label="Conversation transcript"
+        tabindex="0"
+      ></section>
+
+      <footer class="prompt-area" role="contentinfo" aria-label="Message input">
+        <div class="prompt-row">
+          <label class="prompt-marker" for="prompt">&gt;</label>
+          <textarea
+            id="prompt"
+            class="prompt-input"
+            rows="2"
+            placeholder="TYPE A QUERY..."
+            aria-label="Prompt input. Press Enter to send, Shift+Enter for new line."
+            aria-describedby="prompt-hint"
+          ></textarea>
+        </div>
+        <span id="prompt-hint" class="sr-only">Press Enter to send, Shift+Enter for a new line.</span>
+
+        <div class="command-deck">
+          <div class="prompt-actions">
+            <button id="btn-send" class="terminal-button" type="button" aria-label="Send prompt">[ SEND ]</button>
+            <button id="btn-abort" class="terminal-button" type="button" disabled aria-label="Abort current operation">[ ABORT ]</button>
+          </div>
+          <div class="display-actions">
+            <button id="btn-toggle-fx" class="terminal-button" type="button" aria-pressed="false" aria-label="Toggle reduced effects">[ FX ]</button>
+            <button id="btn-toggle-mute" class="terminal-button" type="button" aria-pressed="false" aria-label="Toggle mute">[ MUTE ]</button>
+            <button id="btn-audio-init" class="terminal-button" type="button" aria-label="Enable audio">[ AUDIO ]</button>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="beam" aria-hidden="true"></div>
+    <div class="vignette" aria-hidden="true"></div>
+  </main>
+
+  <script src="app.ts" type="module"></script>
+</body>
+</html>

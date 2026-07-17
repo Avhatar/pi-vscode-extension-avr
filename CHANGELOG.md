@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Added an isolated portable Electron CRT desktop experience spike for testing a future standalone agent interface without shipping its files in the VS Code extension.
+
+### Changed
+- The CRT desktop spike now closely matches the original phosphor terminal reference with its bundled display font, curved screen, scanlines, rolling beam, glow, and terminal-style controls.
+
 ## [0.57.3] - 2026-07-17
 
 ### Fixed
