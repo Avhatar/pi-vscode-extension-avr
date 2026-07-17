@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Turn completion notifications now appear only after an explicitly submitted parent-agent task settles, not for internal or subagent lifecycle activity.
+
 ## [0.57.2] - 2026-07-17
 
 ### Fixed

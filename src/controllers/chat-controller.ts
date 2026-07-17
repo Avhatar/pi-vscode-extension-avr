@@ -5,7 +5,7 @@ import type {
     ClientMessage, ServerMessage, TabInfo,
     LauncherState, LauncherTabInfo, LauncherSessionInfo,
     CacheMode, CacheEffective, TodoSnapshot, LauncherSubagentSnapshot,
-    TurnNotificationSettings,
+    TurnNotificationSettings, ImageAttachment, FileAttachment,
 } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 import {
@@ -28,6 +28,7 @@ import type { SubagentRunStore } from '../pi/subagents/persistence';
 import type { WriteIsolationManager } from '../pi/subagents/write-isolation';
 import type { ChildToolFactoryRegistry } from '../pi/subagents/child-tools';
 import { routeSubagentMutation } from '../pi/subagents/mutations';
+import { TurnNotificationGate } from '../notifications/turn-notification-gate';
 import { TurnNotifier } from '../notifications/turn-notifier';
 import type { TurnCompletionOutcome } from '../shared/turn-notification';
 
@@ -56,6 +57,8 @@ interface TabState {
     /** Sum of completed agent turn durations in this tab, excluding idle gaps between turns. */
     totalTurnDurationMs: number;
     messageMeta: Map<number, MessageMeta>;
+    /** Allows native completion effects only for explicit user-submitted parent tasks. */
+    turnNotificationGate: TurnNotificationGate;
     hasNotification: boolean;
     queuedMessages: string[];
     /** Locally tracked streaming flag – the SDK's isStreaming lags behind agent_end. */
@@ -132,6 +135,7 @@ function makeTabState(
         agentStartTime: 0,
         totalTurnDurationMs: 0,
         messageMeta: new Map(),
+        turnNotificationGate: new TurnNotificationGate(),
         hasNotification: false,
         queuedMessages: [],
         isStreamingLocal: false,
@@ -1254,6 +1258,23 @@ export class ChatController implements vscode.Disposable {
 
     // ── Turn-completion notifications ──
 
+    private async _promptUserTask(
+        tab: TabState,
+        text: string,
+        images?: ImageAttachment[],
+        files?: FileAttachment[],
+    ): Promise<void> {
+        const armToken = tab.turnNotificationGate.arm();
+        try {
+            await tab.session.prompt(text, images, files);
+        } finally {
+            // If prompt preflight returned without agent_start, do not let this
+            // task arm leak into a later internal run. Token matching preserves
+            // a newer arm that may already belong to a queued user task.
+            tab.turnNotificationGate.cancelArm(armToken);
+        }
+    }
+
     getTurnNotificationSettings(): TurnNotificationSettings {
         return {
             showPopup: this._context.globalState.get<boolean>(
@@ -1362,6 +1383,7 @@ export class ChatController implements vscode.Disposable {
 
     private async _handleTabEvent(tab: TabState, event: any): Promise<void> {
         if (event.type === 'agent_start') {
+            tab.turnNotificationGate.onAgentStart();
             tab.streamingText = '';
             tab.streamingThinking = '';
             tab.isThinking = false;
@@ -1500,14 +1522,11 @@ export class ChatController implements vscode.Disposable {
             if (turnDurationMs > 0) {
                 tab.totalTurnDurationMs += turnDurationMs;
             }
-            this._turnNotifier.notify(
-                {
-                    tabName: tab.name,
-                    outcome: turnCompletionOutcome(lastAssistant),
-                    durationMs: turnDurationMs,
-                },
-                this.getTurnNotificationSettings(),
-            );
+            tab.turnNotificationGate.onAgentEnd({
+                tabName: tab.name,
+                outcome: turnCompletionOutcome(lastAssistant),
+                durationMs: turnDurationMs,
+            });
 
             const baseline = tab.codexTurnBaseline;
             const codexModelId = tab.codexTurnModelId;
@@ -1540,8 +1559,6 @@ export class ChatController implements vscode.Disposable {
             tab.lastTurnEndAt = turnEndAt;
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
-            } else {
-                tab.hasNotification = true;
             }
             this._persistTabs();
             this._onLauncherStateChanged.fire();
@@ -1569,7 +1586,24 @@ export class ChatController implements vscode.Disposable {
                     tab.diffManager.setCurrentTurn(turnIdx);
                     this._prepareCacheForRequest(tab);
                     this._logPromptToolState(tab, 'queued');
-                    tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(text));
+                    const queuedPrompt = await this._fileMentions.augmentPromptIfNeeded(text);
+                    void this._promptUserTask(tab, queuedPrompt).catch((error) => {
+                        this._outputChannel.appendLine(
+                            `[queued prompt error] ${error instanceof Error ? error.message : String(error)}`,
+                        );
+                    });
+                }
+            }
+        }
+
+        if (event.type === 'agent_settled') {
+            const completion = tab.turnNotificationGate.onAgentSettled();
+            if (completion) {
+                this._turnNotifier.notify(completion, this.getTurnNotificationSettings());
+                if (tab.id !== this._activeTabId) {
+                    tab.hasNotification = true;
+                    this._persistTabs();
+                    this._onLauncherStateChanged.fire();
                 }
             }
         }
@@ -1775,7 +1809,12 @@ export class ChatController implements vscode.Disposable {
                     tab.diffManager.setCurrentTurn(turnIdx);
                     this._prepareCacheForRequest(tab);
                     this._logPromptToolState(tab, 'prompt');
-                    await tab.session.prompt(await this._fileMentions.augmentPromptIfNeeded(promptText), msg.images, msg.files);
+                    await this._promptUserTask(
+                        tab,
+                        await this._fileMentions.augmentPromptIfNeeded(promptText),
+                        msg.images,
+                        msg.files,
+                    );
                     break;
                 }
                 case 'steer':
@@ -1880,6 +1919,7 @@ export class ChatController implements vscode.Disposable {
                     tab.isStreamingLocal = false;
                     tab.isCompacting = false;
                     tab.messageMeta.clear();
+                    tab.turnNotificationGate.reset();
                     tab.queuedMessages = [];
                     tab.lastTurnEndAt = 0;
                     tab.maxIdleGapMs = 0;
@@ -1904,6 +1944,7 @@ export class ChatController implements vscode.Disposable {
                     tab.isStreamingLocal = false;
                     tab.isCompacting = false;
                     tab.messageMeta.clear();
+                    tab.turnNotificationGate.reset();
                     tab.queuedMessages = [];
                     tab.lastTurnEndAt = 0;
                     tab.maxIdleGapMs = 0;
