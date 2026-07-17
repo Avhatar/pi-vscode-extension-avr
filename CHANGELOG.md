@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-07-16
+
+### Added
+- Pi Code settings can now opt in to using user-level Claude Code MCP servers without copying their definitions or credentials.
+
 ## [0.56.2] - 2026-07-16
 
 ### Security

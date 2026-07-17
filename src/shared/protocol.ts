@@ -92,6 +92,7 @@ export interface SettingsData {
     subagentsDefaultTimeoutMinutes: number;
     subagentsMaxConcurrentGlobal: number;
     subagentsMaxConcurrentPerChat: number;
+    mcpImportClaudeCode: boolean;
     lspEnabled: boolean;
     userMessageGlowColor: string;
     userMessageGlowOpacity: number;

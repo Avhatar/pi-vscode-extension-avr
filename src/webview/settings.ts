@@ -93,6 +93,8 @@ function render(data: SettingsData): void {
     container.appendChild(buildSection('Tool Execution', [
         buildTextarea('allowedTools', 'Allowed Tools', data.allowedTools.join(', '),
             'Comma-separated list of tool names to allow (e.g. read, grep, bash). Leave empty to allow all.'),
+        buildToggle('mcp.importClaudeCode', 'Import Claude Code MCP servers', data.mcpImportClaudeCode,
+            'Expose user-level MCP servers from ~/.claude.json to Pi Code through the bundled MCP adapter. Server definitions and credentials stay in Claude Code\'s config; Pi stores only a managed compatibility import. Existing manual imports are never removed. Applies to new sessions or after Reload Window.'),
         buildToggle('lsp.enabled', 'Language Server tools', data.lspEnabled,
             'Expose Language Server tools (find_references, …) to the agent. Each tool delegates to the active VS Code language extension (C#, rust-analyzer, Pylance, TypeScript, etc.). Turn off to work without LSP — the tools disappear from the system prompt entirely. Applies on new sessions or window reload.'),
     ]));

@@ -5,6 +5,7 @@ import { getAuthStorage, notifyAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { OAuthLoginFlow } from '../pi/oauth-login-flow';
 import { refreshModelRegistry } from '../pi/models';
+import { syncClaudeCodeMcpImport } from '../pi/mcp/claude-code-import';
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
 
@@ -104,11 +105,15 @@ export class SettingsPanel {
             }
         } catch (err: any) {
             this._post({ type: 'error', message: err.message ?? String(err) });
+            if (msg.type === 'updateSetting') await this._sendSettings();
         }
     }
 
     private async _updateSetting(key: string, value: any): Promise<void> {
         const config = vscode.workspace.getConfiguration('pi-code');
+        if (key === 'mcp.importClaudeCode') {
+            syncClaudeCodeMcpImport(value === true);
+        }
         await config.update(key, value, vscode.ConfigurationTarget.Global);
     }
 
@@ -143,6 +148,7 @@ export class SettingsPanel {
             subagentsDefaultTimeoutMinutes: config.get<number>('subagents.defaultTimeoutMinutes', 10),
             subagentsMaxConcurrentGlobal: config.get<number>('subagents.maxConcurrentGlobal', 4),
             subagentsMaxConcurrentPerChat: config.get<number>('subagents.maxConcurrentPerChat', 2),
+            mcpImportClaudeCode: config.get<boolean>('mcp.importClaudeCode', false),
             lspEnabled: config.get<boolean>('lsp.enabled', false),
             userMessageGlowColor: config.get<string>('userMessageGlowColor', '#00aaff'),
             userMessageGlowOpacity: config.get<number>('userMessageGlowOpacity', 40),

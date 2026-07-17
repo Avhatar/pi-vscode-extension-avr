@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.56.2",
+  "version": "0.57.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -223,6 +223,11 @@
           "minimum": 1,
           "maximum": 8,
           "description": "Maximum child agents from one parent chat occupying global execution slots."
+        },
+        "pi-code.mcp.importClaudeCode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Import user-level Claude Code MCP servers into Pi Code through pi-mcp-adapter. This adds a managed `claude-code` compatibility import to Pi's global MCP config without copying server definitions or credentials. Existing manual imports are preserved. Changes apply to new chat sessions or after Reload Window."
         },
         "pi-code.lsp.enabled": {
           "type": "boolean",

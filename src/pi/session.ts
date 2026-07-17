@@ -22,6 +22,7 @@ import { createTodoExtension } from './todo/extension';
 import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
 import { createLspExtension } from './lsp/extension';
+import { syncClaudeCodeMcpImport } from './mcp/claude-code-import';
 import { installEditToolPreflight } from './tools/preflight-edit';
 import { createToolSelectionGuard } from './tool-selection-guard';
 import { isContextUsageEstimated } from './context-usage';
@@ -261,9 +262,21 @@ export class PiSessionManager {
         const todoGuidelines = parseTodoPromptGuidelines(
             vscode.workspace.getConfiguration('pi-code').get<string>('todo.promptGuidelines'),
         );
-        const lspEnabled = vscode.workspace
-            .getConfiguration('pi-code')
-            .get<boolean>('lsp.enabled', false);
+        const piCodeConfig = vscode.workspace.getConfiguration('pi-code');
+        const lspEnabled = piCodeConfig.get<boolean>('lsp.enabled', false);
+        const importClaudeCodeMcp = piCodeConfig.get<boolean>('mcp.importClaudeCode', false);
+        try {
+            const result = syncClaudeCodeMcpImport(importClaudeCodeMcp);
+            if (result.changed) {
+                this._outputChannel.appendLine(
+                    `Claude Code MCP import ${importClaudeCodeMcp ? 'enabled' : 'disabled'} in ${result.path}.`,
+                );
+            }
+        } catch (error) {
+            this._outputChannel.appendLine(
+                `Claude Code MCP import sync failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        }
         const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
         const standardSkillPaths = getStandardSkillPaths(cwd);
         const claudeInfrastructure = await detectClaudeInfrastructure(cwd, {
