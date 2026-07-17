@@ -74,16 +74,52 @@ Keep repository guidance portable across Pi Code, Codex, Cursor, Gemini CLI, Git
 - **Compatibility shims:** Vendor files may only bridge to canonical resources. `CLAUDE.md` intentionally contains `@AGENTS.md`; it must not accumulate independent policy. Do not duplicate skill bodies or agent instructions across vendor directories because copies drift.
 - **Runtime capability remains local:** Instructions never grant tools, permissions, models, trust, or isolation. A harness must map canonical intent onto capabilities it actually provides and report unsupported constraints rather than silently weakening them.
 
-### Current project skills
+### Skill discovery and routing
 
-Harnesses with native `.agents/skills` discovery use the standard metadata automatically. Other harnesses must use this catalog for routing and read the matching `SKILL.md` before acting.
+Harnesses with native `.agents/skills` discovery use the standard metadata automatically. Other harnesses must use the catalogs below for routing. Before entering a matching workflow, read its canonical `SKILL.md` completely and follow supporting files only when that skill directs it.
+
+- Match both the trigger and the target scope; a useful-sounding skill from another domain is not automatically applicable.
+- Load only the skills needed for the current phase. Do not turn every task into the longest possible workflow.
+- When several skills apply, follow the composition rules below rather than running them as unrelated checklists.
+- Skills refine the workflow but never override this `AGENTS.md`, grant tools or agents, relax isolation, or transfer parent-owned review and verification to a child.
+- Do not re-run a completed gate without cause: for example, an approved design proceeds to planning or execution rather than returning to brainstorming.
+
+#### Pi Code project workflows
+
+These skills apply to work on this TypeScript VS Code extension. The `pi-code-` prefix avoids collisions with user-level skills loaded alongside project resources.
 
 | Skill | Invoke when | Canonical file |
 |---|---|---|
+| `pi-code-brainstorming` | A feature or technical problem has unresolved requirements, meaningful design choices, or cross-boundary architecture trade-offs. Skip it for exact, approved, read-only, or repository-answerable work. | `.agents/skills/pi-code-brainstorming/SKILL.md` |
+| `pi-code-writing-plans` | An approved design must become an ordered, file-specific, verifiable implementation plan. Do not use it to reopen design or begin implementation unless execution was also requested. | `.agents/skills/pi-code-writing-plans/SKILL.md` |
+| `pi-code-executing-plans` | Executing an approved Pi Code implementation, migration, documentation, or investigation plan while preserving order, scope, and verification gates. | `.agents/skills/pi-code-executing-plans/SKILL.md` |
+| `pi-code-systematic-debugging` | Investigating a bug, unexpected behavior, flaky test, performance regression, activation/build/package failure, or F5-versus-installed-VSIX difference. Establish root cause before fixing. | `.agents/skills/pi-code-systematic-debugging/SKILL.md` |
+| `pi-code-test-driven-development` | Implementing testable behavior or a regression fix where an automated test or deterministic guard can fail before production code changes. | `.agents/skills/pi-code-test-driven-development/SKILL.md` |
+| `pi-code-dispatching-parallel-agents` | A task has at least two independently understandable, verifiable, non-overlapping slices. Use it as an independence gate, not a reason to manufacture parallel work. | `.agents/skills/pi-code-dispatching-parallel-agents/SKILL.md` |
+| `pi-code-requesting-code-review` | A meaningful or risky change is ready for independent review before merge, release, or handoff. | `.agents/skills/pi-code-requesting-code-review/SKILL.md` |
+| `pi-code-code-reviewer` | Performing an independent review: requirement compliance first, then Pi Code implementation quality and production readiness. | `.agents/skills/pi-code-code-reviewer/SKILL.md` |
+| `pi-code-receiving-code-review` | Evaluating or implementing review feedback; verify each technical claim and push back with evidence when needed. | `.agents/skills/pi-code-receiving-code-review/SKILL.md` |
+| `pi-code-verification-before-completion` | Before claiming work is fixed, complete, passing, performant, merge-ready, package-ready, or release-ready. Unavailable checks remain explicitly unverified. | `.agents/skills/pi-code-verification-before-completion/SKILL.md` |
 | `build-deploy` | The user asks to build, compile, package, deploy, install, create a VSIX, bump/release a version, or supplies the documented standalone test-deploy shortcut. | `.agents/skills/build-deploy/SKILL.md` |
 | `commit` | The user asks to inspect/finalize uncommitted work, draft a commit message, or commit changes. | `.agents/skills/commit/SKILL.md` |
 
-Keep this catalog synchronized when project skills are added, renamed, or removed.
+#### Workflow composition
+
+- **Unclear feature:** `pi-code-brainstorming` -> user approval -> `pi-code-writing-plans` when a standalone plan is requested or needed -> `pi-code-executing-plans` when executing that approved plan.
+- **Exact or already-approved feature:** skip brainstorming. Use `pi-code-test-driven-development` for each testable behavior and execute directly, or use the planning/execution pair when scope warrants an explicit plan.
+- **Defect or failing check:** start with `pi-code-systematic-debugging`; after identifying the cause, use `pi-code-test-driven-development` or the nearest deterministic regression guard before the focused fix.
+- **Parallel work:** apply `pi-code-dispatching-parallel-agents` only after decomposition proves independence; all root subagent isolation and parent-ownership rules still apply.
+- **Review:** for meaningful or risky changes, use `pi-code-requesting-code-review`; the reviewer follows `pi-code-code-reviewer`. Process findings with `pi-code-receiving-code-review`, then re-review materially changed areas.
+- **Completion:** apply `pi-code-verification-before-completion` before final status claims. Verification is proportional to the claim; compile, unit, integration, manual F5, and installed-VSIX checks prove different boundaries.
+- **Deployment and commit:** `build-deploy` and `commit` are explicit user-intent workflows, not automatic final steps. Never package, install, bump a version, or commit merely because implementation finished.
+
+The parent agent always retains integration, final diff review, fresh verification, package/release acceptance, and user-facing reporting.
+
+#### Wiki skill package
+
+`.agents/packages/wiki-skill-package/` is a deployment bundle, not an active project skill. It lives outside `.agents/skills/` because skill discovery is recursive and its nested `files/.claude/skills/` tree is a target template that must not auto-load in this repository. Read the package's `AGENTS.md` and then `AGENT_DEPLOY.md` only when the user explicitly asks to deploy the wiki system to a named target repository. Do not invoke its templated `wiki-read` or `wiki-maintain` workflows until the package has been deployed to that target and its wiki exists. During deployment, preserve the target's existing instructions and content, require explicit consent before overwriting, and do not treat generated `.claude/` copies as replacements for a target repository's `.agents/` source-of-truth policy.
+
+Keep these catalogs and package-routing notes synchronized when project skills or workflow bundles are added, renamed, or removed.
 
 ## Subagent Orchestration
 

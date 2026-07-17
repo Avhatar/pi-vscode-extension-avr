@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Inspect all uncommitted changes (modified + untracked), decide on commit grouping, verify CHANGELOG and version, draft a concise commit message in the project's existing style, iterate with the user until approved, then commit. Triggers when the user asks to commit, write a commit message, finalize changes, закоммить, коммит, or wrap up work.
+description: Inspect all uncommitted changes (modified + untracked), decide on commit grouping, verify CHANGELOG and version, draft a concise commit message in the project's existing style, iterate with the user until approved, then commit. Use when the user asks to commit, write a commit message, finalize changes, create a commit, or wrap up work.
 ---
 
 # Commit — Pi Code VS Code Extension
@@ -97,8 +97,8 @@ and, if non-obvious, the *why*.
 
 ### 5. Show and iterate
 
-Present the draft to the user inside a fenced block. Ask "ок?" or
-"закоммитить?". If they push back, propose another variant (shorter, longer,
+Present the draft to the user inside a fenced block and ask whether it is
+ready to commit. If they push back, propose another variant (shorter, longer,
 different framing) and ask again. Repeat until they approve.
 
 Do **not** stage or commit before approval.

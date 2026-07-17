@@ -123,13 +123,14 @@ Run from the project root.
 npm run compile
 ```
 
-Runs `esbuild.js` producing two bundle targets:
+Runs `esbuild.js` producing the extension-host bundle and three browser webview bundles:
 
 | Target | Entry | Output | Environment |
 |--------|-------|--------|-------------|
 | Extension host | `src/extension.ts` | `out/extension.js` | Node.js, CJS |
 | Webview chat UI | `src/webview/main.ts` | `out/webview/main.js` | Browser, IIFE |
 | Webview settings | `src/webview/settings.ts` | `out/webview/settings.js` | Browser, IIFE |
+| Webview launcher | `src/webview/launcher.ts` | `out/webview/launcher.js` | Browser, IIFE |
 
 Pi SDK packages are **externalized** — not bundled, resolved at runtime by VS Code.
 
