@@ -7,6 +7,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.57.3] - 2026-07-17
+
 ### Fixed
 - Turn completion notifications now appear only after an explicitly submitted parent-agent task settles, not for internal or subagent lifecycle activity.
 - Scrolling upward while the agent is working now reliably pauses auto-follow instead of snapping the chat back to the bottom.
