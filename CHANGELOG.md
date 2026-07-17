@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.57.2] - 2026-07-17
+
+### Fixed
+- Chat now keeps your reading position when a turn finishes instead of jumping to the latest message after you scroll up.
+- Expanded chat details, diff previews, queued messages, and sidebar subagent rows now stay open during agent-driven refreshes.
+
 ## [0.57.1] - 2026-07-17
 
 ### Changed

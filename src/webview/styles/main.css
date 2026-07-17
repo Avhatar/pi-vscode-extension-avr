@@ -343,7 +343,6 @@ body[data-mode="panel"] .tab-strip,
     flex: 1;
     overflow-y: auto;
     padding: 0 0 12px 0;
-    scroll-behavior: smooth;
 }
 .messages::-webkit-scrollbar { width: 6px; }
 .messages::-webkit-scrollbar-track { background: transparent; }

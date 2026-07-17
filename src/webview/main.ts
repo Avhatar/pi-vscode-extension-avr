@@ -33,6 +33,7 @@ const draftTexts = new Map<string, string>();
 const draftImages = new Map<string, ImageAttachment[]>();
 const draftFiles = new Map<string, FileAttachment[]>();
 const expandedUserPrompts = new Set<string>();
+const foldoutStates = new Map<string, boolean>();
 let currentImageAttachments: ImageAttachment[] = [];
 let currentFileAttachments: FileAttachment[] = [];
 
@@ -378,6 +379,7 @@ function applyStateSync(s: SerializedAgentState): void {
         renderAttachmentPreview();
         updateInputArea();
         userHasScrolled = false;
+        pendingPinnedScrollTop = null;
         scrollToBottom(true);
         updateScrollButton();
     } else {
@@ -422,6 +424,10 @@ function handleAgentEvent(event: any): void {
             state.streamingText = '';
             state.streamingThinking = '';
             state.isThinking = false;
+            if (userHasScrolled) {
+                const messages = document.getElementById('messages');
+                pendingPinnedScrollTop = messages?.scrollTop ?? null;
+            }
             dismissSteerToast();
             // Any chip still marked `.running` here means the SDK never fired
             // `tool_execution_end` for it before the turn wrapped up. Sweep
@@ -589,6 +595,7 @@ function render(): void {
     bindScrollListener();
     scrollBtn.addEventListener('click', () => {
         userHasScrolled = false;
+        pendingPinnedScrollTop = null;
         scrollToBottom(true);
         updateScrollButton();
     });
@@ -604,9 +611,53 @@ function render(): void {
     scrollToBottom();
 }
 
+function assignMessageFoldoutKeys(message: HTMLElement, sourceIndex: number): void {
+    const prefix = `${state.activeTabId}:message:${sourceIndex}`;
+    message.querySelectorAll<HTMLDetailsElement>('details').forEach((details, index) => {
+        if (!details.dataset.foldoutKey) {
+            details.dataset.foldoutKey = `${prefix}:details:${index}`;
+        }
+    });
+    message.querySelectorAll<HTMLElement>('.diff-view-expandable').forEach((view, index) => {
+        if (!view.dataset.foldoutKey) {
+            view.dataset.foldoutKey = `${prefix}:diff:${index}`;
+        }
+    });
+}
+
+function captureDetailsFoldoutState(root: ParentNode): void {
+    root.querySelectorAll<HTMLDetailsElement>('details[data-foldout-key]').forEach((details) => {
+        foldoutStates.set(details.dataset.foldoutKey!, details.open);
+    });
+}
+
+function bindDetailsFoldoutState(root: ParentNode): void {
+    root.querySelectorAll<HTMLDetailsElement>('details[data-foldout-key]:not([data-foldout-bound])').forEach((details) => {
+        const key = details.dataset.foldoutKey!;
+        const saved = foldoutStates.get(key);
+        if (saved !== undefined) details.open = saved;
+        details.dataset.foldoutBound = '1';
+        details.addEventListener('toggle', () => {
+            foldoutStates.set(key, details.open);
+        });
+    });
+}
+
+function toolFoldoutKey(toolCallId: string): string {
+    return `${state.activeTabId}:tool:${toolCallId}`;
+}
+
 function updateMessages(): void {
     const container = document.getElementById('messages');
     if (!container) return;
+
+    captureDetailsFoldoutState(container);
+
+    // Rebuilding finalized messages can make Chromium's scroll anchoring jump
+    // to the live-answer anchor at the bottom. Keep the exact viewport when
+    // the user has opted out of following the latest output.
+    const pinnedScrollTop = pendingPinnedScrollTop
+        ?? (userHasScrolled ? container.scrollTop : null);
 
     const streamingEl = document.getElementById('streaming-message');
     const spacerEl = container.querySelector('.messages-spacer');
@@ -656,6 +707,7 @@ function updateMessages(): void {
                 role === 'user' ? userMsgCount : undefined,
                 role === 'user' && displayIndex === lastUserMessageDisplayIndex,
             );
+            assignMessageFoldoutKeys(msgEl, sourceIndex);
             if (dimming) {
                 msgEl.classList.add('dimmed');
             }
@@ -674,6 +726,7 @@ function updateMessages(): void {
         }
     }
 
+    bindDetailsFoldoutState(container);
     bindCopyButtons();
     bindCurrentPromptToggles();
     bindCheckpointButtons();
@@ -682,6 +735,13 @@ function updateMessages(): void {
     bindDiffPreviewToggles();
     bindToolClickable();
     markRetriedValidationErrorsForAllChanges();
+
+    if (pinnedScrollTop !== null) {
+        container.scrollTop = pinnedScrollTop;
+        lastScrollTop = container.scrollTop;
+        userHasScrolled = true;
+        pendingPinnedScrollTop = null;
+    }
 }
 
 function markRetriedValidationErrorsForAllChanges(): void {
@@ -1410,8 +1470,10 @@ function updateQueuedMessageBanner(): void {
         return;
     }
 
+    const wasVisible = section.style.display !== 'none' && section.childElementCount > 0;
+    const wasOpen = section.open;
     section.style.display = '';
-    section.open = true;
+    section.open = wasVisible ? wasOpen : true;
 
     const count = state.queuedMessages.length;
     section.innerHTML = `
@@ -1799,6 +1861,7 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
         const diffView = el('div', `diff-view${renderedDiff.rowCount > 3 ? ' diff-view-expandable diff-view-collapsed' : ''}`);
         if (renderedDiff.rowCount > 3) {
             diffView.dataset.moreRows = String(renderedDiff.rowCount - 3);
+            diffView.dataset.foldoutKey = `${toolFoldoutKey(change.toolCallId)}:diff`;
             diffView.title = 'Click to expand the full diff';
         }
         diffView.innerHTML = renderedDiff.html;
@@ -3095,11 +3158,13 @@ function buildToolResultCard(msg: any, allMessages: any[], msgIndex: number): HT
                 ${buildStatusHtml(isError ? 'error' : 'done')}
             `;
             const details = buildToolIoCard(headerHtml, input, resultContent);
+            if (toolCallId) details.dataset.foldoutKey = toolFoldoutKey(toolCallId);
             wrapper.appendChild(details);
         } else {
             const details = document.createElement('details');
             details.className = 'tool-card tool-expandable';
             details.dataset.toolName = toolName;
+            if (toolCallId) details.dataset.foldoutKey = toolFoldoutKey(toolCallId);
 
             details.innerHTML = `
                 <summary class="tool-header">
@@ -3197,10 +3262,12 @@ function renderToolStart(event: any): void {
         const details = buildToolIoCard(headerHtml, input, '');
         details.id = `tool-${event.toolCallId}`;
         details.dataset.toolName = event.toolName;
+        details.dataset.foldoutKey = toolFoldoutKey(event.toolCallId);
         details.dataset.toolIo = 'true';
         details.dataset.toolInput = input;
         details.dataset.startedAt = String(Date.now());
         insertIntoStreamingContainer(details);
+        bindDetailsFoldoutState(container);
         ensureToolTimerLoop();
         scrollToBottom();
         return;
@@ -3263,6 +3330,7 @@ function renderToolEnd(event: any): void {
             details.className = 'tool-card tool-expandable';
             details.id = card.id;
             details.dataset.toolName = toolName;
+            details.dataset.foldoutKey = toolFoldoutKey(event.toolCallId);
             details.innerHTML = `
                 <summary class="tool-header">
                     ${getToolIconHtml(toolName)}
@@ -3276,6 +3344,8 @@ function renderToolEnd(event: any): void {
             details.appendChild(body);
             details.open = true;
             card.replaceWith(details);
+            const streamingContainer = document.getElementById('streaming-message');
+            if (streamingContainer) bindDetailsFoldoutState(streamingContainer);
             bindToolClickable();
             return;
         }
@@ -3335,9 +3405,12 @@ function renderToolEnd(event: any): void {
 
         details.id = card.id;
         details.dataset.toolName = toolName;
+        details.dataset.foldoutKey = toolFoldoutKey(event.toolCallId);
         if ((card as HTMLElement).dataset.filepath) details.dataset.filepath = (card as HTMLElement).dataset.filepath;
 
         card.replaceWith(details);
+        const streamingContainer = document.getElementById('streaming-message');
+        if (streamingContainer) bindDetailsFoldoutState(streamingContainer);
         bindToolClickable();
     } else {
         const statusEl = card.querySelector('.tool-status');
@@ -3677,6 +3750,7 @@ function looksLikeAuthError(message: string): boolean {
 function updateStreamingUI(): void {
     const container = document.getElementById('streaming-message');
     if (!container) return;
+    captureDetailsFoldoutState(container);
     // Wipe transient children (tool cards, preparing placeholder, diff cards)
     // but keep the persistent #answer-draft node so streamed answer text does
     // not disappear when stateSync fires mid-turn on message_end / turn_end.
@@ -4259,14 +4333,22 @@ function bindDiffButtons(): void {
 }
 
 function bindDiffPreviewToggles(): void {
-    document.querySelectorAll('.diff-view-expandable:not([data-toggle-bound])').forEach((view) => {
+    document.querySelectorAll<HTMLElement>('.diff-view-expandable:not([data-toggle-bound])').forEach((view) => {
+        const foldoutKey = view.dataset.foldoutKey;
+        const saved = foldoutKey ? foldoutStates.get(foldoutKey) : undefined;
+        if (saved !== undefined) {
+            view.classList.toggle('diff-view-collapsed', !saved);
+            view.classList.toggle('diff-view-expanded', saved);
+        }
         view.setAttribute('data-toggle-bound', '1');
         view.addEventListener('click', () => {
             view.classList.toggle('diff-view-collapsed');
             view.classList.toggle('diff-view-expanded');
-            (view as HTMLElement).title = view.classList.contains('diff-view-collapsed')
-                ? 'Click to expand the full diff'
-                : 'Click to collapse the diff preview';
+            const expanded = view.classList.contains('diff-view-expanded');
+            if (foldoutKey) foldoutStates.set(foldoutKey, expanded);
+            view.title = expanded
+                ? 'Click to collapse the diff preview'
+                : 'Click to expand the full diff';
         });
     });
 }
@@ -4353,6 +4435,7 @@ function sendMessage(): void {
     draftTexts.delete(state.activeTabId);
     clearAttachments();
     userHasScrolled = false;
+    pendingPinnedScrollTop = null;
     updateScrollButton();
     vscode.postMessage({ type: 'prompt', text, images, files });
 }
@@ -5013,6 +5096,7 @@ function tryParseJSON(s: string): any {
 let userHasScrolled = false;
 let isProgrammaticScroll = false;
 let lastScrollTop = 0;
+let pendingPinnedScrollTop: number | null = null;
 
 function scrollToBottom(force = false): void {
     if (userHasScrolled && !force) return;
@@ -5056,18 +5140,25 @@ function bindScrollListener(): void {
     // produce a scroll event on the container.
     messages.addEventListener('scroll', () => {
         const currentScrollTop = messages.scrollTop;
+        if (pendingPinnedScrollTop !== null) {
+            // agent_end temporarily removes the live draft before stateSync
+            // finalizes it. Ignore that DOM-driven clamp until updateMessages()
+            // restores the captured reading position.
+            lastScrollTop = currentScrollTop;
+            return;
+        }
         if (isProgrammaticScroll) {
             isProgrammaticScroll = false;
             lastScrollTop = currentScrollTop;
             updateScrollButton();
             return;
         }
-        if (currentScrollTop < lastScrollTop - 1) {
+        if (isNearBottom()) {
+            userHasScrolled = false;
+        } else if (currentScrollTop < lastScrollTop - 1) {
             // User moved the viewport up — pin their position, stop
             // auto-following streaming updates.
             userHasScrolled = true;
-        } else if (isNearBottom()) {
-            userHasScrolled = false;
         }
         lastScrollTop = currentScrollTop;
         updateScrollButton();

@@ -27,10 +27,11 @@ let currentState: LauncherState = {
 };
 let stateReceivedAt = Date.now();
 
-// UI-local state for the Tools panel (search filter + per-group collapse).
-// Not persisted — resets on window reload, but survives launcher re-renders.
+// UI-local state for controls rebuilt by render(). Not persisted across a
+// window reload, but stable during agent-driven launcher refreshes.
 let toolsSearch = '';
 const toolGroupsCollapsed = new Map<string, boolean>();
+const subagentRowsOpen = new Map<string, boolean>();
 
 window.addEventListener('message', (event) => {
     const msg = event.data as LauncherServerMessage;
@@ -91,6 +92,9 @@ interface RenderPreservation {
 
 function captureRenderState(): RenderPreservation {
     const root = document.getElementById('launcher');
+    root?.querySelectorAll<HTMLDetailsElement>('.subagent-row[data-agent-id]').forEach((row) => {
+        subagentRowsOpen.set(row.dataset.agentId!, row.open);
+    });
     const subagentsBody = root?.querySelector('.subagent-list') as HTMLElement | null;
     const body = root?.querySelector('.tools-body') as HTMLElement | null;
     const search = root?.querySelector('.tools-search') as HTMLInputElement | null;
@@ -397,6 +401,10 @@ function setSubagentsCollapsed(collapsed: boolean): void {
 function renderSubagents(): HTMLElement | undefined {
     const snapshot: LauncherSubagentSnapshot | undefined = currentState.subagents;
     if (!snapshot) return undefined;
+    const currentIds = new Set(snapshot.runs.map(run => run.agentId));
+    for (const key of subagentRowsOpen.keys()) {
+        if (!currentIds.has(key)) subagentRowsOpen.delete(key);
+    }
     const collapsed = currentState.subagentsCollapsed === true;
 
     const section = el('div', 'section subagents-section');
@@ -482,6 +490,11 @@ function renderSubagentsToggle(snapshot: LauncherSubagentSnapshot): HTMLElement 
 function renderSubagentRow(run: LauncherSubagentRun): HTMLElement {
     const row = document.createElement('details');
     row.className = `subagent-row subagent-row-${run.status}`;
+    row.dataset.agentId = run.agentId;
+    row.open = subagentRowsOpen.get(run.agentId) ?? false;
+    row.addEventListener('toggle', () => {
+        subagentRowsOpen.set(run.agentId, row.open);
+    });
 
     const summary = el('summary', 'subagent-row-summary');
     const header = el('div', 'subagent-row-header');
