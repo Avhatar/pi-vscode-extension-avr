@@ -5094,7 +5094,6 @@ function tryParseJSON(s: string): any {
 }
 
 let userHasScrolled = false;
-let isProgrammaticScroll = false;
 let lastScrollTop = 0;
 let pendingPinnedScrollTop: number | null = null;
 
@@ -5102,14 +5101,10 @@ function scrollToBottom(force = false): void {
     if (userHasScrolled && !force) return;
     const messages = document.getElementById('messages');
     if (!messages) return;
-    const target = messages.scrollHeight;
-    // Only mark the assignment as programmatic if it will actually move the
-    // scrollbar. Otherwise no scroll event fires and the flag would poison
-    // the next real user-initiated scroll.
-    if (messages.scrollTop < target - messages.clientHeight - 1) {
-        isProgrammaticScroll = true;
-    }
-    messages.scrollTop = target;
+    messages.scrollTop = messages.scrollHeight;
+    // scrollTop assignments are synchronous. Updating the baseline here
+    // prevents the later scroll event from being confused with user input.
+    lastScrollTop = messages.scrollTop;
 }
 
 function isNearBottom(): boolean {
@@ -5134,10 +5129,23 @@ function bindScrollListener(): void {
 
     lastScrollTop = messages.scrollTop;
 
-    // Detect user-initiated scroll intent from the scroll event itself.
-    // This catches every input method — wheel, trackpad, keyboard (PageUp,
-    // arrows, Home), scrollbar drag, click-on-track — because they all
-    // produce a scroll event on the container.
+    // Record upward wheel/trackpad intent before Chromium applies the scroll.
+    // Streaming deltas can otherwise reach scrollToBottom() between input and
+    // the delayed scroll event, making the viewport appear pinned.
+    messages.addEventListener('wheel', (event) => {
+        if (event.deltaY < 0) {
+            userHasScrolled = true;
+            updateScrollButton();
+        }
+    }, { passive: true });
+
+    messages.addEventListener('touchstart', () => {
+        userHasScrolled = true;
+        updateScrollButton();
+    }, { passive: true });
+
+    // Scroll direction covers keyboard navigation, scrollbar dragging, and
+    // click-on-track in addition to wheel and touch input.
     messages.addEventListener('scroll', () => {
         const currentScrollTop = messages.scrollTop;
         if (pendingPinnedScrollTop !== null) {
@@ -5147,18 +5155,13 @@ function bindScrollListener(): void {
             lastScrollTop = currentScrollTop;
             return;
         }
-        if (isProgrammaticScroll) {
-            isProgrammaticScroll = false;
-            lastScrollTop = currentScrollTop;
-            updateScrollButton();
-            return;
-        }
-        if (isNearBottom()) {
-            userHasScrolled = false;
-        } else if (currentScrollTop < lastScrollTop - 1) {
-            // User moved the viewport up — pin their position, stop
-            // auto-following streaming updates.
+        if (currentScrollTop < lastScrollTop - 1) {
+            // Upward movement always wins, including the first few pixels
+            // inside the near-bottom threshold. This lets the user escape
+            // auto-follow mode while new content is still arriving.
             userHasScrolled = true;
+        } else if (isNearBottom()) {
+            userHasScrolled = false;
         }
         lastScrollTop = currentScrollTop;
         updateScrollButton();
