@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.57.1] - 2026-07-17
+
+### Changed
+- Marketplace and repository guides now document subagents, turn notifications, project tool defaults, Claude Code MCP imports, current web tools, all available settings, and the correct source-build requirements.
+
 ## [0.57.0] - 2026-07-16
 
 ### Added

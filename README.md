@@ -17,7 +17,7 @@ Two motivations drove the split from upstream:
 
 **1. Claude Code-style editor-tab panels instead of a sidebar chat.** Upstream renders the entire chat UI inside the activity-bar sidebar — one chat at a time, fixed to one side of the window. This fork moves each chat into an editor-area `WebviewPanel`, so chats behave exactly like editor tabs: split horizontally or vertically, drag into another editor group, move into a separate window, restore across `Reload Window`. The activity-bar sidebar is repurposed as a thin **launcher** with one-click *New chat* / *Settings* buttons and collapsible session history; active chats stay in the editor tab strip instead of being duplicated in the sidebar. Every chat panel also has its own toolbar with *New chat* and *History* so you don't need to keep flipping back to the sidebar.
 
-**2. Bundled Pi extensions instead of `pi install`.** Upstream relies on the user running `pi install npm:<package>` and managing `~/.pi/` themselves to enable Pi ecosystem tools (web search, content fetching, etc.). This fork ships selected Pi extensions (currently `pi-web-access` and `pi-mcp-adapter`) **inside the VSIX** as ordinary npm dependencies and wires them into Pi's resource loader via `additionalExtensionPaths`. The extension never writes to `~/.pi/`, never invokes `pi install` at activation, and works fully offline after install. The tradeoff is that bundled extension versions are pinned per Pi Code release — see [AGENTS.md](AGENTS.md#bundled-pi-extensions) for the rationale and the procedure for adding a new bundled extension.
+**2. Bundled Pi extensions instead of `pi install`.** Upstream relies on the user running `pi install npm:<package>` and managing `~/.pi/` themselves to enable Pi ecosystem tools (web search, content fetching, etc.). This fork ships selected Pi extensions (currently `pi-web-access` and `pi-mcp-adapter`) **inside the VSIX** as ordinary npm dependencies and wires them into Pi's resource loader via `additionalExtensionPaths`. Pi Code never invokes `pi install` at activation and needs no global install step. By default it does not modify Pi's global configuration; the optional Claude Code MCP import writes only a managed compatibility reference while server definitions and credentials remain in Claude Code's config. Bundled extension versions are pinned per Pi Code release — see [AGENTS.md](AGENTS.md#bundled-pi-extensions) for the rationale and the procedure for adding a new bundled extension.
 
 In addition to those two structural changes, the fork has accumulated a number of features not present upstream at the time of forking:
 
@@ -30,6 +30,8 @@ In addition to those two structural changes, the fork has accumulated a number o
 - Bundled MCP adapter that picks up servers from `.mcp.json` / `.pi/mcp.json` automatically, with no `pi install` step.
 - Per-chat **Plan Mode**: persistent prompt guidance asks the agent to study and outline change-heavy work before executing once the approach is clear, without restricting tools or adding execution phases.
 - Opt-in **Language Server tools** (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) that pull semantic information from the active VS Code language extension instead of relying on grep heuristics.
+- Opt-in **subagent orchestration** with named or ad-hoc child agents, exact cross-provider model selection, foreground/background execution, bounded concurrency, and Git-worktree isolation for parallel writers.
+- Optional **Windows turn-completion notifications** with native toast and standard system-sound toggles in the launcher.
 - Per-chat persistent **ToDo** that the agent maintains across `/compact` and across reloads, with per-tab enable/disable.
 - The launcher persists a session history on disk and lets you delete entries individually; opening an old entry reopens it as a fresh editor panel.
 
@@ -47,7 +49,7 @@ Run multiple independent agent sessions in parallel — each chat panel has its 
 Every tool the agent invokes (file reads, writes, edits, shell commands, glob/grep/find searches, web tools, LSP semantic queries) is rendered as an expandable card showing arguments and results in real time. Tool rows sit on a vertical timeline rail that connects the icons on the left, with hover tooltips on every icon describing what the tool does.
 
 ### Tool Selection Panel
-The launcher lists every tool exposed to the active chat with per-tool, per-category, and per-prefix enable/disable controls. A filter searches names and descriptions, while Copy/Paste transfers a curated selection between chats or VS Code windows. Selection is isolated per chat and persists across `Reload Window`.
+The launcher lists every tool exposed to the active chat with per-tool, per-category, and per-prefix enable/disable controls. A filter searches names and descriptions, while Copy/Paste transfers a curated selection between chats or VS Code windows. **DefaultForProject** saves the active selection as the default for every new agent in the current workspace. Selection is isolated per chat and persists across `Reload Window`.
 
 ### Inline Diffs & File Change Tracking
 File modifications made by the agent are tracked automatically. Review unified diffs inline in the chat or open them in VS Code's native diff editor. Undo individual file changes or all changes at once.
@@ -65,10 +67,10 @@ Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle
 Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
 
 ### Settings Page with OAuth Login
-A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API keys, default model and thinking level, ToDo behaviour, file-mention indexing, and chat appearance. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
+A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API keys, default model and thinking level, ToDo behaviour, subagents, Claude Code MCP import, file-mention indexing, and chat appearance. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
 
 ### Bundled Pi Extensions
-Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `code_search`, `fetch_content`, and `get_search_content` tools — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Uses Exa MCP by default with no API keys required; optionally reads `~/.pi/web-search.json` for Exa, Perplexity, or Gemini keys to switch to a different backend. The bundled `pi-mcp-adapter` package wires up MCP servers declared in `.mcp.json` or `.pi/mcp.json` so their tools appear automatically in the agent's tool list. No `pi install` step required.
+Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `fetch_content`, and `get_search_content` — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Search uses OpenAI when suitable and available, then falls back through Exa, Brave, Parallel, Tavily, Perplexity, and Gemini; Exa MCP works without an API key. The bundled `pi-mcp-adapter` discovers project servers declared in `.mcp.json` or `.pi/mcp.json`. Enable `pi-code.mcp.importClaudeCode` to add a managed reference to user-level Claude Code MCP servers; definitions and credentials stay in Claude Code's config. No `pi install` step is required.
 
 ### Workspace File Mentions
 Type `@` in the chat input to open a suggestion menu that fuzzy-matches files from the opened workspace. Selected mentions are highlighted in blue inside the input and sent to the agent as path references it can choose to inspect — this is **not** an attachment mechanism, file contents are not inlined or uploaded. Indexing respects VS Code's standard search excludes plus a built-in pattern set (skip `node_modules`, build artefacts, lockfiles), and can be further tuned via the `pi-code.fileMentions.*` settings or a workspace-local `.pi/file-mentions.json`.
@@ -104,11 +106,19 @@ Each tool accepts either positional addressing (`file`, `line`, `column`) or by-
 ### Per-Turn and Cumulative Timing
 Each assistant message footer shows the elapsed wall-clock time for that turn plus the cumulative active time across the chat (idle gaps excluded), alongside token usage.
 
+### Windows Turn-Completion Notifications
+The launcher provides **Show Popup** and **Play Sound** toggles, both off by default. On Windows, they can show a native toast outside VS Code and play the standard notification sound when an agent turn finishes. On unsupported platforms no popup or sound is produced, and an explanatory notice is logged.
+
 ### Message Queuing & Steering
 While the agent is streaming, you can **queue** follow-up messages that will be sent automatically once the current generation finishes. Queued messages appear in a collapsible list above the input with inline edit and delete controls. You can also **steer** the agent mid-generation (Ctrl+Enter) to inject guidance into the current response without waiting.
 
 ### Slash Commands & Skills
 Type `/` in the input to trigger a slash-command menu. Cross-client Agent Skills are discovered from `~/.agents/skills/` and workspace `.agents/skills/`; Pi Code also retains legacy `~/.pi/agent/skills/` and workspace `.pi/skills/` discovery. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` appear alongside them, with nested skills activated only in their directory scope.
+
+### Subagents
+Enable the per-chat **Subagents** toggle to let the parent agent delegate bounded work through a single `subagent` tool. Reusable agents are discovered from user and trusted-project `.agents/agents/*.md` files, compatible Claude agent resources, and bundled packages; the parent can also create temporary ad-hoc roles. Children use fresh context, policy-approved tools, and exact configured `provider/id` models, and can run in the foreground or background under global and per-chat concurrency limits.
+
+The launcher's **Subagents** section shows live model, status, activity, turns, elapsed time, and expandable task/result details. Background writers require extension-owned Git worktrees; the parent orchestrator reviews the patch, applies accepted changes, verifies them, and cleans up without transferring lifecycle decisions to the user. Delegation is off by default and configurable through `pi-code.subagents.*` settings.
 
 ### Prompt Cache Retention
 A `cache: …` chip in the chat footer controls prompt cache retention for future requests. Choose `short`, `long`, or `auto`; in `auto`, Pi Code uses provider-aware heuristics. OpenAI-style providers and other free-write cache backends prefer `long`, while Anthropic-style providers switch to `long` only after a meaningful idle gap or a large cached prefix. Providers that do not expose cache controls show the chip faded as informational.
@@ -124,11 +134,11 @@ User messages in the chat have a subtle colored glow outline for visual distinct
 
 ## Prerequisites
 
-This extension embeds the [Pi coding agent](https://github.com/badlogic/pi-mono) SDK as an npm dependency. You do **not** need to install Pi separately, but you do need the following on your system before building or running the extension.
+This extension embeds the [Pi coding agent](https://github.com/badlogic/pi-mono) SDK as an npm dependency, so you do **not** need to install Pi separately. Marketplace/VSIX users need a supported VS Code version and provider credentials; source builds additionally require Node.js.
 
-### 1. Node.js 18+
+### 1. Node.js 22.19+ (source builds only)
 
-Install Node.js `18` or later. Any of the following will work:
+Marketplace/VSIX users do not need to install Node.js separately because VS Code supplies the extension-host runtime. To build Pi Code from source, install Node.js `22.19.0` or later, as required by the bundled Pi SDK. Any of the following will work:
 
 - [Official installer](https://nodejs.org/)
 - A version manager such as [nvm](https://github.com/nvm-sh/nvm), [fnm](https://github.com/Schniz/fnm), or [mise](https://mise.jdx.dev/)
@@ -136,7 +146,7 @@ Install Node.js `18` or later. Any of the following will work:
 Verify with:
 
 ```bash
-node --version   # v18.x or later
+node --version   # v22.19.0 or later
 npm --version
 ```
 
@@ -254,8 +264,17 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable prompt-guided Plan Mode for new chats by default; it does not restrict tools or require a separate execution phase |
 | `pi-code.fileUndoView.defaultEnabled` | `boolean` | `false` | Show the changed-files Undo / Redo / Review bar by default for new chats |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat persistent ToDo for new chats by default |
-| `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines injected into the system prompt for the ToDo tool |
+| `pi-code.subagents.defaultEnabled` | `boolean` | `false` | Expose subagent delegation to new chats by default; each chat keeps its own opt-in state |
+| `pi-code.subagents.defaultModel` | `string` | `""` | Default child model in canonical `provider/id` format; empty uses the agent definition and then the parent model |
+| `pi-code.subagents.allowedModels` | `string[]` | `[]` | Exact `provider/id` allowlist for child agents; empty permits every configured model |
+| `pi-code.subagents.allowInvocationModelOverride` | `boolean` | `true` | Allow the parent orchestrator to select an exact child provider/model per delegation |
+| `pi-code.subagents.defaultMaxTurns` | `number` | `30` | Default maximum child turns (1–100) |
+| `pi-code.subagents.defaultTimeoutMinutes` | `number` | `10` | Default child timeout in minutes (1–120) |
+| `pi-code.subagents.maxConcurrentGlobal` | `number` | `4` | Maximum children running across all Pi Code chats (1–16) |
+| `pi-code.subagents.maxConcurrentPerChat` | `number` | `2` | Maximum children from one parent chat occupying execution slots (1–8) |
+| `pi-code.mcp.importClaudeCode` | `boolean` | `false` | Add a managed import for user-level Claude Code MCP servers without copying definitions or credentials |
 | `pi-code.lsp.enabled` | `boolean` | `false` | Expose Language Server tools (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) to the agent. Off by default — the tools are not registered and add nothing to the system prompt. Requires a language extension for each file's language (C#, rust-analyzer, Pylance, etc.). |
+| `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines injected into the system prompt for the ToDo tool |
 | `pi-code.userMessageGlowColor` | `string` | `#00aaff` | Color of the subtle glow outline around user messages in the chat |
 | `pi-code.userMessageGlowOpacity` | `number` | `40` | Opacity of the glow around user messages, as a percentage (0–100) |
 
@@ -273,8 +292,9 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 │  │ (WebviewView)      │   │ (WebviewPanel per chat)        │   │
 │  │ - new / settings   │   │ - chat UI (main.ts + CSS)       │   │
 │  │ - history          │   │ - timeline rail + tooltips      │   │
-│  │ - plan mode toggle │   │ - diffs, checkpoints, queue     │   │
-│  │ - per-tab ToDo     │   │                                  │   │
+│  │ - notifications    │   │ - diffs, checkpoints, queue     │   │
+│  │ - plan / ToDo      │   │ - subagent task/result cards    │   │
+│  │ - tools/subagents  │   │                                  │   │
 │  └─────────┬──────────┘   └──────────────┬──────────────────┘   │
 │            │                              │                      │
 │            └──────────────┬───────────────┘                      │
@@ -316,7 +336,10 @@ API keys are managed through the settings page and stored via VS Code's SecretSt
 - **DiffManager** ([src/providers/diff.ts](src/providers/diff.ts)) tracks file changes from `edit`/`write` tool calls and provides unified diffs via a `pi-diff:` virtual document scheme.
 - **CheckpointManager** ([src/providers/checkpoint.ts](src/providers/checkpoint.ts)) snapshots file state per turn for rollback and redo.
 - **Codex usage plumbing** ([src/pi/codex-monitor.ts](src/pi/codex-monitor.ts) + [src/pi/codex-usage-store.ts](src/pi/codex-usage-store.ts)) captures subscription windows from Codex response headers and exposes them to the chat footer.
-- **Claude infrastructure compatibility bridge** ([src/pi/claude-compat/](src/pi/claude-compat/)) activates only in workspaces with detected Claude infrastructure. It delivers bounded instructions/rules, adapts project/user skills and commands, activates nested skills with directory-qualified names such as `/apps/web:deploy`, and resolves Claude tool vocabulary through the active Pi registry (`Read` → `read`, `Glob` → `find`, `mcp__server__tool` → a direct `server_tool` or the existing `mcp` proxy). Mappings never grant permissions or add tools; Claude-only model, agent, hook, shell, and permission behavior remains diagnosed and non-emulated. Project `.mcp.json` continues to be owned exclusively by the bundled `pi-mcp-adapter`.
+- **Claude infrastructure compatibility bridge** ([src/pi/claude-compat/](src/pi/claude-compat/)) activates only in workspaces with detected Claude infrastructure. It delivers bounded instructions/rules, adapts project/user skills and commands, activates nested skills with directory-qualified names such as `/apps/web:deploy`, and resolves Claude tool vocabulary through the active Pi registry (`Read` → `read`, `Glob` → `find`, `mcp__server__tool` → a direct `server_tool` or the existing `mcp` proxy). Mappings never grant permissions or add tools; unsupported Claude-only behavior remains diagnosed and non-emulated. Project `.mcp.json` continues to be owned exclusively by the bundled `pi-mcp-adapter`.
+- **Subagent orchestration** ([src/pi/subagents/](src/pi/subagents/)) discovers neutral, Claude-compatible, bundled, and ad-hoc child definitions; enforces model/tool/concurrency policy; persists child transcripts; and manages foreground/background execution plus shared-workspace or Git-worktree write isolation.
+- **Claude Code MCP import** ([src/pi/mcp/](src/pi/mcp/)) can opt in to a managed reference to user-level Claude Code servers without copying definitions or credentials.
+- **Turn notifier** ([src/notifications/turn-notifier.ts](src/notifications/turn-notifier.ts)) emits optional native Windows completion toasts and the standard notification sound from launcher preferences.
 - **Per-chat ToDo** ([src/pi/todo/](src/pi/todo/)) provides a persistent, per-tab task list the agent manages via a built-in `todo` tool. The system includes a reducer-based task graph ([task-graph.ts](src/pi/todo/task-graph.ts)), replay-based persistence ([replay.ts](src/pi/todo/replay.ts)), a state store ([store.ts](src/pi/todo/store.ts)), and the tool schema ([tool.ts](src/pi/todo/tool.ts)). The launcher sidebar renders the active tab's ToDo with a per-tab enable/disable toggle.
 - **Workspace file mentions** ([src/workspace/file-mentions.ts](src/workspace/file-mentions.ts)) indexes the opened workspace for `@` file mention suggestions in the chat input, supporting fuzzy matching, configurable excludes, and cached file lists.
 - **Provider registry** ([src/shared/providers.ts](src/shared/providers.ts)) defines the supported API-key providers (Anthropic, OpenAI, Google, Qwen, Z.ai, and others). Custom provider sync ([src/pi/models.ts](src/pi/models.ts)) keeps the model registry up to date. Qwen-specific logic lives in [src/pi/providers/qwen.ts](src/pi/providers/qwen.ts).
@@ -341,6 +364,8 @@ src/
 │   ├── events.ts                     # Event router for agent events
 │   ├── bundled-packages.ts           # Pi extensions shipped inside the VSIX
 │   ├── claude-compat/                 # Conditionally bridges Claude project infrastructure
+│   ├── mcp/                           # Optional Claude Code MCP compatibility import
+│   ├── subagents/                     # Child-agent registry, runtime, persistence, and isolation
 │   ├── codex-monitor.ts              # Codex subscription header capture
 │   ├── codex-usage-store.ts          # Per-window usage state (5h / weekly)
 │   ├── providers/
@@ -355,6 +380,8 @@ src/
 │       ├── task-graph.ts             # Dependency graph (blockedBy) and invariants
 │       ├── invariants.ts             # Task graph invariant checks
 │       └── response-envelope.ts      # Tool response envelope types
+├── notifications/
+│   └── turn-notifier.ts              # Optional Windows turn-completion effects
 ├── providers/
 │   ├── launcher-view.ts              # Activity-bar sidebar (launcher)
 │   ├── chat-panel.ts                 # Editor-area WebviewPanel per chat

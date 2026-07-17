@@ -11,7 +11,7 @@ A visual VS Code wrapper around the [Pi coding agent](https://pi.dev/) — built
 
 - **Claude Code-style ergonomics.** Chats are normal editor tabs — split, drag into another editor group, move into a separate window, restore across `Reload Window`. Multiple chats run in parallel, each with its own history, file changes, and checkpoints.
 - **Bring your own model.** Works with the major AI providers via API key, or sign in with your existing subscription — no separate setup, no second invoice.
-- **Web access and MCP servers out of the box.** Web search, page/PDF/YouTube fetch, and any MCP server you declare in `.mcp.json` work immediately after install. No CLI step, no global `~/.pi/` writes.
+- **Web access and MCP servers out of the box.** Web search, page/PDF/YouTube fetch, and any MCP server you declare in `.mcp.json` work immediately after install. No CLI step — bundled extensions load from the VSIX without a global install step. Optionally import your Claude Code MCP servers with one checkbox.
 - **Plan-before-execute.** Optional Plan Mode gives the agent persistent guidance to study change-heavy tasks, outline an approach, and then execute once the plan is clear — while answering simple questions directly.
 - **Semantic code navigation.** Opt-in Language Server tools let the agent ask your existing language extension (C#, rust-analyzer, Pylance, TypeScript, gopls, clangd) for references, definitions, implementations, call hierarchy, and workspace symbols instead of guessing from grep.
 - **Made for non-engineers too.** Inline diffs, per-turn checkpoints, image attachments, per-turn timing, and a per-chat ToDo make the agent legible — you can see exactly what it's doing and undo any step.
@@ -28,7 +28,7 @@ Run several agent sessions in parallel. Conversation history, tracked file chang
 Every tool call (file reads/writes/edits, shell, glob/grep/find, web search, fetch, LSP semantic queries) renders as an expandable card with arguments and results, streamed in real time. A vertical timeline rail connects the icons on the left so it's easy to follow what the agent did across a long turn; hover any icon for a tooltip describing what the tool does.
 
 ### Tool selection panel
-The launcher sidebar has a **Tools** panel that lists every tool the active chat exposes to the model, with a checkbox per tool. Unchecking a tool hides it from the model on the next turn. Tools sharing a prefix (`github_*`, `database_*`, `browser_*`, …) are grouped into collapsible sections with per-group Enable / Disable buttons — one click removes a large tool group from the prompt when it is not needed. Named categories (**Pi built-ins**, **Web**, **ToDo**, **MCP**, **Language Server**) sit alongside prefix groups, and a filter box searches both tool names and descriptions. **Copy** / **Paste** buttons serialise the current selection to the clipboard so you can transplant a curated tool set between chats or between VS Code windows. Selection is per-chat and persists across `Reload Window`.
+The launcher sidebar has a **Tools** panel that lists every tool the active chat exposes to the model, with a checkbox per tool. Unchecking a tool hides it from the model on the next turn. Tools sharing a prefix (`github_*`, `database_*`, `browser_*`, …) are grouped into collapsible sections with per-group Enable / Disable buttons — one click removes a large tool group from the prompt when it is not needed. Named categories (**Pi built-ins**, **Web**, **ToDo**, **MCP**, **Language Server**) sit alongside prefix groups, and a filter box searches both tool names and descriptions. **Copy** / **Paste** buttons serialise the current selection to the clipboard so you can transplant a curated tool set between chats or between VS Code windows. **DefaultForProject** saves the active selection as the workspace project default — reuse the same curated tool set across every new chat in that project. Selection is per-chat and persists across `Reload Window`.
 
 ### Inline diffs and rollback
 File modifications are tracked automatically. Review unified diffs inline or open them in VS Code's native diff editor. Undo a single file or every change at once.
@@ -68,6 +68,9 @@ Queue follow-up messages while the agent is streaming (they auto-send when the t
 ### Slash commands and skills
 Type `/` to open a slash-command menu. Cross-client Agent Skills are discovered from `~/.agents/skills/` and workspace `.agents/skills/`; Pi Code also retains legacy `~/.pi/agent/skills/` and workspace `.pi/skills/` discovery. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` are surfaced alongside them, with directory-scoped skills activated only when the agent works in their subtree.
 
+### Subagents
+Per-chat opt-in toggle in the launcher sidebar (disabled by default) that gives the parent agent a `subagent` tool for delegating work to child agents. Named agents are discovered from user and trusted-project `.agents/agents/*.md` resources, Claude-compatible definitions, and bundled packages; the parent can also create ad-hoc roles on the fly. Each child runs with an exact cross-provider `provider/id` model constrained by the configured policy and allowlist, or explicitly inherits the parent model. Foreground children return inside the parent turn; background children run independently and post a compact result when they finish. The launcher's **Subagents** section shows every child spawned from the active chat with live status, elapsed time, and expandable results. For isolated background writes the parent reviews, applies, and cleans up the worktree diff — child agents never touch the project workspace directly. Tune concurrency, timeouts, and turn limits via `pi-code.subagents.*` settings.
+
 ### Per-chat ToDo
 Each chat has its own persistent task list the agent manages via a built-in `todo` tool — pending / in-progress / completed states, dependencies, and inline display in the launcher. Toggle per-tab on or off.
 
@@ -77,11 +80,14 @@ When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer 
 ### Prompt cache retention controls
 A `cache: …` chip in the footer chooses `short` / `long` / provider-aware `auto` so cached prefixes are kept around exactly as long as you need them.
 
+### Windows turn-completion notifications
+Two opt-in toggles in the launcher sidebar, both off by default: **Show Popup** displays a native toast outside VS Code when an agent turn finishes, and **Play Sound** plays the standard Windows notification sound. Both use PowerShell and are currently Windows-only; non-Windows platforms log a notice instead.
+
 ### Settings page with OAuth login
-A dedicated settings panel handles API keys, default model, thinking level, ToDo behaviour, file-mention indexing, and chat appearance. API keys are stored via VS Code's `SecretStorage` — never in `settings.json`. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Gemini CLI, and Antigravity, with a manual paste-the-code fallback when the local OAuth callback can't be reached.
+A dedicated settings panel handles API keys, default model, thinking level, ToDo behaviour, subagents, Claude Code MCP import, Language Server tools, file-mention indexing, and chat appearance. Provider credentials entered there are stored via VS Code's `SecretStorage` — never in `settings.json`. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Gemini CLI, and Antigravity, with a manual paste-the-code fallback when the local OAuth callback can't be reached.
 
 ### Bundled web access and MCP
-Web search, code search, content fetching (web pages, GitHub, YouTube transcripts, PDFs, local videos), and an MCP adapter that picks up servers from `.mcp.json` / `.pi/mcp.json` ship inside the extension and load automatically. Uses Exa MCP by default with no API keys; optionally reads `~/.pi/web-search.json` to switch backends.
+`web_search`, `fetch_content` (web pages, GitHub, YouTube transcripts, PDFs, local videos), and `get_search_content` ship inside the extension as the bundled `pi-web-access` package. In automatic mode, search uses OpenAI when suitable and available, then falls back through Exa, Brave, Parallel, Tavily, Perplexity, and Gemini; Exa MCP works without an API key. The bundled `pi-mcp-adapter` picks up servers from `.mcp.json` / `.pi/mcp.json` automatically. Enable `pi-code.mcp.importClaudeCode` in settings to add a managed compatibility import that references your user-level Claude Code MCP servers — server definitions and credentials stay in your Claude config; only an import entry is written to Pi's global MCP config.
 
 ## Getting Started
 
@@ -144,6 +150,15 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.fileUndoView.defaultEnabled` | `boolean` | `false` | Show the File Undo View (Undo / Redo / Review bar above the prompt) by default for new chats |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat ToDo for new chats by default |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines for the ToDo tool |
+| `pi-code.subagents.defaultEnabled` | `boolean` | `false` | Expose the subagent delegation tool to new chats by default. Each chat keeps its own opt-in state. |
+| `pi-code.subagents.defaultModel` | `string` | `""` | Default child model in canonical `provider/id` format. Empty = use agent definition then parent model. |
+| `pi-code.subagents.allowedModels` | `string[]` | `[]` | Exact `provider/id` models allowed for child agents. Empty = allow all configured models. |
+| `pi-code.subagents.allowInvocationModelOverride` | `boolean` | `true` | Allow the parent to select an exact child provider/model in a subagent tool call. |
+| `pi-code.subagents.defaultMaxTurns` | `number` | `30` | Default maximum turns for a foreground child agent (1–100). |
+| `pi-code.subagents.defaultTimeoutMinutes` | `number` | `10` | Default execution timeout in minutes for a child agent (1–120). |
+| `pi-code.subagents.maxConcurrentGlobal` | `number` | `4` | Maximum child agents running across all Pi Code chats (1–16). |
+| `pi-code.subagents.maxConcurrentPerChat` | `number` | `2` | Maximum child agents from one parent chat (1–8). |
+| `pi-code.mcp.importClaudeCode` | `boolean` | `false` | Import user-level Claude Code MCP servers via a managed compatibility entry. Server definitions and credentials remain in Claude config. |
 | `pi-code.lsp.enabled` | `boolean` | `false` | Expose Language Server tools (find_references, goto_definition, hover, etc.) to the agent. Opt-in; requires a language extension per file's language. |
 | `pi-code.userMessageGlowColor` | `string` | `#00aaff` | Glow colour around user messages in the chat |
 | `pi-code.userMessageGlowOpacity` | `number` | `40` | Glow opacity, 0–100 |
@@ -152,7 +167,7 @@ API keys are managed through the settings page and stored via VS Code's `SecretS
 
 ## Privacy
 
-API keys and OAuth tokens are stored exclusively in VS Code's `SecretStorage` — never written to `settings.json` or any plaintext file. The extension itself contacts only the AI provider you configure (and, if you use the bundled web tools, the chosen search backend). No telemetry is sent to the publisher.
+Provider API keys and OAuth tokens entered in Pi Code settings are stored in VS Code's `SecretStorage`, never in `settings.json` or a plaintext file. Network requests go only to providers and services you configure or invoke, including enabled MCP servers and bundled web tools. Optional web-search credentials can be supplied separately through `~/.pi/web-search.json`. Opt-in managed config writes, such as the Claude Code MCP import, are explicit in their setting. No telemetry is sent to the publisher.
 
 ## Credits
 
