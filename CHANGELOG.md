@@ -12,6 +12,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - The CRT desktop spike now closely matches the original phosphor terminal reference with its bundled display font, curved screen, scanlines, rolling beam, glow, and terminal-style controls.
+- Expanded regression coverage for file-change tracking, checkpoint rollback and redo, workspace file mentions, per-tab message queues, and session event rebinding ahead of the shared-backend extraction.
 
 ## [0.57.3] - 2026-07-17
 
