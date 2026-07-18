@@ -61,7 +61,7 @@ The Pi SDK packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-agen
 - **No direct DOM libraries**: The webview UI is built with vanilla TypeScript and DOM APIs. No React, no framework. Rendering uses an `el()` helper for element creation and manual DOM updates.
 - **CSS variables**: Webview styles use VS Code's CSS custom properties (e.g. `--vscode-editor-background`) for theme compatibility. Never hardcode colors.
 - **SecretStorage for secrets**: API keys are stored via `vscode.SecretStorage`, never in `settings.json` or plaintext.
-- **Message queuing**: While streaming, user messages are queued (stored in `TabState.queuedMessages`) and auto-dispatched as new prompts on `agent_end`. Steering (mid-stream injection) is a separate path via `AgentSession.steer()`.
+- **Message queuing**: While streaming, user messages are queued in the tab runtime and auto-dispatched as new prompts on `agent_settled`. Do not dispatch from `agent_end`: the SDK still reports the session as busy until settlement, so a normal prompt will be rejected and lost. Steering (mid-stream injection) is a separate path via `AgentSession.steer()`.
 - **Skills / slash commands**: Skills are loaded from the Pi SDK and surfaced in the webview via a `getSkills` message. The webview renders a slash-command menu triggered by `/` in the input.
 
 ## Cross-Harness Agent Resources

@@ -3,6 +3,7 @@ import { unlink } from 'fs/promises';
 import { PiSessionManager } from '../pi/session';
 import type { Logger } from '../core/ports/logger';
 import type { SecretStore, SessionRuntimePorts } from '../core/ports/session-platform';
+import { TabRuntime } from '../core/chat/tab-runtime';
 import type {
     ClientMessage, ServerMessage, TabInfo,
     LauncherState, LauncherTabInfo, LauncherSessionInfo,
@@ -22,7 +23,6 @@ import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { computeCodexTurnUsage, isCodexUsageStale } from '../shared/codex-usage';
 import { WorkspaceFileMentions } from '../workspace/file-mentions';
-import type { CodexTurnUsage, CodexUsageSnapshot } from '../shared/protocol';
 import type { SubagentCoordinator } from '../pi/subagents/coordinator';
 import { SubagentCapabilityGate } from '../pi/subagents/gating';
 import { projectSubagentLauncherSnapshot } from '../pi/subagents/launcher-state';
@@ -30,65 +30,10 @@ import type { SubagentRunStore } from '../pi/subagents/persistence';
 import type { WriteIsolationManager } from '../pi/subagents/write-isolation';
 import type { ChildToolFactoryRegistry } from '../pi/subagents/child-tools';
 import { routeSubagentMutation } from '../pi/subagents/mutations';
-import { TurnNotificationGate } from '../notifications/turn-notification-gate';
 import { TurnNotifier } from '../notifications/turn-notifier';
 import type { TurnCompletionOutcome } from '../shared/turn-notification';
 
-interface MessageMeta {
-    thinkingDurationSec: number;
-    messageEndTime: number;
-    codexTurn?: CodexTurnUsage;
-    turnDurationMs?: number;
-    totalTurnDurationMs?: number;
-}
-
-interface TabState {
-    id: string;
-    name: string;
-    session: PiSessionManager;
-    diffManager: DiffManager;
-    checkpointManager: CheckpointManager;
-    turnCounter: number;
-    suspendedMessages: any[];
-    streamingText: string;
-    streamingThinking: string;
-    isThinking: boolean;
-    thinkingStartTime: number;
-    streamingThinkingDuration: number;
-    agentStartTime: number;
-    /** Sum of completed agent turn durations in this tab, excluding idle gaps between turns. */
-    totalTurnDurationMs: number;
-    messageMeta: Map<number, MessageMeta>;
-    /** Allows native completion effects only for explicit user-submitted parent tasks. */
-    turnNotificationGate: TurnNotificationGate;
-    hasNotification: boolean;
-    queuedMessages: string[];
-    /** Locally tracked streaming flag – the SDK's isStreaming lags behind agent_end. */
-    isStreamingLocal: boolean;
-    /** True while SDK context compaction is running. */
-    isCompacting: boolean;
-    /** Fresh Codex usage snapshot captured at agent_start for an account-window delta. */
-    codexTurnBaseline?: CodexUsageSnapshot | null;
-    /** Model id associated with the current Codex turn and its usage bucket. */
-    codexTurnModelId?: string;
-    /** Set when a provider error has already been surfaced to the UI for the current run, so the agent_end fallback doesn't duplicate it. */
-    errorReportedThisRun: boolean;
-    /** Timestamp (ms) of the last `agent_end`. Used by `auto` cache heuristic. 0 means no turn finished yet. */
-    lastTurnEndAt: number;
-    /** Largest idle gap (ms) ever observed between successive turns in this tab's session. */
-    maxIdleGapMs: number;
-    /** Cache retention applied to the most recent request from this tab. */
-    cacheEffective: CacheEffective;
-    /**
-     * `tool_execution_start` events without a matching `tool_execution_end`
-     * yet. Cleared on `tool_execution_end`, on `agent_start`, and swept on
-     * `agent_end` — anything still present at `agent_end` is a tool call
-     * the SDK abandoned mid-turn and should be surfaced to the user.
-     */
-    pendingTools: Map<string, { name: string; startTime: number }>;
-    /** Project-scoped tool allowlist used only as this newly created session's fallback. */
-    projectToolDefault?: ProjectToolSelectionDefault;
-}
+type TabState = TabRuntime<PiSessionManager, DiffManager, CheckpointManager>;
 
 interface PersistedTabsState {
     tabs: Array<{ name: string; sessionPath: string }>;
@@ -116,43 +61,6 @@ export type ChatCommandDispatchResult =
 let tabIdCounter = 0;
 function nextTabId(): string {
     return `tab-${++tabIdCounter}`;
-}
-
-function makeTabState(
-    id: string,
-    session: PiSessionManager,
-    diffManager: DiffManager,
-    checkpointManager: CheckpointManager,
-    projectToolDefault?: ProjectToolSelectionDefault,
-): TabState {
-    return {
-        id,
-        name: 'New Agent',
-        session,
-        diffManager,
-        checkpointManager,
-        turnCounter: 0,
-        suspendedMessages: [],
-        streamingText: '',
-        streamingThinking: '',
-        isThinking: false,
-        thinkingStartTime: 0,
-        streamingThinkingDuration: 0,
-        agentStartTime: 0,
-        totalTurnDurationMs: 0,
-        messageMeta: new Map(),
-        turnNotificationGate: new TurnNotificationGate(),
-        hasNotification: false,
-        queuedMessages: [],
-        isStreamingLocal: false,
-        isCompacting: false,
-        errorReportedThisRun: false,
-        lastTurnEndAt: 0,
-        maxIdleGapMs: 0,
-        cacheEffective: 'short',
-        pendingTools: new Map(),
-        projectToolDefault,
-    };
 }
 
 // Auto-mode heuristic thresholds for prompt cache retention.
@@ -286,7 +194,6 @@ export class ChatController implements vscode.Disposable {
 
     private _tabs = new Map<string, TabState>();
     private _activeTabId = '';
-    private _tabSubscriptions = new Map<string, (() => void)[]>();
     private _authChangedSubscription?: vscode.Disposable;
     private _codexUsageUnsubscribe?: () => void;
     private _fileMentions: WorkspaceFileMentions;
@@ -396,13 +303,13 @@ export class ChatController implements vscode.Disposable {
         this._fileMentions.warmup();
 
         const id = nextTabId();
-        const tab = makeTabState(
+        const tab = new TabRuntime({
             id,
-            initialSession,
-            initialDiffManager,
-            initialCheckpointManager,
-            this._getProjectToolSelectionDefault(),
-        );
+            session: initialSession,
+            diffManager: initialDiffManager,
+            checkpointManager: initialCheckpointManager,
+            projectToolDefault: this._getProjectToolSelectionDefault(),
+        });
         this._tabs.set(id, tab);
         this._activeTabId = id;
         this._subscribeTab(tab);
@@ -531,10 +438,7 @@ export class ChatController implements vscode.Disposable {
             return;
         }
 
-        this._unsubscribeTab(tabId);
-        tab.diffManager.dispose();
-        tab.checkpointManager.dispose();
-        await tab.session.dispose();
+        await tab.disposeResources();
         this._tabs.delete(tabId);
 
         if (tabId === this._activeTabId) {
@@ -674,10 +578,7 @@ export class ChatController implements vscode.Disposable {
         if (loadedTabId) {
             const tab = this._tabs.get(loadedTabId);
             if (tab) {
-                this._unsubscribeTab(loadedTabId);
-                tab.diffManager.dispose();
-                tab.checkpointManager.dispose();
-                await tab.session.dispose();
+                await tab.disposeResources();
                 this._tabs.delete(loadedTabId);
                 if (loadedTabId === this._activeTabId) {
                     this._activeTabId = this._tabs.keys().next().value ?? '';
@@ -717,7 +618,12 @@ export class ChatController implements vscode.Disposable {
         const diff = new DiffManager(session, checkpoint);
 
         const id = nextTabId();
-        const tab = makeTabState(id, session, diff, checkpoint);
+        const tab = new TabRuntime({
+            id,
+            session,
+            diffManager: diff,
+            checkpointManager: checkpoint,
+        });
         this._updateTabName(tab);
 
         this._tabs.set(id, tab);
@@ -883,7 +789,7 @@ export class ChatController implements vscode.Disposable {
         // takes effect immediately.
         this._applyPersistedToolSelection(tab);
 
-        this._tabSubscriptions.set(tab.id, unsubs);
+        for (const unsubscribe of unsubs) tab.addSubscription(unsubscribe);
     }
 
     private _todoEnabledKey(sessionPath: string | undefined): string | undefined {
@@ -1296,6 +1202,88 @@ export class ChatController implements vscode.Disposable {
         }
     }
 
+    private async _dispatchNextQueuedMessage(tab: TabState): Promise<void> {
+        const text = tab.queuedMessages[0];
+        if (text === undefined) {
+            tab.isStreamingLocal = false;
+            this.sendStateSync(tab.id);
+            return;
+        }
+
+        const compactInstructions = parseCompactCommand(text);
+        if (compactInstructions !== null) {
+            tab.queuedMessages.shift();
+            this._prepareCacheForRequest(tab);
+            try {
+                await tab.session.compact(compactInstructions);
+            } catch {
+                // The SDK emits compaction_end with a user-facing error message.
+            } finally {
+                tab.isStreamingLocal = false;
+                this.sendStateSync(tab.id);
+            }
+            if (tab.queuedMessages.length > 0 && !tab.session.serializeState().isStreaming) {
+                tab.isStreamingLocal = true;
+                this.sendStateSync(tab.id);
+                await this._dispatchNextQueuedMessage(tab);
+            }
+            return;
+        }
+
+        let queuedPrompt: string;
+        try {
+            queuedPrompt = await this._fileMentions.augmentPromptIfNeeded(text);
+        } catch (error) {
+            tab.isStreamingLocal = false;
+            this._outputChannel.appendLine(
+                `[queued prompt error] ${error instanceof Error ? error.message : String(error)}`,
+            );
+            this.sendStateSync(tab.id);
+            return;
+        }
+
+        // Queue controls remain available while file indexing runs. If the
+        // head item changed, prepare the current head instead of dispatching
+        // stale text or removing a different item.
+        if (tab.queuedMessages[0] !== text) {
+            await this._dispatchNextQueuedMessage(tab);
+            return;
+        }
+
+        tab.queuedMessages.shift();
+        if (tab.checkpointManager.rollbackPoint !== null) {
+            tab.checkpointManager.discardSuspended();
+            tab.diffManager.discardSuspended();
+            tab.suspendedMessages = [];
+        }
+        tab.turnCounter++;
+        const turnIdx = tab.turnCounter;
+        tab.checkpointManager.startTurn(turnIdx);
+        tab.diffManager.setCurrentTurn(turnIdx);
+        this._prepareCacheForRequest(tab);
+        this._logPromptToolState(tab, 'queued');
+        this.sendStateSync(tab.id);
+
+        let agentStarted = false;
+        const stopWatchingAgentStart = tab.session.events.on('agent_start', () => {
+            agentStarted = true;
+        });
+        void this._promptUserTask(tab, queuedPrompt)
+            .catch((error) => {
+                if (!agentStarted) tab.queuedMessages.unshift(text);
+                this._outputChannel.appendLine(
+                    `[queued prompt error] ${error instanceof Error ? error.message : String(error)}`,
+                );
+            })
+            .finally(() => {
+                stopWatchingAgentStart();
+                if (!agentStarted && !tab.session.serializeState().isStreaming) {
+                    tab.isStreamingLocal = false;
+                    this.sendStateSync(tab.id);
+                }
+            });
+    }
+
     getTurnNotificationSettings(): TurnNotificationSettings {
         return {
             showPopup: this._context.globalState.get<boolean>(
@@ -1394,15 +1382,9 @@ export class ChatController implements vscode.Disposable {
         await this._setFileUndoViewEnabledFor(tab, enabled);
     }
 
-    private _unsubscribeTab(tabId: string): void {
-        const unsubs = this._tabSubscriptions.get(tabId);
-        if (unsubs) {
-            for (const unsub of unsubs) unsub();
-            this._tabSubscriptions.delete(tabId);
-        }
-    }
-
     private async _handleTabEvent(tab: TabState, event: any): Promise<void> {
+        let dispatchQueuedAfterEvent = false;
+
         if (event.type === 'agent_start') {
             tab.session.markTurnStarted?.();
             tab.turnNotificationGate.onAgentStart();
@@ -1588,37 +1570,11 @@ export class ChatController implements vscode.Disposable {
             this._persistTabs();
             this._onLauncherStateChanged.fire();
 
-            if (tab.queuedMessages.length > 0) {
-                const text = tab.queuedMessages.shift()!;
-                const compactInstructions = parseCompactCommand(text);
-                if (compactInstructions !== null) {
-                    this._prepareCacheForRequest(tab);
-                    try {
-                        await tab.session.compact(compactInstructions);
-                    } catch {
-                        // The SDK emits compaction_end with a user-facing error message.
-                    }
-                    this.sendStateSync(tab.id);
-                } else {
-                    if (tab.checkpointManager.rollbackPoint !== null) {
-                        tab.checkpointManager.discardSuspended();
-                        tab.diffManager.discardSuspended();
-                        tab.suspendedMessages = [];
-                    }
-                    tab.turnCounter++;
-                    const turnIdx = tab.turnCounter;
-                    tab.checkpointManager.startTurn(turnIdx);
-                    tab.diffManager.setCurrentTurn(turnIdx);
-                    this._prepareCacheForRequest(tab);
-                    this._logPromptToolState(tab, 'queued');
-                    const queuedPrompt = await this._fileMentions.augmentPromptIfNeeded(text);
-                    void this._promptUserTask(tab, queuedPrompt).catch((error) => {
-                        this._outputChannel.appendLine(
-                            `[queued prompt error] ${error instanceof Error ? error.message : String(error)}`,
-                        );
-                    });
-                }
-            }
+            // EventRouter does not await async reducers. If the SDK reached
+            // agent_settled while Codex accounting above was still pending,
+            // this agent_end reducer is responsible for dispatching after it
+            // finishes publishing the old run's terminal state.
+            dispatchQueuedAfterEvent = !tab.session.serializeState().isStreaming;
         }
 
         if (event.type === 'agent_settled') {
@@ -1631,6 +1587,12 @@ export class ChatController implements vscode.Disposable {
                     this._onLauncherStateChanged.fire();
                 }
             }
+
+            // AgentSession remains busy while it emits agent_end. Wait until
+            // both the SDK is settled and the async agent_end reducer has
+            // published the old run's terminal state before starting a normal
+            // prompt. If that reducer is still active, it dispatches instead.
+            dispatchQueuedAfterEvent = !tab.isStreamingLocal;
         }
 
         if (event.type === 'message_update' && event.assistantMessageEvent) {
@@ -1661,6 +1623,18 @@ export class ChatController implements vscode.Disposable {
 
         this._updateTabName(tab);
 
+        if (dispatchQueuedAfterEvent && tab.queuedMessages.length > 0) {
+            // Reserve the tab before publishing terminal state. The queued
+            // prompt may still need async file-mention expansion, and the
+            // webview must continue treating Enter as queueing during that gap.
+            tab.isStreamingLocal = true;
+            if (event.type === 'agent_settled') {
+                // agent_settled is not part of the regular state-sync set below;
+                // publish the reservation before awaiting prompt augmentation.
+                this.sendStateSync(tab.id);
+            }
+        }
+
         // Stream raw events to whoever is watching this tab (the sidebar if active, panels for this tab).
         this._postForTab(tab.id, { type: 'agentEvent', event: safeSerialize(event) });
 
@@ -1677,6 +1651,10 @@ export class ChatController implements vscode.Disposable {
 
         if (event.type === 'compaction_end' && event.errorMessage) {
             this._postForTab(tab.id, { type: 'error', message: event.errorMessage });
+        }
+
+        if (dispatchQueuedAfterEvent) {
+            await this._dispatchNextQueuedMessage(tab);
         }
     }
 
@@ -1940,55 +1918,25 @@ export class ChatController implements vscode.Disposable {
                     tab.session.setThinkingLevel(msg.level);
                     this.sendStateSync(tab.id);
                     break;
-                case 'newSession':
+                case 'newSession': {
                     await tab.session.newSession();
-                    tab.projectToolDefault = this._getProjectToolSelectionDefault();
+                    const projectToolDefault = this._getProjectToolSelectionDefault();
+                    tab.projectToolDefault = projectToolDefault;
                     this._applyPersistedToolSelection(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
-                    tab.turnCounter = 0;
-                    tab.suspendedMessages = [];
-                    tab.name = 'New Agent';
-                    tab.streamingText = '';
-                    tab.streamingThinking = '';
-                    tab.isThinking = false;
-                    tab.thinkingStartTime = 0;
-                    tab.streamingThinkingDuration = 0;
-                    tab.agentStartTime = 0;
-                    tab.totalTurnDurationMs = 0;
-                    tab.isStreamingLocal = false;
-                    tab.isCompacting = false;
-                    tab.messageMeta.clear();
-                    tab.turnNotificationGate.reset();
-                    tab.queuedMessages = [];
-                    tab.lastTurnEndAt = 0;
-                    tab.maxIdleGapMs = 0;
+                    tab.resetSessionProjection(projectToolDefault);
                     this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
                     this.sendStateSync(tab.id);
                     break;
+                }
                 case 'loadSession':
                     await tab.session.loadSession(msg.sessionPath);
                     tab.projectToolDefault = undefined;
                     this._applyPersistedToolSelection(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
-                    tab.turnCounter = 0;
-                    tab.suspendedMessages = [];
-                    tab.streamingText = '';
-                    tab.streamingThinking = '';
-                    tab.isThinking = false;
-                    tab.thinkingStartTime = 0;
-                    tab.streamingThinkingDuration = 0;
-                    tab.agentStartTime = 0;
-                    tab.totalTurnDurationMs = 0;
-                    tab.isStreamingLocal = false;
-                    tab.isCompacting = false;
-                    tab.messageMeta.clear();
-                    tab.turnNotificationGate.reset();
-                    tab.queuedMessages = [];
-                    tab.lastTurnEndAt = 0;
-                    tab.maxIdleGapMs = 0;
-                    tab.name = 'New Agent'; // reset so _updateTabName re-derives from first message
+                    tab.resetSessionProjection(undefined);
                     this._updateTabName(tab);
                     this._persistTabs();
                     this.sendStateSync(tab.id);
@@ -2297,13 +2245,13 @@ export class ChatController implements vscode.Disposable {
         const newDiff = new DiffManager(newSession, newCheckpoint);
 
         const id = nextTabId();
-        const tab = makeTabState(
+        const tab = new TabRuntime({
             id,
-            newSession,
-            newDiff,
-            newCheckpoint,
-            this._getProjectToolSelectionDefault(),
-        );
+            session: newSession,
+            diffManager: newDiff,
+            checkpointManager: newCheckpoint,
+            projectToolDefault: this._getProjectToolSelectionDefault(),
+        });
         this._tabs.set(id, tab);
         this._subscribeTab(tab);
 
@@ -2326,10 +2274,7 @@ export class ChatController implements vscode.Disposable {
 
         const wasActive = tabId === this._activeTabId;
 
-        this._unsubscribeTab(tabId);
-        tab.diffManager.dispose();
-        tab.checkpointManager.dispose();
-        await tab.session.dispose();
+        await tab.disposeResources();
         this._tabs.delete(tabId);
 
         if (wasActive) {
@@ -2397,7 +2342,12 @@ export class ChatController implements vscode.Disposable {
                 const diff = new DiffManager(session, checkpoint);
 
                 const id = nextTabId();
-                const tab = makeTabState(id, session, diff, checkpoint);
+                const tab = new TabRuntime({
+                    id,
+                    session,
+                    diffManager: diff,
+                    checkpointManager: checkpoint,
+                });
                 tab.name = name;
                 this._updateTabName(tab); // re-derive name from first message if needed
 
@@ -2413,10 +2363,7 @@ export class ChatController implements vscode.Disposable {
 
         // Dispose the initial empty tab
         if (initialTab) {
-            this._unsubscribeTab(initialTabId);
-            initialTab.diffManager.dispose();
-            initialTab.checkpointManager.dispose();
-            await initialTab.session.dispose();
+            await initialTab.disposeResources();
             this._tabs.delete(initialTabId);
         }
 
@@ -2442,10 +2389,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     dispose(): void {
-        for (const [, unsubs] of this._tabSubscriptions) {
-            for (const unsub of unsubs) unsub();
-        }
-        this._tabSubscriptions.clear();
+        for (const tab of this._tabs.values()) tab.unsubscribe();
         this._authChangedSubscription?.dispose();
         this._authChangedSubscription = undefined;
         this._codexUsageUnsubscribe?.();

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
+import { TabRuntime } from '../../../core/chat/tab-runtime';
 
 describe('ChatController command dispatch results', () => {
     it('acknowledges a prompt after dispatch without waiting for the model turn', async () => {
@@ -137,6 +138,38 @@ describe('ChatController command dispatch results', () => {
             'tab-1',
         )).resolves.toEqual({ ok: true });
         expect(promptUserTask).toHaveBeenCalledOnce();
+    });
+
+    it('unsubscribes tab runtimes without disposing their resources on controller shutdown', () => {
+        const unsubscribe = vi.fn();
+        const sessionDispose = vi.fn();
+        const diffDispose = vi.fn();
+        const checkpointDispose = vi.fn();
+        const tab = new TabRuntime({
+            id: 'tab-1',
+            session: { dispose: sessionDispose },
+            diffManager: { dispose: diffDispose },
+            checkpointManager: { dispose: checkpointDispose },
+        });
+        tab.addSubscription(unsubscribe);
+
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', tab]]);
+        controller._authChangedSubscription = { dispose: vi.fn() };
+        controller._codexUsageUnsubscribe = vi.fn();
+        controller._fileMentions = { dispose: vi.fn() };
+        controller._sinks = new Set([{}]);
+        controller._openPanels = new Map([['tab-1', {}]]);
+        controller._panelOpener = vi.fn();
+        controller._onTabRenamed = { dispose: vi.fn() };
+        controller._onLauncherStateChanged = { dispose: vi.fn() };
+
+        controller.dispose();
+
+        expect(unsubscribe).toHaveBeenCalledOnce();
+        expect(sessionDispose).not.toHaveBeenCalled();
+        expect(diffDispose).not.toHaveBeenCalled();
+        expect(checkpointDispose).not.toHaveBeenCalled();
     });
 
     it('reports a missing target tab without dispatching', async () => {
