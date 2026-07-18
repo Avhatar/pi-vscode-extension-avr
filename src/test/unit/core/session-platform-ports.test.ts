@@ -45,10 +45,19 @@ describe('portable session workspace and settings ports', () => {
                 findFiles: async () => [],
             },
             settings: { get: (_key, fallback) => fallback },
+            dialogs: {
+                showWarning: () => undefined,
+                selectModel: async () => undefined,
+            },
+        };
+        const secrets = {
+            get: vi.fn(async () => undefined),
+            store: vi.fn(async () => undefined),
+            delete: vi.fn(async () => undefined),
         };
         const manager = new PiSessionManager(
             { appendLine: vi.fn() },
-            undefined,
+            secrets,
             undefined,
             undefined,
             undefined,
@@ -60,6 +69,7 @@ describe('portable session workspace and settings ports', () => {
 
         const controller = Object.create(ChatController.prototype) as any;
         controller._sessionLogger = manager.logger;
+        controller._sessionSecrets = manager.secrets;
         controller._sessionPorts = ports;
         controller._context = { secrets: undefined };
         controller._subagentCoordinator = undefined;
@@ -69,6 +79,7 @@ describe('portable session workspace and settings ports', () => {
         const replacement = controller._createSessionManager();
 
         expect(replacement.logger).toBe(manager.logger);
+        expect(replacement.secrets).toBe(manager.secrets);
         expect(replacement.ports).toBe(ports);
 
         replacement.dispose();

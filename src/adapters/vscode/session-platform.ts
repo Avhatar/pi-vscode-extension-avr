@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import type {
+    ModelSelection,
+    ModelSelectionOption,
+    SecretStore,
+    SessionDialogPort,
     SessionRuntimePorts,
     SessionSettingValues,
     SessionSettingsPort,
@@ -11,6 +15,7 @@ type WorkspaceSource = Pick<
     'workspaceFolders' | 'isTrusted' | 'findFiles'
 >;
 type ConfigurationSource = Pick<typeof vscode.workspace, 'getConfiguration'>;
+type DialogSource = Pick<typeof vscode.window, 'showWarningMessage' | 'showQuickPick'>;
 type RelativePatternFactory = (root: string, pattern: string) => vscode.GlobPattern;
 
 export class VsCodeWorkspacePort implements SessionWorkspacePort {
@@ -54,9 +59,48 @@ export class VsCodeSessionSettings implements SessionSettingsPort {
     }
 }
 
+export class VsCodeSecretStore implements SecretStore {
+    constructor(private readonly source: Pick<vscode.SecretStorage, 'get' | 'store' | 'delete'>) {}
+
+    get(key: string): PromiseLike<string | undefined> {
+        return this.source.get(key);
+    }
+
+    store(key: string, value: string): PromiseLike<void> {
+        return this.source.store(key, value);
+    }
+
+    delete(key: string): PromiseLike<void> {
+        return this.source.delete(key);
+    }
+}
+
+export class VsCodeSessionDialogs implements SessionDialogPort {
+    constructor(private readonly source: DialogSource = vscode.window) {}
+
+    showWarning(message: string): void {
+        void this.source.showWarningMessage(message);
+    }
+
+    async selectModel(
+        models: readonly ModelSelectionOption[],
+        placeHolder: string,
+    ): Promise<ModelSelection | undefined> {
+        const items = models.map((model) => ({
+            label: model.label,
+            description: model.provider,
+            provider: model.provider,
+            modelId: model.id,
+        }));
+        const pick = await this.source.showQuickPick(items, { placeHolder });
+        return pick ? { provider: pick.provider, modelId: pick.modelId } : undefined;
+    }
+}
+
 export function createVsCodeSessionRuntimePorts(): SessionRuntimePorts {
     return {
         workspace: new VsCodeWorkspacePort(),
         settings: new VsCodeSessionSettings(),
+        dialogs: new VsCodeSessionDialogs(),
     };
 }

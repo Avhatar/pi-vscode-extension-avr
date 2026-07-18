@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { AuthStorage } from '@earendil-works/pi-coding-agent';
+import type { SecretStore } from '../core/ports/session-platform';
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
 
@@ -14,7 +15,7 @@ const KNOWN_PROVIDERS = [
 ];
 
 let cached: AuthStorage | undefined;
-let cachedSecrets: vscode.SecretStorage | undefined;
+let cachedSecrets: SecretStore | undefined;
 
 const _onAuthChanged = new vscode.EventEmitter<string | undefined>();
 export const onAuthChanged = _onAuthChanged.event;
@@ -23,7 +24,7 @@ export function notifyAuthChanged(providerId?: string): void {
     _onAuthChanged.fire(providerId);
 }
 
-export async function getAuthStorage(secrets?: vscode.SecretStorage): Promise<AuthStorage> {
+export async function getAuthStorage(secrets?: SecretStore): Promise<AuthStorage> {
     if (cached) {
         if (secrets) {
             cachedSecrets = secrets;
@@ -49,7 +50,7 @@ export async function reloadCredentials(): Promise<void> {
     }
 }
 
-async function applySecretsToStorage(storage: AuthStorage, secrets: vscode.SecretStorage): Promise<void> {
+async function applySecretsToStorage(storage: AuthStorage, secrets: SecretStore): Promise<void> {
     for (const provider of KNOWN_PROVIDERS) {
         const key = await secrets.get(`${API_KEY_PREFIX}${provider}`);
         if (key) {

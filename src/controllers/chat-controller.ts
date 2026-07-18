@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { unlink } from 'fs/promises';
 import { PiSessionManager } from '../pi/session';
 import type { Logger } from '../core/ports/logger';
-import type { SessionRuntimePorts } from '../core/ports/session-platform';
+import type { SecretStore, SessionRuntimePorts } from '../core/ports/session-platform';
 import type {
     ClientMessage, ServerMessage, TabInfo,
     LauncherState, LauncherTabInfo, LauncherSessionInfo,
@@ -274,6 +274,7 @@ function turnCompletionOutcome(message: any): TurnCompletionOutcome {
 export class ChatController implements vscode.Disposable {
     private _outputChannel: vscode.OutputChannel;
     private readonly _sessionLogger: Logger;
+    private readonly _sessionSecrets: SecretStore | undefined;
     private readonly _sessionPorts: SessionRuntimePorts;
     private _context: vscode.ExtensionContext;
 
@@ -373,6 +374,7 @@ export class ChatController implements vscode.Disposable {
         this._context = context;
         this._outputChannel = outputChannel;
         this._sessionLogger = initialSession.logger;
+        this._sessionSecrets = initialSession.secrets;
         this._sessionPorts = initialSession.ports;
         this._turnNotifier = new TurnNotifier(outputChannel);
         this._subagentCoordinator = subagentCoordinator;
@@ -693,7 +695,7 @@ export class ChatController implements vscode.Disposable {
     private _createSessionManager(): PiSessionManager {
         return new PiSessionManager(
             this._sessionLogger,
-            this._context.secrets,
+            this._sessionSecrets,
             this._subagentCoordinator,
             this._subagentStore,
             this._writeIsolation,

@@ -1,9 +1,9 @@
-import * as vscode from 'vscode';
 import * as process from 'node:process';
 import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@earendil-works/pi-coding-agent';
 import type { Logger } from '../core/ports/logger';
 import {
     DEFAULT_SESSION_RUNTIME_PORTS,
+    type SecretStore,
     type SessionRuntimePorts,
 } from '../core/ports/session-platform';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
@@ -60,7 +60,7 @@ export class PiSessionManager {
     private _modelRegistry: ModelRegistry | undefined;
     private _unsubscribe: (() => void) | undefined;
     private _outputChannel: Logger;
-    private _secrets: vscode.SecretStorage | undefined;
+    private _secrets: SecretStore | undefined;
     readonly events = new EventRouter();
     readonly todoStore = new TodoStore();
     private _subagentManager: SubagentManager | undefined;
@@ -77,7 +77,7 @@ export class PiSessionManager {
 
     constructor(
         outputChannel: Logger,
-        secrets?: vscode.SecretStorage,
+        secrets?: SecretStore,
         private readonly _subagentCoordinator?: SubagentCoordinator,
         private readonly _subagentStore?: SubagentRunStore,
         private readonly _writeIsolation?: WriteIsolationManager,
@@ -97,6 +97,10 @@ export class PiSessionManager {
 
     get ports(): SessionRuntimePorts {
         return this._ports;
+    }
+
+    get secrets(): SecretStore | undefined {
+        return this._secrets;
     }
 
     async reloadCredentials(): Promise<void> {
@@ -821,19 +825,19 @@ export class PiSessionManager {
     async showModelPicker(): Promise<void> {
         const models = this.getModels();
         if (models.length === 0) {
-            vscode.window.showWarningMessage('No models available. Check your Pi configuration.');
+            this._ports.dialogs.showWarning('No models available. Check your Pi configuration.');
             return;
         }
-        const items = models.map((m) => ({
-            label: m.name ?? m.id,
-            description: m.provider,
-            model: m,
-        }));
-        const pick = await vscode.window.showQuickPick(items, {
-            placeHolder: 'Select a model',
-        });
+        const pick = await this._ports.dialogs.selectModel(
+            models.map((model) => ({
+                provider: model.provider,
+                id: model.id,
+                label: model.name ?? model.id,
+            })),
+            'Select a model',
+        );
         if (pick) {
-            await this.setModel(pick.model.provider, pick.model.id);
+            await this.setModel(pick.provider, pick.modelId);
         }
     }
 
