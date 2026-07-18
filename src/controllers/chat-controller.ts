@@ -1768,6 +1768,18 @@ export class ChatController implements vscode.Disposable {
         }));
     }
 
+    /** Handle Pi's built-in session naming command without starting a model turn. */
+    private _handleNameCommand(tab: TabState, text: string): boolean {
+        const name = parseNameCommand(text);
+        if (name === null) return false;
+        if (!name) throw new Error('Usage: /name <name>');
+
+        tab.session.setSessionName(name);
+        this._updateTabName(tab);
+        this.sendStateSync(tab.id);
+        return true;
+    }
+
     /**
      * Process a webview message. `sourceTabId` identifies the panel that
      * sent the message; if omitted, the message is routed to the active tab
@@ -1783,6 +1795,8 @@ export class ChatController implements vscode.Disposable {
 
             switch (msg.type) {
                 case 'prompt': {
+                    if (this._handleNameCommand(tab, msg.text)) break;
+
                     const compactInstructions = parseCompactCommand(msg.text);
                     if (compactInstructions !== null) {
                         this._prepareCacheForRequest(tab);
@@ -1831,6 +1845,7 @@ export class ChatController implements vscode.Disposable {
                     await tab.session.steer(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
                     break;
                 case 'queueMessage':
+                    if (this._handleNameCommand(tab, msg.text)) break;
                     tab.queuedMessages.push(msg.text);
                     this.sendStateSync(tab.id);
                     break;
@@ -2474,6 +2489,15 @@ function lastAssistantOrdinal(messages: any[]): number {
         }
     }
     return ordinal;
+}
+
+function parseNameCommand(text: string): string | undefined | null {
+    const trimmed = text.trim();
+    if (trimmed === '/name') return undefined;
+    if (trimmed.startsWith('/name ')) {
+        return trimmed.slice('/name '.length).trim() || undefined;
+    }
+    return null;
 }
 
 function parseCompactCommand(text: string): string | undefined | null {

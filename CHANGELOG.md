@@ -7,7 +7,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-07-18
+
 ### Added
+- Chats can now be renamed without contacting the model by entering `/name <new name>`.
 - Added an isolated portable Electron CRT desktop experience spike for testing a future standalone agent interface without shipping its files in the VS Code extension.
 
 ### Changed

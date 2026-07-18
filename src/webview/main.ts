@@ -107,6 +107,13 @@ const BUILTIN_SLASH_COMMANDS: SlashMenuItem[] = [
     },
     {
         kind: 'builtin',
+        name: 'name',
+        displayName: '/name',
+        description: 'Set the display name of the current chat.',
+        insertText: '/name ',
+    },
+    {
+        kind: 'builtin',
         name: 'model',
         displayName: '/model',
         description: 'Open the model picker to switch the model used for this chat.',

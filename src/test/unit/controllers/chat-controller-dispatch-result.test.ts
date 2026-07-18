@@ -40,6 +40,105 @@ describe('ChatController command dispatch results', () => {
         await turn;
     });
 
+    it('handles /name locally instead of sending it to the model or queue', async () => {
+        const setSessionName = vi.fn();
+        const promptUserTask = vi.fn(async () => undefined);
+        const controller = Object.create(ChatController.prototype) as any;
+        const tab = {
+            id: 'tab-1',
+            session: { setSessionName },
+            checkpointManager: {
+                rollbackPoint: null,
+                startTurn: vi.fn(),
+                discardSuspended: vi.fn(),
+            },
+            diffManager: {
+                setCurrentTurn: vi.fn(),
+                discardSuspended: vi.fn(),
+            },
+            suspendedMessages: [],
+            queuedMessages: [],
+            turnCounter: 0,
+        };
+        controller._tabs = new Map([['tab-1', tab]]);
+        controller._activeTabId = 'tab-1';
+        controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
+        controller._isPlanModeEnabledFor = vi.fn(() => false);
+        controller._prepareCacheForRequest = vi.fn();
+        controller._logPromptToolState = vi.fn();
+        controller._promptUserTask = promptUserTask;
+        controller._updateTabName = vi.fn();
+        controller.sendStateSync = vi.fn();
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._postForTab = vi.fn();
+
+        await expect(controller.handleMessage(
+            { type: 'prompt', text: '/name Authentication cleanup' },
+            'tab-1',
+        )).resolves.toEqual({ ok: true });
+        await expect(controller.handleMessage(
+            { type: 'queueMessage', text: '/name Streaming rename' },
+            'tab-1',
+        )).resolves.toEqual({ ok: true });
+
+        expect(setSessionName).toHaveBeenNthCalledWith(1, 'Authentication cleanup');
+        expect(setSessionName).toHaveBeenNthCalledWith(2, 'Streaming rename');
+        expect(promptUserTask).not.toHaveBeenCalled();
+        expect(tab.queuedMessages).toEqual([]);
+        expect(tab.turnCounter).toBe(0);
+    });
+
+    it('rejects an empty /name command without capturing similar prompts', async () => {
+        const promptUserTask = vi.fn(async () => undefined);
+        const postForTab = vi.fn();
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', {
+            id: 'tab-1',
+            session: { setSessionName: vi.fn() },
+            checkpointManager: {
+                rollbackPoint: null,
+                startTurn: vi.fn(),
+                discardSuspended: vi.fn(),
+            },
+            diffManager: {
+                setCurrentTurn: vi.fn(),
+                discardSuspended: vi.fn(),
+            },
+            suspendedMessages: [],
+            queuedMessages: [],
+            turnCounter: 0,
+        }]]);
+        controller._activeTabId = 'tab-1';
+        controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
+        controller._isPlanModeEnabledFor = vi.fn(() => false);
+        controller._prepareCacheForRequest = vi.fn();
+        controller._logPromptToolState = vi.fn();
+        controller._promptUserTask = promptUserTask;
+        controller._updateTabName = vi.fn();
+        controller.sendStateSync = vi.fn();
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._postForTab = postForTab;
+
+        await expect(controller.handleMessage(
+            { type: 'prompt', text: '  /name  ' },
+            'tab-1',
+        )).resolves.toEqual({
+            ok: false,
+            code: 'command_failed',
+            message: 'Usage: /name <name>',
+        });
+        expect(postForTab).toHaveBeenCalledWith('tab-1', {
+            type: 'error',
+            message: 'Usage: /name <name>',
+        });
+
+        await expect(controller.handleMessage(
+            { type: 'prompt', text: '/nameplate cleanup' },
+            'tab-1',
+        )).resolves.toEqual({ ok: true });
+        expect(promptUserTask).toHaveBeenCalledOnce();
+    });
+
     it('reports a missing target tab without dispatching', async () => {
         const controller = Object.create(ChatController.prototype) as any;
         controller._tabs = new Map();

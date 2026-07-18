@@ -717,6 +717,12 @@ export class PiSessionManager {
         await this._session.prompt(command);
     }
 
+    /** Set the persisted display name of the current Pi session. */
+    setSessionName(name: string): void {
+        if (!this._session) throw new Error('Session not initialized');
+        this._session.setSessionName(name);
+    }
+
     getActiveToolNames(): string[] {
         return this._session?.getActiveToolNames() ?? [];
     }
