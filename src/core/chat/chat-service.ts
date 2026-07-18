@@ -23,10 +23,14 @@ export interface ChatServiceSession extends TabSessionResource {
 
 export interface ChatServiceDiff extends TabDisposableResource {
     readonly fileChanges: FileChangeInfo[];
+    setCurrentTurn(turnIndex: number): void;
+    discardSuspended(): void;
 }
 
 export interface ChatServiceCheckpoint extends TabDisposableResource {
     readonly rollbackPoint: number | null;
+    startTurn(turnIndex: number): void;
+    discardSuspended(): void;
 }
 
 export type ChatServiceTab = TabRuntime<
@@ -55,6 +59,17 @@ export interface AgentEndProjection {
 export interface TabNameUpdate {
     readonly changed: boolean;
     readonly name: string;
+}
+
+export interface QueuedDispatchCallbacks {
+    augmentPrompt(text: string): Promise<string>;
+    compact(instructions?: string): Promise<void>;
+    prompt(text: string, onAgentStart: () => void): Promise<void>;
+    isSessionStreaming(): boolean;
+    prepareRequest(): void;
+    logQueuedPrompt(): void;
+    publishState(): void;
+    reportError(error: unknown): void;
 }
 
 /**
@@ -191,6 +206,88 @@ export class ChatService {
         return tab.turnNotificationGate.onAgentSettled();
     }
 
+    reserveQueuedDispatch(tab: ChatServiceTab): boolean {
+        if (tab.queuedMessages.length === 0) return false;
+        tab.isStreamingLocal = true;
+        return true;
+    }
+
+    async dispatchNextQueued(
+        tab: ChatServiceTab,
+        callbacks: QueuedDispatchCallbacks,
+    ): Promise<void> {
+        const text = tab.queuedMessages[0];
+        if (text === undefined) {
+            tab.isStreamingLocal = false;
+            callbacks.publishState();
+            return;
+        }
+
+        const compactInstructions = parseCompactCommand(text);
+        if (compactInstructions !== null) {
+            tab.queuedMessages.shift();
+            callbacks.prepareRequest();
+            try {
+                await callbacks.compact(compactInstructions);
+            } catch {
+                // The concrete session reports compaction failures through its event stream.
+            } finally {
+                tab.isStreamingLocal = false;
+                callbacks.publishState();
+            }
+            if (tab.queuedMessages.length > 0 && !callbacks.isSessionStreaming()) {
+                this.reserveQueuedDispatch(tab);
+                callbacks.publishState();
+                await this.dispatchNextQueued(tab, callbacks);
+            }
+            return;
+        }
+
+        let queuedPrompt: string;
+        try {
+            queuedPrompt = await callbacks.augmentPrompt(text);
+        } catch (error) {
+            tab.isStreamingLocal = false;
+            callbacks.reportError(error);
+            callbacks.publishState();
+            return;
+        }
+
+        // Queue controls remain available during asynchronous preparation.
+        // Never dispatch an expansion prepared for a head that has changed.
+        if (tab.queuedMessages[0] !== text) {
+            await this.dispatchNextQueued(tab, callbacks);
+            return;
+        }
+
+        tab.queuedMessages.shift();
+        if (tab.checkpointManager.rollbackPoint !== null) {
+            tab.checkpointManager.discardSuspended();
+            tab.diffManager.discardSuspended();
+            tab.suspendedMessages = [];
+        }
+        tab.turnCounter++;
+        const turnIndex = tab.turnCounter;
+        tab.checkpointManager.startTurn(turnIndex);
+        tab.diffManager.setCurrentTurn(turnIndex);
+        callbacks.prepareRequest();
+        callbacks.logQueuedPrompt();
+        callbacks.publishState();
+
+        let agentStarted = false;
+        void callbacks.prompt(queuedPrompt, () => {
+            agentStarted = true;
+        }).catch((error) => {
+            if (!agentStarted) tab.queuedMessages.unshift(text);
+            callbacks.reportError(error);
+        }).finally(() => {
+            if (!agentStarted && !callbacks.isSessionStreaming()) {
+                tab.isStreamingLocal = false;
+                callbacks.publishState();
+            }
+        });
+    }
+
     updateTabName(tab: ChatServiceTab): TabNameUpdate {
         const sessionName = tab.session.session?.sessionName;
         if (sessionName && tab.name !== sessionName) {
@@ -264,6 +361,16 @@ export class ChatService {
         }
         return state;
     }
+}
+
+export function parseCompactCommand(text: string): string | undefined | null {
+    const trimmed = text.trim();
+    if (trimmed === '/compact') return undefined;
+    if (trimmed.startsWith('/compact ')) {
+        const instructions = trimmed.slice('/compact '.length).trim();
+        return instructions || undefined;
+    }
+    return null;
 }
 
 function lastAssistantOrdinal(messages: any[]): number {

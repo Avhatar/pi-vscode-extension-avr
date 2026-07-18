@@ -7,7 +7,7 @@ import type { ChatPlatformPorts, FileMentionsPort, StateStore } from '../core/po
 import type { FileChangePlatformPorts } from '../core/ports/file-state';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
-import { ChatService } from '../core/chat/chat-service';
+import { ChatService, parseCompactCommand } from '../core/chat/chat-service';
 import { TabRuntime } from '../core/chat/tab-runtime';
 import type {
     ClientMessage, ServerMessage, TabInfo,
@@ -1211,86 +1211,24 @@ export class ChatController implements vscode.Disposable {
         }
     }
 
-    private async _dispatchNextQueuedMessage(tab: TabState): Promise<void> {
-        const text = tab.queuedMessages[0];
-        if (text === undefined) {
-            tab.isStreamingLocal = false;
-            this.sendStateSync(tab.id);
-            return;
-        }
-
-        const compactInstructions = parseCompactCommand(text);
-        if (compactInstructions !== null) {
-            tab.queuedMessages.shift();
-            this._prepareCacheForRequest(tab);
-            try {
-                await tab.session.compact(compactInstructions);
-            } catch {
-                // The SDK emits compaction_end with a user-facing error message.
-            } finally {
-                tab.isStreamingLocal = false;
-                this.sendStateSync(tab.id);
-            }
-            if (tab.queuedMessages.length > 0 && !tab.session.serializeState().isStreaming) {
-                tab.isStreamingLocal = true;
-                this.sendStateSync(tab.id);
-                await this._dispatchNextQueuedMessage(tab);
-            }
-            return;
-        }
-
-        let queuedPrompt: string;
-        try {
-            queuedPrompt = await this._fileMentions.augmentPromptIfNeeded(text);
-        } catch (error) {
-            tab.isStreamingLocal = false;
-            this._outputChannel.appendLine(
-                `[queued prompt error] ${error instanceof Error ? error.message : String(error)}`,
-            );
-            this.sendStateSync(tab.id);
-            return;
-        }
-
-        // Queue controls remain available while file indexing runs. If the
-        // head item changed, prepare the current head instead of dispatching
-        // stale text or removing a different item.
-        if (tab.queuedMessages[0] !== text) {
-            await this._dispatchNextQueuedMessage(tab);
-            return;
-        }
-
-        tab.queuedMessages.shift();
-        if (tab.checkpointManager.rollbackPoint !== null) {
-            tab.checkpointManager.discardSuspended();
-            tab.diffManager.discardSuspended();
-            tab.suspendedMessages = [];
-        }
-        tab.turnCounter++;
-        const turnIdx = tab.turnCounter;
-        tab.checkpointManager.startTurn(turnIdx);
-        tab.diffManager.setCurrentTurn(turnIdx);
-        this._prepareCacheForRequest(tab);
-        this._logPromptToolState(tab, 'queued');
-        this.sendStateSync(tab.id);
-
-        let agentStarted = false;
-        const stopWatchingAgentStart = tab.session.events.on('agent_start', () => {
-            agentStarted = true;
-        });
-        void this._promptUserTask(tab, queuedPrompt)
-            .catch((error) => {
-                if (!agentStarted) tab.queuedMessages.unshift(text);
+    private _dispatchNextQueuedMessage(tab: TabState): Promise<void> {
+        return this._chatService.dispatchNextQueued(tab, {
+            augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
+            compact: (instructions) => tab.session.compact(instructions),
+            prompt: (text, onAgentStart) => {
+                const stopWatchingAgentStart = tab.session.events.on('agent_start', onAgentStart);
+                return this._promptUserTask(tab, text).finally(stopWatchingAgentStart);
+            },
+            isSessionStreaming: () => tab.session.serializeState().isStreaming,
+            prepareRequest: () => this._prepareCacheForRequest(tab),
+            logQueuedPrompt: () => this._logPromptToolState(tab, 'queued'),
+            publishState: () => this.sendStateSync(tab.id),
+            reportError: (error) => {
                 this._outputChannel.appendLine(
                     `[queued prompt error] ${error instanceof Error ? error.message : String(error)}`,
                 );
-            })
-            .finally(() => {
-                stopWatchingAgentStart();
-                if (!agentStarted && !tab.session.serializeState().isStreaming) {
-                    tab.isStreamingLocal = false;
-                    this.sendStateSync(tab.id);
-                }
-            });
+            },
+        });
     }
 
     getTurnNotificationSettings(): TurnNotificationSettings {
@@ -1528,11 +1466,10 @@ export class ChatController implements vscode.Disposable {
 
         this._updateTabName(tab);
 
-        if (dispatchQueuedAfterEvent && tab.queuedMessages.length > 0) {
+        if (dispatchQueuedAfterEvent && this._chatService.reserveQueuedDispatch(tab)) {
             // Reserve the tab before publishing terminal state. The queued
             // prompt may still need async file-mention expansion, and the
             // webview must continue treating Enter as queueing during that gap.
-            tab.isStreamingLocal = true;
             if (event.type === 'agent_settled') {
                 // agent_settled is not part of the regular state-sync set below;
                 // publish the reservation before awaiting prompt augmentation.
@@ -2278,15 +2215,6 @@ function parseNameCommand(text: string): string | undefined | null {
     if (trimmed === '/name') return undefined;
     if (trimmed.startsWith('/name ')) {
         return trimmed.slice('/name '.length).trim() || undefined;
-    }
-    return null;
-}
-
-function parseCompactCommand(text: string): string | undefined | null {
-    const trimmed = text.trim();
-    if (trimmed === '/compact') return undefined;
-    if (trimmed.startsWith('/compact ')) {
-        return trimmed.slice('/compact '.length).trim() || undefined;
     }
     return null;
 }
