@@ -140,7 +140,7 @@ describe('ChatController command dispatch results', () => {
         expect(promptUserTask).toHaveBeenCalledOnce();
     });
 
-    it('unsubscribes tab runtimes without disposing their resources on controller shutdown', () => {
+    it('unsubscribes tabs without disposing tab or host-owned resources on controller shutdown', () => {
         const unsubscribe = vi.fn();
         const sessionDispose = vi.fn();
         const diffDispose = vi.fn();
@@ -157,7 +157,8 @@ describe('ChatController command dispatch results', () => {
         controller._tabs = new Map([['tab-1', tab]]);
         controller._authChangedSubscription = { dispose: vi.fn() };
         controller._codexUsageUnsubscribe = vi.fn();
-        controller._fileMentions = { dispose: vi.fn() };
+        const fileMentionsDispose = vi.fn();
+        controller._fileMentions = { dispose: fileMentionsDispose };
         controller._sinks = new Set([{}]);
         controller._openPanels = new Map([['tab-1', {}]]);
         controller._panelOpener = vi.fn();
@@ -170,6 +171,7 @@ describe('ChatController command dispatch results', () => {
         expect(sessionDispose).not.toHaveBeenCalled();
         expect(diffDispose).not.toHaveBeenCalled();
         expect(checkpointDispose).not.toHaveBeenCalled();
+        expect(fileMentionsDispose).not.toHaveBeenCalled();
     });
 
     it('reports a missing target tab without dispatching', async () => {

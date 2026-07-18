@@ -4,6 +4,7 @@ import {
     VsCodeSecretStore,
     createVsCodeSessionRuntimePorts,
 } from './adapters/vscode/session-platform';
+import { createVsCodeChatPlatformPorts } from './adapters/vscode/chat-platform';
 import { PiSessionManager } from './pi/session';
 import { getBundledPiPackagePaths } from './pi/bundled-packages';
 import { getCodexUsageStore } from './pi/codex-usage-store';
@@ -23,6 +24,7 @@ import { SubagentCoordinator } from './pi/subagents/coordinator';
 import { SubagentRunStore } from './pi/subagents/persistence';
 import { WriteIsolationManager } from './pi/subagents/write-isolation';
 import { ChildToolFactoryRegistry } from './pi/subagents/child-tools';
+import { WorkspaceFileMentions } from './workspace/file-mentions';
 
 let controllerRef: ChatController | undefined;
 let subagentCoordinatorRef: SubagentCoordinator | undefined;
@@ -81,10 +83,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const statusBar = new StatusBarManager(initialSession);
 
         const diffManager = new DiffManager(initialSession, checkpointManager);
+        const fileMentions = new WorkspaceFileMentions(outputChannel);
+        fileMentions.warmup();
+        context.subscriptions.push(fileMentions);
+        const chatPorts = createVsCodeChatPlatformPorts(context, fileMentions);
 
         const controller = new ChatController(
             context, initialSession, diffManager, checkpointManager, outputChannel,
-            subagentCoordinator, subagentStore, writeIsolation, childToolFactories,
+            subagentCoordinator, subagentStore, writeIsolation, childToolFactories, chatPorts,
         );
         controllerRef = controller;
 

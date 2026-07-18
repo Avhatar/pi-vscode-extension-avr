@@ -3,6 +3,7 @@ import { unlink } from 'fs/promises';
 import { PiSessionManager } from '../pi/session';
 import type { Logger } from '../core/ports/logger';
 import type { SecretStore, SessionRuntimePorts } from '../core/ports/session-platform';
+import type { ChatPlatformPorts, FileMentionsPort, StateStore } from '../core/ports/chat-platform';
 import { TabRuntime } from '../core/chat/tab-runtime';
 import type {
     ClientMessage, ServerMessage, TabInfo,
@@ -22,7 +23,6 @@ import { CheckpointManager } from '../providers/checkpoint';
 import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { computeCodexTurnUsage, isCodexUsageStale } from '../shared/codex-usage';
-import { WorkspaceFileMentions } from '../workspace/file-mentions';
 import type { SubagentCoordinator } from '../pi/subagents/coordinator';
 import { SubagentCapabilityGate } from '../pi/subagents/gating';
 import { projectSubagentLauncherSnapshot } from '../pi/subagents/launcher-state';
@@ -184,6 +184,8 @@ export class ChatController implements vscode.Disposable {
     private readonly _sessionLogger: Logger;
     private readonly _sessionSecrets: SecretStore | undefined;
     private readonly _sessionPorts: SessionRuntimePorts;
+    private readonly _workspaceState: StateStore;
+    private readonly _globalState: StateStore;
     private _context: vscode.ExtensionContext;
 
     private _cacheMode: CacheMode = 'auto';
@@ -196,7 +198,7 @@ export class ChatController implements vscode.Disposable {
     private _activeTabId = '';
     private _authChangedSubscription?: vscode.Disposable;
     private _codexUsageUnsubscribe?: () => void;
-    private _fileMentions: WorkspaceFileMentions;
+    private readonly _fileMentions: FileMentionsPort;
     private readonly _turnNotifier: TurnNotifier;
 
     private _sinks = new Set<ChatViewSink>();
@@ -212,11 +214,9 @@ export class ChatController implements vscode.Disposable {
     /** Tracks which `tabId`s currently have a visible editor panel. */
     private _openPanels = new Map<string, { reveal(viewColumn?: vscode.ViewColumn): void }>();
 
-    /** Persistence for per-tab ToDo toggle. Keyed by the session-file
-     *  path (the same key used for tab persistence) so the toggle
-     *  state survives reload and the tab is matched correctly on
-     *  restore. Default for missing entries: `false` — the model
-     *  knows nothing about ToDo until the user explicitly opts in. */
+    /** Persistence for the per-tab ToDo toggle. Keyed by the session-file
+     *  path so the toggle survives reload and follows the restored session.
+     *  Missing entries fall back to the project selection, then configuration. */
     private static readonly TODO_ENABLED_KEY_PREFIX = 'pi-code.todoEnabled.';
 
     /** Persistence for per-tab Plan Mode toggle. Same shape as ToDo. */
@@ -277,30 +277,32 @@ export class ChatController implements vscode.Disposable {
         private readonly _subagentStore: SubagentRunStore,
         private readonly _writeIsolation: WriteIsolationManager,
         private readonly _childToolFactories: ChildToolFactoryRegistry,
+        chatPorts: ChatPlatformPorts,
     ) {
         this._context = context;
         this._outputChannel = outputChannel;
         this._sessionLogger = initialSession.logger;
         this._sessionSecrets = initialSession.secrets;
         this._sessionPorts = initialSession.ports;
+        this._workspaceState = chatPorts.state.workspace;
+        this._globalState = chatPorts.state.global;
+        this._fileMentions = chatPorts.fileMentions;
         this._turnNotifier = new TurnNotifier(outputChannel);
         this._subagentCoordinator = subagentCoordinator;
         this._subagentGate = new SubagentCapabilityGate(
-            context.workspaceState,
+            this._workspaceState,
             () => vscode.workspace.getConfiguration('pi-code').get<boolean>('subagents.defaultEnabled', false),
         );
-        const storedMode = context.globalState.get<CacheMode>('pi-code.cacheMode');
+        const storedMode = this._globalState.get<CacheMode>('pi-code.cacheMode');
         if (storedMode === 'short' || storedMode === 'long' || storedMode === 'auto') {
             this._cacheMode = storedMode;
         }
-        const storedFavorites = context.globalState.get<string[]>(
+        const storedFavorites = this._globalState.get<string[]>(
             ChatController.FAVORITES_KEY,
         );
         if (Array.isArray(storedFavorites)) {
             this._favoriteModels = new Set(storedFavorites);
         }
-        this._fileMentions = new WorkspaceFileMentions(outputChannel);
-        this._fileMentions.warmup();
 
         const id = nextTabId();
         const tab = new TabRuntime({
@@ -814,13 +816,13 @@ export class ChatController implements vscode.Disposable {
         if (!key) return fallback;
         // Explicitly stored values (`true` / `false`) win over the project
         // tool default and the config default once this chat is customized.
-        const stored = this._context.workspaceState.get<unknown>(key);
+        const stored = this._workspaceState.get<unknown>(key);
         return typeof stored === 'boolean' ? stored : fallback;
     }
 
     private _isSubagentsEnabledFor(tab: TabState): boolean {
         const key = this._subagentGate.key(tab.session.sessionPath);
-        const stored = key ? this._context.workspaceState.get<unknown>(key) : undefined;
+        const stored = key ? this._workspaceState.get<unknown>(key) : undefined;
         if (typeof stored === 'boolean') return stored;
         if (tab.projectToolDefault) return tab.projectToolDefault.enabled.includes('subagent');
         return this._subagentGate.isEnabled(tab.session.sessionPath);
@@ -955,7 +957,7 @@ export class ChatController implements vscode.Disposable {
 
     private _getProjectToolSelectionDefault(): ProjectToolSelectionDefault | undefined {
         return parseProjectToolSelectionDefault(
-            this._context.workspaceState.get<unknown>(ChatController.PROJECT_TOOL_DEFAULT_KEY),
+            this._workspaceState.get<unknown>(ChatController.PROJECT_TOOL_DEFAULT_KEY),
         );
     }
 
@@ -970,7 +972,7 @@ export class ChatController implements vscode.Disposable {
      *  server re-added). */
     private _getDisabledToolsFor(tab: TabState): string[] {
         const key = this._toolsDisabledKey(tab.session.sessionPath);
-        const stored = key ? this._context.workspaceState.get<unknown>(key) : undefined;
+        const stored = key ? this._workspaceState.get<unknown>(key) : undefined;
         if (stored !== undefined) {
             return Array.isArray(stored)
                 ? stored.filter((v): v is string => typeof v === 'string' && v.length > 0)
@@ -987,7 +989,7 @@ export class ChatController implements vscode.Disposable {
         const key = this._toolsDisabledKey(tab.session.sessionPath);
         if (!key) return;
         const uniq = [...new Set(disabled.filter((t) => typeof t === 'string' && t.length > 0))];
-        await this._context.workspaceState.update(key, uniq);
+        await this._workspaceState.update(key, uniq);
     }
 
     /** The full effective denylist for this tab: everything in the Tools
@@ -1038,7 +1040,7 @@ export class ChatController implements vscode.Disposable {
     private async _setTodoEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
         const key = this._todoEnabledKey(tab.session.sessionPath);
         if (key) {
-            await this._context.workspaceState.update(key, enabled);
+            await this._workspaceState.update(key, enabled);
         }
         this._applyPersistedToolSelection(tab);
         this._onLauncherStateChanged.fire();
@@ -1095,7 +1097,7 @@ export class ChatController implements vscode.Disposable {
 
         const todoKey = this._todoEnabledKey(tab.session.sessionPath);
         if (todoKey) {
-            await this._context.workspaceState.update(todoKey, !wantsTodoDisabled);
+            await this._workspaceState.update(todoKey, !wantsTodoDisabled);
         }
         await this._subagentGate.setEnabled(tab.session.sessionPath, !wantsSubagentDisabled, false);
         await this._setDisabledToolsFor(tab, others);
@@ -1137,7 +1139,7 @@ export class ChatController implements vscode.Disposable {
             registered,
             this._effectiveDisabledTools(tab),
         );
-        await this._context.workspaceState.update(ChatController.PROJECT_TOOL_DEFAULT_KEY, selection);
+        await this._workspaceState.update(ChatController.PROJECT_TOOL_DEFAULT_KEY, selection);
         vscode.window.setStatusBarMessage(
             'Pi Code: tool selection saved as the project default for new agents.',
             3000,
@@ -1167,7 +1169,7 @@ export class ChatController implements vscode.Disposable {
             typeof t === 'string' && t.length > 0 && t !== 'todo' && t !== 'subagent');
         const todoKey = this._todoEnabledKey(tab.session.sessionPath);
         if (todoKey) {
-            await this._context.workspaceState.update(todoKey, cfg.todoEnabled);
+            await this._workspaceState.update(todoKey, cfg.todoEnabled);
         }
         const subagentsEnabled = typeof cfg.subagentsEnabled === 'boolean'
             ? cfg.subagentsEnabled
@@ -1286,11 +1288,11 @@ export class ChatController implements vscode.Disposable {
 
     getTurnNotificationSettings(): TurnNotificationSettings {
         return {
-            showPopup: this._context.globalState.get<boolean>(
+            showPopup: this._globalState.get<boolean>(
                 ChatController.NOTIFICATION_SHOW_POPUP_KEY,
                 false,
             ),
-            playSound: this._context.globalState.get<boolean>(
+            playSound: this._globalState.get<boolean>(
                 ChatController.NOTIFICATION_PLAY_SOUND_KEY,
                 false,
             ),
@@ -1298,12 +1300,12 @@ export class ChatController implements vscode.Disposable {
     }
 
     async setNotificationShowPopup(enabled: boolean): Promise<void> {
-        await this._context.globalState.update(ChatController.NOTIFICATION_SHOW_POPUP_KEY, enabled);
+        await this._globalState.update(ChatController.NOTIFICATION_SHOW_POPUP_KEY, enabled);
         this._onLauncherStateChanged.fire();
     }
 
     async setNotificationPlaySound(enabled: boolean): Promise<void> {
-        await this._context.globalState.update(ChatController.NOTIFICATION_PLAY_SOUND_KEY, enabled);
+        await this._globalState.update(ChatController.NOTIFICATION_PLAY_SOUND_KEY, enabled);
         this._onLauncherStateChanged.fire();
     }
 
@@ -1324,13 +1326,13 @@ export class ChatController implements vscode.Disposable {
         const key = this._planModeKey(tab.session.sessionPath);
         const fallback = this._planModeDefaultEnabled();
         if (!key) return fallback;
-        return this._context.workspaceState.get<boolean>(key, fallback);
+        return this._workspaceState.get<boolean>(key, fallback);
     }
 
     private async _setPlanModeEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
         const key = this._planModeKey(tab.session.sessionPath);
         if (key) {
-            await this._context.workspaceState.update(key, enabled);
+            await this._workspaceState.update(key, enabled);
         }
         this._onLauncherStateChanged.fire();
     }
@@ -1360,13 +1362,13 @@ export class ChatController implements vscode.Disposable {
         const key = this._fileUndoViewKey(tab.session.sessionPath);
         const fallback = this._fileUndoViewDefaultEnabled();
         if (!key) return fallback;
-        return this._context.workspaceState.get<boolean>(key, fallback);
+        return this._workspaceState.get<boolean>(key, fallback);
     }
 
     private async _setFileUndoViewEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
         const key = this._fileUndoViewKey(tab.session.sessionPath);
         if (key) {
-            await this._context.workspaceState.update(key, enabled);
+            await this._workspaceState.update(key, enabled);
         }
         // Push fresh state to the chat panel so the bar appears/hides
         // immediately, and to the launcher so the toggle reflects the
@@ -1869,7 +1871,7 @@ export class ChatController implements vscode.Disposable {
                     const next = msg.mode;
                     if (next !== 'short' && next !== 'long' && next !== 'auto') break;
                     this._cacheMode = next;
-                    await this._context.globalState.update('pi-code.cacheMode', next);
+                    await this._globalState.update('pi-code.cacheMode', next);
                     // Re-evaluate effective for every tab so the UI reflects the
                     // change immediately, not only after the next prompt.
                     for (const t of this._tabs.values()) {
@@ -1907,7 +1909,7 @@ export class ChatController implements vscode.Disposable {
                     } else {
                         this._favoriteModels.add(key);
                     }
-                    await this._context.globalState.update(
+                    await this._globalState.update(
                         ChatController.FAVORITES_KEY,
                         [...this._favoriteModels],
                     );
@@ -2317,14 +2319,14 @@ export class ChatController implements vscode.Disposable {
             }))
             .filter(t => t.sessionPath !== '');
 
-        this._context.workspaceState.update('pi-code.tabs', {
+        void this._workspaceState.update('pi-code.tabs', {
             tabs,
             activeIndex: Math.max(0, activeIndex),
         } satisfies PersistedTabsState);
     }
 
     async restorePersistedTabs(): Promise<void> {
-        const persisted = this._context.workspaceState.get<PersistedTabsState>('pi-code.tabs');
+        const persisted = this._workspaceState.get<PersistedTabsState>('pi-code.tabs');
         if (!persisted || persisted.tabs.length === 0) { return; }
 
         // Remember the initial empty tab to dispose after successful restore
@@ -2394,7 +2396,6 @@ export class ChatController implements vscode.Disposable {
         this._authChangedSubscription = undefined;
         this._codexUsageUnsubscribe?.();
         this._codexUsageUnsubscribe = undefined;
-        this._fileMentions.dispose();
         this._sinks.clear();
         this._openPanels.clear();
         this._panelOpener = undefined;

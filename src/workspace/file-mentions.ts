@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import type { WorkspaceFileSuggestion } from '../shared/protocol';
+import type { FileMentionsPort } from '../core/ports/chat-platform';
+import type { WorkspaceFileSuggestion } from '../shared/agent-protocol';
 
 interface WorkspaceFileEntry {
     uri: vscode.Uri;
@@ -50,7 +51,7 @@ const DEFAULT_CONFIG_PATH = '.pi/file-mentions.json';
 const REBUILD_BURST_THRESHOLD = 25;
 const REBUILD_DEBOUNCE_MS = 800;
 
-export class WorkspaceFileMentions implements vscode.Disposable {
+export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPort {
     private _entries: WorkspaceFileEntry[] = [];
     private _entriesByRelativePath = new Map<string, WorkspaceFileEntry>();
     private _indexingPromise: Promise<void> | undefined;
