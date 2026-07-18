@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
+import { ChatService } from '../../../core/chat/chat-service';
 import { TabRuntime } from '../../../core/chat/tab-runtime';
 import { EventRouter } from '../../../pi/events';
 
@@ -218,6 +219,7 @@ function createControllerHarness(): any {
         globalState: { get: vi.fn(), update: vi.fn(async () => undefined) },
     };
     controller._onLauncherStateChanged = { fire: vi.fn() };
+    controller._chatService = new ChatService({ now: () => Date.now() });
     controller._fileMentions = { augmentPromptIfNeeded: async (text: string) => text };
     controller._applyPersistedToolSelection = vi.fn();
     controller._persistTabs = vi.fn();

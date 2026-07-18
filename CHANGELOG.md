@@ -12,6 +12,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Improved chat-tab isolation by moving each tab's transient state, subscriptions, and resource lifecycle into a portable shared runtime.
 - Moved chat preference persistence and workspace file mentions behind portable platform ports without changing their existing behavior.
 - Moved file-change tracking and checkpoint rollback/redo into the portable shared core while preserving VS Code diff review and undo behavior.
+- Moved chat event-derived streaming state and serialized snapshot assembly into a portable shared service without changing tab, queue, or panel behavior.
 
 ### Fixed
 - Queued messages now start after the active agent fully settles instead of being dropped while the SDK still considers the previous run busy.

@@ -7,6 +7,7 @@ import type { ChatPlatformPorts, FileMentionsPort, StateStore } from '../core/po
 import type { FileChangePlatformPorts } from '../core/ports/file-state';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
+import { ChatService } from '../core/chat/chat-service';
 import { TabRuntime } from '../core/chat/tab-runtime';
 import type {
     ClientMessage, ServerMessage, TabInfo,
@@ -33,6 +34,7 @@ import type { ChildToolFactoryRegistry } from '../pi/subagents/child-tools';
 import { routeSubagentMutation } from '../pi/subagents/mutations';
 import { TurnNotifier } from '../notifications/turn-notifier';
 import type { TurnCompletionOutcome } from '../shared/turn-notification';
+import { safeSerialize } from '../shared/safe-serialize';
 
 type TabState = TabRuntime<PiSessionManager, DiffManager, CheckpointManager>;
 
@@ -77,14 +79,6 @@ function nextTabId(): string {
 // be expensive even on a single re-write.
 const AUTO_IDLE_GAP_THRESHOLD_MS = 2 * 60 * 1000;
 const AUTO_LARGE_CONTEXT_TOKENS = 20_000;
-
-function safeSerialize(obj: any): any {
-    try {
-        return JSON.parse(JSON.stringify(obj));
-    } catch {
-        return { type: obj?.type, _serializationFailed: true };
-    }
-}
 
 const PROVIDER_ERROR_MAX = 1200;
 
@@ -188,6 +182,7 @@ export class ChatController implements vscode.Disposable {
     private readonly _workspaceState: StateStore;
     private readonly _globalState: StateStore;
     private readonly _fileChangePorts: FileChangePlatformPorts;
+    private readonly _chatService: ChatService;
     private _context: vscode.ExtensionContext;
 
     private _cacheMode: CacheMode = 'auto';
@@ -290,6 +285,7 @@ export class ChatController implements vscode.Disposable {
         this._globalState = chatPorts.state.global;
         this._fileMentions = chatPorts.fileMentions;
         this._fileChangePorts = chatPorts.fileChanges;
+        this._chatService = new ChatService({ now: () => Date.now() });
         this._turnNotifier = new TurnNotifier(outputChannel);
         this._subagentCoordinator = subagentCoordinator;
         this._subagentGate = new SubagentCapabilityGate(
@@ -1397,19 +1393,10 @@ export class ChatController implements vscode.Disposable {
 
     private async _handleTabEvent(tab: TabState, event: any): Promise<void> {
         let dispatchQueuedAfterEvent = false;
+        if (event.type === 'agent_start') tab.session.markTurnStarted?.();
+        this._chatService.reduceEvent(tab, event);
 
         if (event.type === 'agent_start') {
-            tab.session.markTurnStarted?.();
-            tab.turnNotificationGate.onAgentStart();
-            tab.streamingText = '';
-            tab.streamingThinking = '';
-            tab.isThinking = false;
-            tab.thinkingStartTime = 0;
-            tab.streamingThinkingDuration = 0;
-            tab.agentStartTime = Date.now();
-            tab.isStreamingLocal = true;
-            tab.errorReportedThisRun = false;
-            tab.pendingTools.clear();
             const currentModel = tab.session.getCurrentModel();
             const currentUsage = getCodexUsageStore().getCurrent();
             tab.codexTurnModelId = currentModel?.provider === 'openai-codex' ? currentModel.id : undefined;
@@ -1420,17 +1407,6 @@ export class ChatController implements vscode.Disposable {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
             }
             this._onLauncherStateChanged.fire();
-        }
-
-        if (event.type === 'tool_execution_start' && event.toolCallId) {
-            tab.pendingTools.set(String(event.toolCallId), {
-                name: String(event.toolName ?? '?'),
-                startTime: Date.now(),
-            });
-        }
-
-        if (event.type === 'tool_execution_end' && event.toolCallId) {
-            tab.pendingTools.delete(String(event.toolCallId));
         }
 
         if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'error'
@@ -1447,7 +1423,6 @@ export class ChatController implements vscode.Disposable {
         }
 
         if (event.type === 'compaction_start') {
-            tab.isCompacting = true;
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
             }
@@ -1455,39 +1430,10 @@ export class ChatController implements vscode.Disposable {
         }
 
         if (event.type === 'compaction_end') {
-            tab.isCompacting = false;
             if (tab.id === this._activeTabId && !tab.isStreamingLocal) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
             }
             this._onLauncherStateChanged.fire();
-        }
-
-        if (event.type === 'message_end' && event.message?.role === 'assistant') {
-            const msgs = tab.session.getMessages();
-            let assistantOrdinal = 0;
-            let lastOrdinal = -1;
-            for (let i = 0; i < msgs.length; i++) {
-                if (msgs[i].role === 'assistant') {
-                    lastOrdinal = assistantOrdinal;
-                    assistantOrdinal++;
-                }
-            }
-            if (lastOrdinal >= 0) {
-                const meta = tab.messageMeta.get(lastOrdinal) ?? { thinkingDurationSec: 0, messageEndTime: 0 };
-                meta.thinkingDurationSec = tab.streamingThinkingDuration;
-                meta.messageEndTime = Date.now();
-                tab.messageMeta.set(lastOrdinal, meta);
-            }
-            tab.streamingThinkingDuration = 0;
-            // Reset streaming buffers so the next assistant message in the
-            // same turn starts fresh. Without this, `tab.streamingText` /
-            // `tab.streamingThinking` carry the finalized message's content
-            // into the next `message_update`; deltas append to stale text,
-            // and the webview's `#answer-draft` widget shows duplicated
-            // content when it repopulates after the mid-turn stateSync wipe.
-            tab.streamingText = '';
-            tab.streamingThinking = '';
-            tab.isThinking = false;
         }
 
         if (event.type === 'agent_end') {
@@ -1535,19 +1481,10 @@ export class ChatController implements vscode.Disposable {
             }
             this._logTurnEnd(tab, lastAssistant);
             this._sweepPendingTools(tab, lastAssistant);
-            const turnEndAt = Date.now();
-            const turnDurationMs = tab.agentStartTime > 0
-                ? Math.max(0, turnEndAt - tab.agentStartTime)
-                : 0;
-            if (turnDurationMs > 0) {
-                tab.totalTurnDurationMs += turnDurationMs;
-            }
-            tab.turnNotificationGate.onAgentEnd({
-                tabName: tab.name,
-                outcome: turnCompletionOutcome(lastAssistant),
-                durationMs: turnDurationMs,
-            });
-
+            const agentEndProjection = this._chatService.beginAgentEnd(
+                tab,
+                turnCompletionOutcome(lastAssistant),
+            );
             const baseline = tab.codexTurnBaseline;
             const codexModelId = tab.codexTurnModelId;
             tab.codexTurnBaseline = undefined;
@@ -1557,26 +1494,7 @@ export class ChatController implements vscode.Disposable {
             }
             const after = getCodexUsageStore().getCurrent();
             const turn = computeCodexTurnUsage(baseline ?? null, after, codexModelId);
-            const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
-            if (lastOrdinal >= 0 && (turn || turnDurationMs > 0)) {
-                const meta = tab.messageMeta.get(lastOrdinal) ?? { thinkingDurationSec: 0, messageEndTime: 0 };
-                if (turn) {
-                    meta.codexTurn = turn;
-                }
-                if (turnDurationMs > 0) {
-                    meta.turnDurationMs = turnDurationMs;
-                    meta.totalTurnDurationMs = tab.totalTurnDurationMs;
-                }
-                tab.messageMeta.set(lastOrdinal, meta);
-            }
-            tab.streamingText = '';
-            tab.streamingThinking = '';
-            tab.isThinking = false;
-            tab.thinkingStartTime = 0;
-            tab.streamingThinkingDuration = 0;
-            tab.agentStartTime = 0;
-            tab.isStreamingLocal = false;
-            tab.lastTurnEndAt = turnEndAt;
+            this._chatService.completeAgentEnd(tab, agentEndProjection, turn);
             if (tab.id === this._activeTabId) {
                 vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
             }
@@ -1591,7 +1509,7 @@ export class ChatController implements vscode.Disposable {
         }
 
         if (event.type === 'agent_settled') {
-            const completion = tab.turnNotificationGate.onAgentSettled();
+            const completion = this._chatService.settleAgent(tab);
             if (completion) {
                 this._turnNotifier.notify(completion, this.getTurnNotificationSettings());
                 if (tab.id !== this._activeTabId) {
@@ -1606,32 +1524,6 @@ export class ChatController implements vscode.Disposable {
             // published the old run's terminal state before starting a normal
             // prompt. If that reducer is still active, it dispatches instead.
             dispatchQueuedAfterEvent = !tab.isStreamingLocal;
-        }
-
-        if (event.type === 'message_update' && event.assistantMessageEvent) {
-            const ae = event.assistantMessageEvent;
-            switch (ae.type) {
-                case 'thinking_start':
-                    tab.isThinking = true;
-                    tab.streamingThinking = '';
-                    tab.thinkingStartTime = Date.now();
-                    tab.streamingThinkingDuration = 0;
-                    break;
-                case 'thinking_delta':
-                    tab.streamingThinking += ae.delta ?? '';
-                    break;
-                case 'thinking_end':
-                    tab.isThinking = false;
-                    if (tab.thinkingStartTime > 0) {
-                        tab.streamingThinkingDuration = Math.round(
-                            (Date.now() - tab.thinkingStartTime) / 1000
-                        );
-                    }
-                    break;
-                case 'text_delta':
-                    tab.streamingText += ae.delta ?? '';
-                    break;
-            }
         }
 
         this._updateTabName(tab);
@@ -1672,34 +1564,11 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _updateTabName(tab: TabState): void {
-        const sessionName = tab.session.session?.sessionName;
-        if (sessionName && tab.name !== sessionName) {
-            tab.name = sessionName;
-            this._persistTabs();
-            this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
-            this._onLauncherStateChanged.fire();
-            return;
-        }
-        // Derive tab name from first user message if still default
-        if (tab.name === 'New Agent') {
-            const msgs = tab.session.getMessages();
-            const firstUser = msgs.find((m: any) => m.role === 'user');
-            if (firstUser) {
-                const content = firstUser.content;
-                const text: string = typeof content === 'string'
-                    ? content
-                    : Array.isArray(content)
-                        ? (content.find((c: any) => c.type === 'text')?.text ?? '')
-                        : '';
-                const trimmed = text.replace(/\n/g, ' ').trim().slice(0, 60);
-                if (trimmed) {
-                    tab.name = trimmed;
-                    this._persistTabs();
-                    this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
-                    this._onLauncherStateChanged.fire();
-                }
-            }
-        }
+        const update = this._chatService.updateTabName(tab);
+        if (!update.changed) return;
+        this._persistTabs();
+        this._onTabRenamed.fire({ tabId: tab.id, name: update.name });
+        this._onLauncherStateChanged.fire();
     }
 
     /**
@@ -1711,58 +1580,15 @@ export class ChatController implements vscode.Disposable {
         const tab = this._tabs.get(targetId);
         if (!tab) return;
 
-        const state = tab.session.serializeState();
-        // Override isStreaming with our locally tracked flag because the SDK
-        // sets session.isStreaming = false only AFTER the agent_end listener
-        // returns (in finishRun), so reading it here during agent_end would
-        // still see `true` and the webview would think the agent is still working.
-        state.isStreaming = tab.isStreamingLocal;
-        state.isCompacting = tab.isCompacting;
-        if (tab.suspendedMessages.length > 0) {
-            state.messages = [
-                ...state.messages,
-                ...tab.suspendedMessages.map((m: any) => safeSerialize(m)),
-            ];
-        }
-        state.fileChanges = tab.diffManager.fileChanges;
-        state.rollbackPoint = tab.checkpointManager.rollbackPoint;
-        state.tabs = this._getTabInfos();
-        state.activeTabId = this._activeTabId;
-        state.sessionPath = tab.session.sessionPath ?? undefined;
-        state.streamingText = tab.streamingText;
-        state.streamingThinking = tab.streamingThinking;
-        state.isThinking = tab.isThinking;
-        state.thinkingStartTime = tab.thinkingStartTime;
-        state.streamingThinkingDuration = tab.streamingThinkingDuration;
-        if (tab.queuedMessages.length > 0) {
-            state.queuedMessages = tab.queuedMessages;
-        }
-        state.cacheMode = this._cacheMode;
-        // Recompute on every sync so `auto` reflects the latest idle gap and
-        // context size without waiting for the next prompt to update the chip.
-        state.cacheEffective = this._computeEffectiveCache(tab);
-        tab.cacheEffective = state.cacheEffective;
-        state.fileUndoViewEnabled = this._isFileUndoViewEnabledFor(tab);
-        let assistantOrdinal = 0;
-        for (let i = 0; i < state.messages.length; i++) {
-            if (state.messages[i].role === 'assistant') {
-                const meta = tab.messageMeta.get(assistantOrdinal);
-                if (meta) {
-                    state.messages[i]._thinkingDurationSec = meta.thinkingDurationSec;
-                    state.messages[i]._messageEndTime = meta.messageEndTime;
-                    if (meta.turnDurationMs !== undefined) {
-                        state.messages[i]._turnDurationMs = meta.turnDurationMs;
-                    }
-                    if (meta.totalTurnDurationMs !== undefined) {
-                        state.messages[i]._totalTurnDurationMs = meta.totalTurnDurationMs;
-                    }
-                    if (meta.codexTurn) {
-                        state.messages[i]._codexTurnUsage = meta.codexTurn;
-                    }
-                }
-                assistantOrdinal++;
-            }
-        }
+        const state = this._chatService.buildState(tab, {
+            activeTabId: this._activeTabId,
+            getTabs: () => this._getTabInfos(),
+            cacheMode: this._cacheMode,
+            // Recompute on every sync so `auto` reflects the latest idle gap
+            // and context size without waiting for the next prompt.
+            getCacheEffective: () => this._computeEffectiveCache(tab),
+            getFileUndoViewEnabled: () => this._isFileUndoViewEnabledFor(tab),
+        });
         this._postForTab(targetId, { type: 'stateSync', state });
     }
 
@@ -2445,18 +2271,6 @@ function renderTranscriptContent(content: unknown): string {
         if (part?.type === 'text') return String(part.text ?? '');
         return `\`\`\`json\n${JSON.stringify(part, null, 2)}\n\`\`\``;
     }).join('\n\n');
-}
-
-function lastAssistantOrdinal(messages: any[]): number {
-    let ordinal = -1;
-    let counter = 0;
-    for (const m of messages) {
-        if (m && m.role === 'assistant') {
-            ordinal = counter;
-            counter++;
-        }
-    }
-    return ordinal;
 }
 
 function parseNameCommand(text: string): string | undefined | null {

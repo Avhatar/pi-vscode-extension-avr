@@ -80,6 +80,32 @@ describe('ChatController platform ports', () => {
         );
     });
 
+    it('persists turn start before delegating portable event projection', async () => {
+        const order: string[] = [];
+        const tab: any = {
+            id: 'tab-1',
+            name: 'Chat',
+            session: {
+                markTurnStarted: vi.fn(() => order.push('persist-start')),
+                getCurrentModel: vi.fn(() => undefined),
+            },
+            queuedMessages: [],
+        };
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._activeTabId = 'tab-1';
+        controller._chatService = {
+            reduceEvent: vi.fn(() => order.push('reduce-event')),
+        };
+        controller._onLauncherStateChanged = { fire: vi.fn() };
+        controller._updateTabName = vi.fn();
+        controller._postForTab = vi.fn();
+        controller.sendStateSync = vi.fn();
+
+        await controller._handleTabEvent(tab, { type: 'agent_start' });
+
+        expect(order).toEqual(['persist-start', 'reduce-event']);
+    });
+
     it('routes VS Code diff review through the injected presenter', async () => {
         const review = {
             filePath: 'src/main.ts',
