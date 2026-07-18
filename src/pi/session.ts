@@ -1,5 +1,5 @@
 import * as process from 'node:process';
-import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@earendil-works/pi-coding-agent';
+import type { AgentSession, AgentSessionEvent, ModelRegistry, ResourceLoader } from '@earendil-works/pi-coding-agent';
 import type { Logger } from '../core/ports/logger';
 import {
     DEFAULT_SESSION_RUNTIME_PORTS,
@@ -39,6 +39,7 @@ import { isContextUsageEstimated } from './context-usage';
 import type { SubagentCoordinator } from './subagents/coordinator';
 import { SubagentManager } from './subagents/manager';
 import { PiChildSessionFactory, CHILD_SAFE_TOOLS } from './subagents/pi-child-session';
+import { PiSessionRuntime, type PiSessionRuntimeState } from './session-runtime';
 import { AgentRegistry } from './subagents/registry';
 import { resolveAgentSpec } from './subagents/resolver';
 import { createSubagentExtension } from './subagents/extension';
@@ -53,11 +54,16 @@ import type { SubagentRunStore } from './subagents/persistence';
 import type { WriteIsolationManager } from './subagents/write-isolation';
 import type { ChildToolFactoryRegistry } from './subagents/child-tools';
 
+interface CreatedSessionRuntime extends PiSessionRuntimeState {
+    cwd: string;
+    modelFallbackMessage?: string;
+}
+
+type SessionCreationKind = 'initial' | 'restore' | 'new' | 'load';
+
 export class PiSessionManager {
-    private _session: AgentSession | undefined;
-    private _sessionManager: SessionManager | undefined;
+    private readonly _runtime: PiSessionRuntime;
     private _modelRegistry: ModelRegistry | undefined;
-    private _unsubscribe: (() => void) | undefined;
     private _outputChannel: Logger;
     private _secrets: SecretStore | undefined;
     readonly events = new EventRouter();
@@ -85,6 +91,9 @@ export class PiSessionManager {
     ) {
         this._outputChannel = outputChannel;
         this._secrets = secrets;
+        this._runtime = new PiSessionRuntime(
+            (session) => session.subscribe(this.events.asSessionListener()),
+        );
         this._backgroundNotificationUnsubscribe = this.events.onAll((event) => {
             if (event.type === 'agent_end') this._flushBackgroundSubagentNotifications();
         });
@@ -110,57 +119,31 @@ export class PiSessionManager {
         return this._ports.workspace.getRoot() ?? process.cwd();
     }
 
+    private get _session(): AgentSession | undefined {
+        return this._runtime.session;
+    }
+
+    private get _sessionManager() {
+        return this._runtime.sessionManager;
+    }
+
     get session(): AgentSession | undefined {
-        return this._session;
+        return this._runtime.session;
     }
 
     get isReady(): boolean {
-        return this._session !== undefined;
+        return this._runtime.isReady;
     }
 
     async initialize(): Promise<void> {
         this._outputChannel.appendLine('Initializing Pi session...');
-        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
+        const state = await this._runtime.start(() => this._createSessionRuntime('initial'));
+        await this._activateSessionRuntime(state);
 
-        const cwd = this._getCwd();
-        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
-        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
-        // typically the VS Code install directory, not the workspace, so those configs are missed.
-        // Chdir to the workspace folder so adapters resolve project files correctly.
-        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
-        const authStorage = await getAuthStorage(this._secrets);
-        this._modelRegistry = await getModelRegistry((message) => this._outputChannel.appendLine(message));
-
-        this._sessionManager = SM.create(cwd);
-
-        const allowedTools = this._ports.settings.get('allowedTools', []);
-
-        const resourceLoader = await this._buildResourceLoader(cwd);
-
-        const opts: any = {
-            cwd,
-            authStorage,
-            modelRegistry: this._modelRegistry,
-            sessionManager: this._sessionManager,
-            resourceLoader,
-        };
-        if (allowedTools.length > 0) {
-            opts.tools = allowedTools;
+        if (state.modelFallbackMessage) {
+            this._outputChannel.appendLine(`Model fallback: ${state.modelFallbackMessage}`);
         }
-
-        const { session, modelFallbackMessage } = await createAgentSession(opts);
-
-        await this._bindExtensions(session);
-
-        this._session = session;
-        this._unsubscribe = session.subscribe(this.events.asSessionListener());
-        await this._resetSubagentManager(cwd, session);
-
-        if (modelFallbackMessage) {
-            this._outputChannel.appendLine(`Model fallback: ${modelFallbackMessage}`);
-        }
-
-        await this._applyDefaultSettings(session);
+        await this._applyDefaultSettings(state.session);
 
         // Initial todo visibility is decided by the controller from the
         // per-session persisted toggle (see ChatController._subscribeTab
@@ -170,7 +153,7 @@ export class PiSessionManager {
         // OFF only when the user explicitly toggled it off for this
         // session.
 
-        const model = session.model;
+        const model = state.session.model;
         this._outputChannel.appendLine(
             `Pi session initialized. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
         );
@@ -272,6 +255,60 @@ export class PiSessionManager {
             hasSubagent: active.includes('subagent'),
             subagentRegistered: registered.includes('subagent'),
         };
+    }
+
+    private async _createSessionRuntime(
+        kind: SessionCreationKind,
+        sessionPath?: string,
+    ): Promise<CreatedSessionRuntime> {
+        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
+        const cwd = this._getCwd();
+        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
+        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
+        // typically the VS Code install directory, not the workspace, so those configs are missed.
+        // Chdir to the workspace folder so adapters resolve project files correctly.
+        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
+
+        let authStorage;
+        if (kind === 'initial' || kind === 'restore') {
+            authStorage = await getAuthStorage(this._secrets);
+            this._modelRegistry = await getModelRegistry(
+                (message) => this._outputChannel.appendLine(message),
+            );
+        } else {
+            await refreshModelRegistry((message) => this._outputChannel.appendLine(message));
+        }
+
+        if ((kind === 'restore' || kind === 'load') && !sessionPath) {
+            throw new Error(`Session path is required for ${kind}`);
+        }
+        const sessionManager = kind === 'initial' || kind === 'new'
+            ? SM.create(cwd)
+            : SM.open(sessionPath!, undefined);
+        const allowedTools = kind === 'load'
+            ? []
+            : this._ports.settings.get('allowedTools', []);
+        const resourceLoader = await this._buildResourceLoader(cwd);
+        authStorage ??= await getAuthStorage(this._secrets);
+
+        const opts: any = {
+            cwd,
+            authStorage,
+            modelRegistry: this._modelRegistry,
+            sessionManager,
+            resourceLoader,
+        };
+        if (allowedTools.length > 0) {
+            opts.tools = allowedTools;
+        }
+
+        const { session, modelFallbackMessage } = await createAgentSession(opts);
+        await this._bindExtensions(session);
+        return { session, sessionManager, cwd, modelFallbackMessage };
+    }
+
+    private async _activateSessionRuntime(state: CreatedSessionRuntime): Promise<void> {
+        await this._resetSubagentManager(state.cwd, state.session);
     }
 
     private async _buildResourceLoader(cwd: string): Promise<ResourceLoader> {
@@ -525,45 +562,12 @@ export class PiSessionManager {
     }
 
     async newSession(): Promise<void> {
-        if (!this._session) { return; }
+        if (!this._runtime.isReady) { return; }
         await this._subagentManager?.dispose();
         this._subagentManager = undefined;
-        this._unsubscribe?.();
-        this._session.dispose();
-        const { createAgentSession } = await import('@earendil-works/pi-coding-agent');
-        const cwd = this._getCwd();
-        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
-        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
-        // typically the VS Code install directory, not the workspace, so those configs are missed.
-        // Chdir to the workspace folder so adapters resolve project files correctly.
-        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
-        const { SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
-        await refreshModelRegistry((message) => this._outputChannel.appendLine(message));
-        this._sessionManager = SM.create(cwd);
-
-        const allowedTools = this._ports.settings.get('allowedTools', []);
-
-        const resourceLoader = await this._buildResourceLoader(cwd);
-
-        const opts: any = {
-            cwd,
-            authStorage: await getAuthStorage(this._secrets),
-            modelRegistry: this._modelRegistry,
-            sessionManager: this._sessionManager,
-            resourceLoader,
-        };
-        if (allowedTools.length > 0) {
-            opts.tools = allowedTools;
-        }
-
-        const { session } = await createAgentSession(opts);
-
-        await this._bindExtensions(session);
-
-        this._session = session;
-        this._unsubscribe = session.subscribe(this.events.asSessionListener());
-        await this._resetSubagentManager(cwd, session);
-        await this._applyDefaultSettings(session);
+        const state = await this._runtime.replace(() => this._createSessionRuntime('new'));
+        await this._activateSessionRuntime(state);
+        await this._applyDefaultSettings(state.session);
     }
 
     get sessionPath(): string | undefined {
@@ -572,42 +576,13 @@ export class PiSessionManager {
 
     async initializeFromPath(sessionPath: string): Promise<void> {
         this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
-        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
-        const cwd = this._getCwd();
-        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
-        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
-        // typically the VS Code install directory, not the workspace, so those configs are missed.
-        // Chdir to the workspace folder so adapters resolve project files correctly.
-        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
-        const authStorage = await getAuthStorage(this._secrets);
-        this._modelRegistry = await getModelRegistry((message) => this._outputChannel.appendLine(message));
-        this._sessionManager = SM.open(sessionPath, undefined);
+        const state = await this._runtime.start(
+            () => this._createSessionRuntime('restore', sessionPath),
+        );
+        await this._activateSessionRuntime(state);
+        await this._applyDefaultSettings(state.session);
 
-        const allowedTools = this._ports.settings.get('allowedTools', []);
-
-        const resourceLoader = await this._buildResourceLoader(cwd);
-
-        const opts: any = {
-            cwd,
-            authStorage,
-            modelRegistry: this._modelRegistry,
-            sessionManager: this._sessionManager,
-            resourceLoader,
-        };
-        if (allowedTools.length > 0) {
-            opts.tools = allowedTools;
-        }
-
-        const { session } = await createAgentSession(opts);
-
-        await this._bindExtensions(session);
-
-        this._session = session;
-        this._unsubscribe = session.subscribe(this.events.asSessionListener());
-        await this._resetSubagentManager(cwd, session);
-        await this._applyDefaultSettings(session);
-
-        const model = session.model;
+        const model = state.session.model;
         this._outputChannel.appendLine(
             `Session restored. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
         );
@@ -632,36 +607,13 @@ export class PiSessionManager {
     }
 
     async loadSession(sessionPath: string): Promise<void> {
-        if (!this._session) { return; }
+        if (!this._runtime.isReady) { return; }
         await this._subagentManager?.dispose();
         this._subagentManager = undefined;
-        this._unsubscribe?.();
-        this._session.dispose();
-        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
-        const cwd = this._getCwd();
-        // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
-        // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
-        // typically the VS Code install directory, not the workspace, so those configs are missed.
-        // Chdir to the workspace folder so adapters resolve project files correctly.
-        try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
-        await refreshModelRegistry((message) => this._outputChannel.appendLine(message));
-        this._sessionManager = SM.open(sessionPath, undefined);
-
-        const resourceLoader = await this._buildResourceLoader(cwd);
-
-        const { session } = await createAgentSession({
-            cwd,
-            authStorage: await getAuthStorage(this._secrets),
-            modelRegistry: this._modelRegistry,
-            sessionManager: this._sessionManager,
-            resourceLoader,
-        });
-
-        await this._bindExtensions(session);
-
-        this._session = session;
-        this._unsubscribe = session.subscribe(this.events.asSessionListener());
-        await this._resetSubagentManager(cwd, session);
+        const state = await this._runtime.replace(
+            () => this._createSessionRuntime('load', sessionPath),
+        );
+        await this._activateSessionRuntime(state);
     }
 
     getModels(): ModelInfo[] {
@@ -1143,9 +1095,7 @@ export class PiSessionManager {
         this._flushBackgroundSubagentNotifications();
         this._backgroundNotificationUnsubscribe?.();
         this._backgroundNotificationUnsubscribe = undefined;
-        this._unsubscribe?.();
-        this._session?.dispose();
-        this._session = undefined;
+        await this._runtime.dispose();
         this._onSubagentStateChanged.dispose();
         this._onSubagentMutation.dispose();
         this._onSubagentNotification.dispose();

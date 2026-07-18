@@ -8,7 +8,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
-- Continued the shared session-runtime extraction by moving Pi session logging, workspace discovery, trust, typed settings, secrets, model dialogs, and bundled resource paths behind platform-neutral ports.
+- Continued the shared session-runtime extraction by moving host capabilities behind platform-neutral ports and centralizing Pi session ownership and replacement in a portable runtime.
 
 ## [0.58.0] - 2026-07-18
 

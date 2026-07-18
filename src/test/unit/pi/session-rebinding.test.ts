@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSessionEvent, AgentSessionEventListener } from '@earendil-works/pi-coding-agent';
 import { PiSessionManager } from '../../../pi/session';
+import { DEFAULT_SESSION_RUNTIME_PORTS } from '../../../core/ports/session-platform';
 import { resetTestWorkspace, setTestWorkspaceRoot } from '../../mocks/vscode';
 
 const sdkMocks = vi.hoisted(() => ({
@@ -68,18 +69,21 @@ describe('PiSessionManager session replacement', () => {
     });
 
     it('newSession rebinds extensions and events while preserving router subscribers', async () => {
-        const harness = createReplacementHarness();
+        const harness = await createReplacementHarness();
         activeManager = harness.manager;
 
         await harness.manager.newSession();
 
         expect(sdkMocks.createSessionManager).toHaveBeenCalledWith(process.cwd());
         expect(sdkMocks.openSessionManager).not.toHaveBeenCalled();
+        expect(sdkMocks.createAgentSession).toHaveBeenCalledWith(
+            expect.objectContaining({ cwd: process.cwd(), tools: ['read'] }),
+        );
         expectReplacementLifecycle(harness, true);
     });
 
     it('loadSession rebinds extensions and events while preserving router subscribers', async () => {
-        const harness = createReplacementHarness();
+        const harness = await createReplacementHarness();
         const sessionPath = 'X:/sessions/existing.jsonl';
         activeManager = harness.manager;
 
@@ -87,6 +91,9 @@ describe('PiSessionManager session replacement', () => {
 
         expect(sdkMocks.openSessionManager).toHaveBeenCalledWith(sessionPath, undefined);
         expect(sdkMocks.createSessionManager).not.toHaveBeenCalled();
+        const creationOptions = sdkMocks.createAgentSession.mock.calls[0][0];
+        expect(creationOptions.cwd).toBe(process.cwd());
+        expect(creationOptions).not.toHaveProperty('tools');
         expectReplacementLifecycle(harness, false);
     });
 });
@@ -101,20 +108,34 @@ interface ReplacementHarness {
     applyDefaultSettings: ReturnType<typeof vi.fn>;
 }
 
-function createReplacementHarness(): ReplacementHarness {
+async function createReplacementHarness(): Promise<ReplacementHarness> {
     const order: string[] = [];
     const original = createFakeAgentSession('original', order);
     const replacement = createFakeAgentSession('replacement', order);
     const outputChannel = { appendLine: vi.fn() };
-    const manager = new PiSessionManager(outputChannel as any);
+    const manager = new PiSessionManager(
+        outputChannel as any,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+            ...DEFAULT_SESSION_RUNTIME_PORTS,
+            settings: {
+                get: ((key: string, fallback: unknown) =>
+                    key === 'allowedTools' ? ['read'] : fallback) as any,
+            },
+        },
+    );
     const observedEvents: string[] = [];
     manager.events.onAll(event => observedEvents.push(event.type));
 
-    const originalUnsubscribe = original.session.subscribe(manager.events.asSessionListener());
-    (manager as any)._session = original.session;
-    (manager as any)._sessionManager = { getSessionFile: () => undefined };
+    await (manager as any)._runtime.start(async () => ({
+        session: original.session,
+        sessionManager: { getSessionFile: () => undefined },
+    }));
     (manager as any)._modelRegistry = {};
-    (manager as any)._unsubscribe = originalUnsubscribe;
     (manager as any)._subagentManager = {
         async dispose(): Promise<void> {
             order.push('original-subagents:dispose');

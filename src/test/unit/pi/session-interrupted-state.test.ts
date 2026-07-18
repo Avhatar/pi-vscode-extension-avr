@@ -12,15 +12,24 @@ function createSession(messages: any[], isStreaming: boolean, isCompacting = fal
         sessionName: 'Session',
         getActiveToolNames: () => [],
         getContextUsage: () => undefined,
+        subscribe: () => () => undefined,
         dispose: () => undefined,
     };
 }
 
+async function startRuntime(manager: any, session: any, sessionManager: any): Promise<void> {
+    await manager._runtime.start(async () => ({ session, sessionManager }));
+}
+
+async function replaceRuntime(manager: any, session: any, sessionManager: any): Promise<void> {
+    await manager._runtime.replace(async () => ({ session, sessionManager }));
+}
+
 describe('PiSessionManager interrupted turn state', () => {
-    it('persists explicit turn lifecycle boundaries outside model context', () => {
+    it('persists explicit turn lifecycle boundaries outside model context', async () => {
         const manager = new PiSessionManager({ appendLine(): void {} } as any) as any;
         const appendCustomEntry = vi.fn();
-        manager._sessionManager = { appendCustomEntry };
+        await startRuntime(manager, createSession([], false), { appendCustomEntry });
 
         manager.markTurnStarted();
         manager.markTurnCompleted();
@@ -29,58 +38,65 @@ describe('PiSessionManager interrupted turn state', () => {
             ['pi-code.turn-lifecycle', { status: 'started' }],
             ['pi-code.turn-lifecycle', { status: 'completed' }],
         ]);
-        manager.dispose();
+        await manager.dispose();
     });
 
-    it('marks an idle restored session whose persisted tail still requires continuation', () => {
+    it('marks an idle restored session whose persisted tail still requires continuation', async () => {
         const manager = new PiSessionManager({ appendLine(): void {} } as any) as any;
-        manager._session = createSession([
+        const session = createSession([
             { role: 'user', content: 'Work' },
             { role: 'assistant', content: [{ type: 'toolCall', id: 'tool-1', name: 'todo' }] },
             { role: 'toolResult', toolCallId: 'tool-1', toolName: 'todo', content: [] },
         ], false);
-        manager._sessionManager = {
+        await startRuntime(manager, session, {
             getBranch: () => [{
                 type: 'custom',
                 customType: 'pi-code.turn-lifecycle',
                 data: { status: 'started' },
             }],
-        };
+        });
 
         expect(manager.serializeState()).toMatchObject({
             isStreaming: false,
             interruptedTurn: { reason: 'incomplete_session_tail' },
         });
-        manager.dispose();
+        await manager.dispose();
     });
 
-    it('does not mark a live turn or a completed assistant tail as interrupted', () => {
+    it('does not mark a live turn or a completed assistant tail as interrupted', async () => {
         const manager = new PiSessionManager({ appendLine(): void {} } as any) as any;
-        manager._sessionManager = {
+        const startedLifecycle = {
             getBranch: () => [{
                 type: 'custom',
                 customType: 'pi-code.turn-lifecycle',
                 data: { status: 'started' },
             }],
         };
-        manager._session = createSession([{ role: 'user', content: 'Work' }], true);
+        await startRuntime(
+            manager,
+            createSession([{ role: 'user', content: 'Work' }], true),
+            startedLifecycle,
+        );
         expect(manager.serializeState()).not.toHaveProperty('interruptedTurn');
 
-        manager._session = createSession([{ role: 'user', content: 'Work' }], false, true);
+        await replaceRuntime(
+            manager,
+            createSession([{ role: 'user', content: 'Work' }], false, true),
+            startedLifecycle,
+        );
         expect(manager.serializeState()).not.toHaveProperty('interruptedTurn');
 
-        manager._sessionManager = {
+        await replaceRuntime(manager, createSession([
+            { role: 'user', content: 'Work' },
+            { role: 'assistant', content: [{ type: 'text', text: 'Done' }], stopReason: 'stop' },
+        ], false), {
             getBranch: () => [{
                 type: 'custom',
                 customType: 'pi-code.turn-lifecycle',
                 data: { status: 'completed' },
             }],
-        };
-        manager._session = createSession([
-            { role: 'user', content: 'Work' },
-            { role: 'assistant', content: [{ type: 'text', text: 'Done' }], stopReason: 'stop' },
-        ], false);
+        });
         expect(manager.serializeState()).not.toHaveProperty('interruptedTurn');
-        manager.dispose();
+        await manager.dispose();
     });
 });
