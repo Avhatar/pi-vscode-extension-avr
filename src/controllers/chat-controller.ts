@@ -4,6 +4,9 @@ import { PiSessionManager } from '../pi/session';
 import type { Logger } from '../core/ports/logger';
 import type { SecretStore, SessionRuntimePorts } from '../core/ports/session-platform';
 import type { ChatPlatformPorts, FileMentionsPort, StateStore } from '../core/ports/chat-platform';
+import type { FileChangePlatformPorts } from '../core/ports/file-state';
+import { DiffManager } from '../core/files/diff-manager';
+import { CheckpointManager } from '../core/files/checkpoint-manager';
 import { TabRuntime } from '../core/chat/tab-runtime';
 import type {
     ClientMessage, ServerMessage, TabInfo,
@@ -18,8 +21,6 @@ import {
     parseProjectToolSelectionDefault,
     type ProjectToolSelectionDefault,
 } from '../shared/project-tool-default';
-import { DiffManager } from '../providers/diff';
-import { CheckpointManager } from '../providers/checkpoint';
 import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { computeCodexTurnUsage, isCodexUsageStale } from '../shared/codex-usage';
@@ -186,6 +187,7 @@ export class ChatController implements vscode.Disposable {
     private readonly _sessionPorts: SessionRuntimePorts;
     private readonly _workspaceState: StateStore;
     private readonly _globalState: StateStore;
+    private readonly _fileChangePorts: FileChangePlatformPorts;
     private _context: vscode.ExtensionContext;
 
     private _cacheMode: CacheMode = 'auto';
@@ -287,6 +289,7 @@ export class ChatController implements vscode.Disposable {
         this._workspaceState = chatPorts.state.workspace;
         this._globalState = chatPorts.state.global;
         this._fileMentions = chatPorts.fileMentions;
+        this._fileChangePorts = chatPorts.fileChanges;
         this._turnNotifier = new TurnNotifier(outputChannel);
         this._subagentCoordinator = subagentCoordinator;
         this._subagentGate = new SubagentCapabilityGate(
@@ -607,6 +610,15 @@ export class ChatController implements vscode.Disposable {
         );
     }
 
+    private _createFileChangeManagers(session: PiSessionManager): {
+        checkpoint: CheckpointManager;
+        diff: DiffManager;
+    } {
+        const checkpoint = new CheckpointManager(this._fileChangePorts.fileState);
+        const diff = new DiffManager(session, checkpoint, this._fileChangePorts.fileState);
+        return { checkpoint, diff };
+    }
+
     /**
      * Load a session from disk into a brand-new tab and return its id.
      * Used by the panel serializer when restoring a panel whose session
@@ -616,8 +628,7 @@ export class ChatController implements vscode.Disposable {
         const session = this._createSessionManager();
         await session.initializeFromPath(sessionPath);
 
-        const checkpoint = new CheckpointManager();
-        const diff = new DiffManager(session, checkpoint);
+        const { checkpoint, diff } = this._createFileChangeManagers(session);
 
         const id = nextTabId();
         const tab = new TabRuntime({
@@ -1987,7 +1998,9 @@ export class ChatController implements vscode.Disposable {
                     break;
                 }
                 case 'openDiff':
-                    await tab.diffManager.openDiff(msg.filePath, msg.toolCallId);
+                    await this._fileChangePorts.diffPresenter.openDiff(
+                        tab.diffManager.getReview(msg.filePath, msg.toolCallId),
+                    );
                     break;
                 case 'undoFileChange':
                     await tab.diffManager.undoFileChange(msg.filePath, msg.toolCallId);
@@ -2243,8 +2256,8 @@ export class ChatController implements vscode.Disposable {
         const newSession = this._createSessionManager();
         await newSession.initialize();
 
-        const newCheckpoint = new CheckpointManager();
-        const newDiff = new DiffManager(newSession, newCheckpoint);
+        const { checkpoint: newCheckpoint, diff: newDiff } =
+            this._createFileChangeManagers(newSession);
 
         const id = nextTabId();
         const tab = new TabRuntime({
@@ -2340,8 +2353,7 @@ export class ChatController implements vscode.Disposable {
                 const session = this._createSessionManager();
                 await session.initializeFromPath(sessionPath);
 
-                const checkpoint = new CheckpointManager();
-                const diff = new DiffManager(session, checkpoint);
+                const { checkpoint, diff } = this._createFileChangeManagers(session);
 
                 const id = nextTabId();
                 const tab = new TabRuntime({

@@ -4,8 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { EventRouter } from '../../../pi/events';
 import type { PiSessionManager } from '../../../pi/session';
-import { CheckpointManager } from '../../../providers/checkpoint';
-import { DiffManager } from '../../../providers/diff';
+import { CheckpointManager } from '../../../core/files/checkpoint-manager';
+import { DiffManager } from '../../../core/files/diff-manager';
+import { VsCodeWorkspaceFileState } from '../../../adapters/vscode/workspace-file-state';
 import type { FileChangeInfo } from '../../../shared/protocol';
 import { resetTestWorkspace, setTestWorkspaceRoot } from '../../mocks/vscode';
 
@@ -19,8 +20,13 @@ describe('DiffManager', () => {
         temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-diff-test-'));
         setTestWorkspaceRoot(temporaryDirectory);
         events = new EventRouter();
-        checkpoints = new CheckpointManager();
-        diffs = new DiffManager({ events } as unknown as PiSessionManager, checkpoints);
+        const fileState = new VsCodeWorkspaceFileState();
+        checkpoints = new CheckpointManager(fileState);
+        diffs = new DiffManager(
+            { events } as unknown as PiSessionManager,
+            checkpoints,
+            fileState,
+        );
     });
 
     afterEach(() => {

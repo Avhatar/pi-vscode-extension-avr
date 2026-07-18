@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { CheckpointManager } from '../../../providers/checkpoint';
+import { CheckpointManager } from '../../../core/files/checkpoint-manager';
+import { VsCodeWorkspaceFileState } from '../../../adapters/vscode/workspace-file-state';
 import { resetTestWorkspace, setTestWorkspaceRoot } from '../../mocks/vscode';
 
 describe('CheckpointManager', () => {
@@ -12,7 +13,7 @@ describe('CheckpointManager', () => {
     beforeEach(() => {
         temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-checkpoint-test-'));
         setTestWorkspaceRoot(temporaryDirectory);
-        checkpoints = new CheckpointManager();
+        checkpoints = new CheckpointManager(new VsCodeWorkspaceFileState());
     });
 
     afterEach(() => {

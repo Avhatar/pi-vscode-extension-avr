@@ -11,6 +11,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Continued the shared session-runtime extraction by moving host capabilities behind platform-neutral ports and centralizing Pi session ownership and replacement in a portable runtime.
 - Improved chat-tab isolation by moving each tab's transient state, subscriptions, and resource lifecycle into a portable shared runtime.
 - Moved chat preference persistence and workspace file mentions behind portable platform ports without changing their existing behavior.
+- Moved file-change tracking and checkpoint rollback/redo into the portable shared core while preserving VS Code diff review and undo behavior.
 
 ### Fixed
 - Queued messages now start after the active agent fully settles instead of being dropped while the SDK still considers the previous run busy.

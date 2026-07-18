@@ -215,8 +215,12 @@ Pi extensions (npm packages keyed `pi-package`, e.g. `pi-web-access`) ship **ins
 | `src/providers/chat-panel.ts` | Editor-area `WebviewPanel` per chat |
 | `src/providers/chat-panel-serializer.ts` | Restores chat panels across `Reload Window` |
 | `src/providers/settings-panel.ts` | WebviewPanel for the settings page |
-| `src/providers/diff.ts` | File change tracking, unified diff generation |
-| `src/providers/checkpoint.ts` | Per-turn file snapshots, rollback/redo |
+| `src/core/files/` | Portable file-change tracking and checkpoint rollback/redo state machines |
+| `src/core/ports/file-state.ts` | Portable synchronous filesystem and diff-presentation contracts |
+| `src/adapters/vscode/workspace-file-state.ts` | VS Code workspace path and Node filesystem adapter |
+| `src/adapters/vscode/diff-presenter.ts` | VS Code diff editor and virtual before-content presentation |
+| `src/providers/diff.ts` | Compatibility exports for file-change tracking and diff presentation |
+| `src/providers/checkpoint.ts` | Compatibility export for portable checkpoint management |
 | `src/providers/status-bar.ts` | Status bar item |
 | `src/pi/todo/` | Per-chat persistent ToDo (reducer, replay, store, tool schema) |
 | `src/pi/subagents/` | Agent registry/resolution, child runtime, persistence, lifecycle, worktree isolation, compatibility sources, and smoke scenarios |

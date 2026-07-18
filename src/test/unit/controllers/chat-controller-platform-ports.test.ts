@@ -80,6 +80,78 @@ describe('ChatController platform ports', () => {
         );
     });
 
+    it('routes VS Code diff review through the injected presenter', async () => {
+        const review = {
+            filePath: 'src/main.ts',
+            absolutePath: '/workspace/src/main.ts',
+            toolCallId: 'tool-1',
+            originalContent: 'before',
+        };
+        const diffManager = { getReview: vi.fn(() => review) };
+        const openDiff = vi.fn(async () => undefined);
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', { id: 'tab-1', diffManager }]]);
+        controller._activeTabId = 'tab-1';
+        controller._fileChangePorts = { diffPresenter: { openDiff } };
+        controller._outputChannel = { appendLine: vi.fn() };
+
+        await expect(controller.handleMessage({
+            type: 'openDiff',
+            filePath: 'src/main.ts',
+            toolCallId: 'tool-1',
+        }, 'tab-1')).resolves.toEqual({ ok: true });
+
+        expect(diffManager.getReview).toHaveBeenCalledWith('src/main.ts', 'tool-1');
+        expect(openDiff).toHaveBeenCalledWith(review);
+    });
+
+    it('preserves checkpoint, diff, message, and state-sync ordering for restore and redo', async () => {
+        const order: string[] = [];
+        const messages = [{ role: 'user', content: 'first' }, { role: 'assistant', content: 'reply' }];
+        const tab: any = {
+            id: 'tab-1',
+            checkpointManager: {
+                restoreCheckpoint: vi.fn(async () => { order.push('restore-files'); return []; }),
+                redoCheckpoint: vi.fn(async () => { order.push('redo-files'); return []; }),
+            },
+            diffManager: {
+                suspendChangesAfter: vi.fn(() => order.push('suspend-diffs')),
+                redoChanges: vi.fn(() => order.push('redo-diffs')),
+            },
+            session: {
+                getMessages: vi.fn(() => { order.push('get-messages'); return messages; }),
+                setMessages: vi.fn(() => order.push('set-messages')),
+            },
+            suspendedMessages: [],
+        };
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', tab]]);
+        controller._activeTabId = 'tab-1';
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller.sendStateSync = vi.fn(() => order.push('state-sync'));
+
+        await controller.handleMessage({ type: 'restoreCheckpoint', messageIndex: 0 }, 'tab-1');
+        expect(order).toEqual([
+            'restore-files',
+            'suspend-diffs',
+            'get-messages',
+            'set-messages',
+            'state-sync',
+        ]);
+        expect(tab.suspendedMessages).toEqual(messages);
+
+        order.length = 0;
+        await controller.handleMessage({ type: 'redoCheckpoint' }, 'tab-1');
+        expect(order).toEqual([
+            'redo-files',
+            'redo-diffs',
+            'get-messages',
+            'set-messages',
+            'state-sync',
+        ]);
+        expect(tab.suspendedMessages).toEqual([]);
+    });
+
     it('routes cold workspace-file searches through the injected file-mentions port', async () => {
         let finishIndexing!: () => void;
         const indexing = new Promise<void>((resolve) => { finishIndexing = resolve; });

@@ -5,6 +5,8 @@ import {
     createVsCodeSessionRuntimePorts,
 } from './adapters/vscode/session-platform';
 import { createVsCodeChatPlatformPorts } from './adapters/vscode/chat-platform';
+import { VsCodeWorkspaceFileState } from './adapters/vscode/workspace-file-state';
+import { DiffContentProvider, VsCodeDiffPresenter } from './adapters/vscode/diff-presenter';
 import { PiSessionManager } from './pi/session';
 import { getBundledPiPackagePaths } from './pi/bundled-packages';
 import { getCodexUsageStore } from './pi/codex-usage-store';
@@ -17,8 +19,8 @@ import { ChatPanelSerializer } from './providers/chat-panel-serializer';
 import { notifyAuthChanged, reloadCredentials } from './pi/auth';
 import { refreshModelRegistry } from './pi/models';
 
-import { DiffManager, DiffContentProvider } from './providers/diff';
-import { CheckpointManager } from './providers/checkpoint';
+import { DiffManager } from './core/files/diff-manager';
+import { CheckpointManager } from './core/files/checkpoint-manager';
 import { registerSubagentSmokeCommand } from './pi/subagents/smoke/runner';
 import { SubagentCoordinator } from './pi/subagents/coordinator';
 import { SubagentRunStore } from './pi/subagents/persistence';
@@ -79,14 +81,18 @@ export async function activate(context: vscode.ExtensionContext) {
         );
 
         const diffContentProvider = new DiffContentProvider();
-        const checkpointManager = new CheckpointManager();
-        const statusBar = new StatusBarManager(initialSession);
-
-        const diffManager = new DiffManager(initialSession, checkpointManager);
+        const fileState = new VsCodeWorkspaceFileState();
+        const diffPresenter = new VsCodeDiffPresenter(diffContentProvider);
         const fileMentions = new WorkspaceFileMentions(outputChannel);
         fileMentions.warmup();
         context.subscriptions.push(fileMentions);
-        const chatPorts = createVsCodeChatPlatformPorts(context, fileMentions);
+        const chatPorts = createVsCodeChatPlatformPorts(context, fileMentions, {
+            fileState,
+            diffPresenter,
+        });
+        const checkpointManager = new CheckpointManager(fileState);
+        const diffManager = new DiffManager(initialSession, checkpointManager, fileState);
+        const statusBar = new StatusBarManager(initialSession);
 
         const controller = new ChatController(
             context, initialSession, diffManager, checkpointManager, outputChannel,

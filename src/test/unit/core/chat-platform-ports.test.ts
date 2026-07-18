@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FileMentionsPort } from '../../../core/ports/chat-platform';
+import type { FileChangePlatformPorts } from '../../../core/ports/file-state';
 import {
     VsCodeStateStore,
     createVsCodeChatPlatformPorts,
@@ -51,15 +52,26 @@ describe('portable chat platform ports', () => {
         const globalState = createStateSource({ scope: 'global' });
         const context = { workspaceState, globalState };
         const fileMentions = createFileMentionsPort();
+        const fileChanges = {
+            fileState: {
+                resolvePath: vi.fn((filePath: string) => filePath),
+                readText: vi.fn(() => ''),
+                exists: vi.fn(() => false),
+                writeText: vi.fn(),
+                deleteFile: vi.fn(),
+            },
+            diffPresenter: { openDiff: vi.fn(async () => undefined) },
+        } satisfies FileChangePlatformPorts;
 
         const state = createVsCodeChatStatePorts(context as any);
-        const ports = createVsCodeChatPlatformPorts(context as any, fileMentions);
+        const ports = createVsCodeChatPlatformPorts(context as any, fileMentions, fileChanges);
 
         expect(state.workspace.get('scope')).toBe('workspace');
         expect(state.global.get('scope')).toBe('global');
         expect(ports.state.workspace.get('scope')).toBe('workspace');
         expect(ports.state.global.get('scope')).toBe('global');
         expect(ports.fileMentions).toBe(fileMentions);
+        expect(ports.fileChanges).toBe(fileChanges);
 
         await ports.state.workspace.update('workspace-only', 1);
         expect(workspaceState.values.get('workspace-only')).toBe(1);

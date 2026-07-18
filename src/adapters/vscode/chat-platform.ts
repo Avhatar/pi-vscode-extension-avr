@@ -5,6 +5,7 @@ import type {
     FileMentionsPort,
     StateStore,
 } from '../../core/ports/chat-platform';
+import type { FileChangePlatformPorts } from '../../core/ports/file-state';
 
 type StateSource = Pick<vscode.Memento, 'get' | 'update'>;
 type StateContext = Pick<vscode.ExtensionContext, 'workspaceState' | 'globalState'>;
@@ -33,9 +34,11 @@ export function createVsCodeChatStatePorts(context: StateContext): ChatStatePort
 export function createVsCodeChatPlatformPorts(
     context: StateContext,
     fileMentions: FileMentionsPort,
+    fileChanges: FileChangePlatformPorts,
 ): ChatPlatformPorts {
     return {
         state: createVsCodeChatStatePorts(context),
         fileMentions,
+        fileChanges,
     };
 }

@@ -29,6 +29,7 @@ export const workspace = {
         get: <T>(_key: string, fallback: T): T => fallback,
     }),
     findFiles: async () => workspaceFiles,
+    openTextDocument: async (uri: TestUri) => ({ uri }),
     fs: {
         async readFile(uri: TestUri): Promise<Uint8Array> {
             try {
@@ -69,6 +70,12 @@ export const FileType = {
 export const commands = {
     async executeCommand(): Promise<undefined> {
         return undefined;
+    },
+};
+
+export const window = {
+    async showTextDocument(document: unknown): Promise<unknown> {
+        return document;
     },
 };
 

@@ -1,4 +1,5 @@
 import type { WorkspaceFileSuggestion } from '../../shared/agent-protocol';
+import type { FileChangePlatformPorts } from './file-state';
 
 export interface StateStore {
     get<T>(key: string): T | undefined;
@@ -21,4 +22,5 @@ export interface FileMentionsPort {
 export interface ChatPlatformPorts {
     readonly state: ChatStatePorts;
     readonly fileMentions: FileMentionsPort;
+    readonly fileChanges: FileChangePlatformPorts;
 }
