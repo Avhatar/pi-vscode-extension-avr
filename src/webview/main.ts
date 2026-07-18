@@ -3,14 +3,19 @@ import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo
 import { getCacheCapability } from '../shared/cache-info';
 import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage';
 import { shouldDisplayChatMessage } from '../shared/message-visibility';
+import {
+    VsCodeAgentConnection,
+    type MessageEventSource,
+} from './vscode-agent-connection';
+import { mergeStateMessages } from './interrupted-turn-notice';
 
 declare function acquireVsCodeApi(): {
-    postMessage(message: ClientMessage): void;
+    postMessage(message: unknown): void;
     getState(): any;
     setState(state: any): void;
 };
 
-const vscode = acquireVsCodeApi();
+const nativeVsCode = acquireVsCodeApi();
 const appEl = document.getElementById('app');
 const iconsBaseUri = appEl?.dataset.iconsUri ?? '';
 /**
@@ -25,6 +30,29 @@ const viewMode: 'sidebar' | 'panel' =
     (appEl?.dataset.mode === 'panel') ? 'panel' : 'sidebar';
 /** When in panel mode, the tab id baked into the HTML at panel creation time. */
 const panelTabId: string | undefined = appEl?.dataset.tabId || undefined;
+const connection = new VsCodeAgentConnection(
+    nativeVsCode,
+    window as unknown as MessageEventSource,
+    { tabId: panelTabId },
+);
+
+function send(message: ClientMessage): void {
+    void connection.request(message).then((response) => {
+        if (
+            !response.ok
+            && response.error.code !== 'command_failed'
+            && response.error.code !== 'transport_closed'
+        ) {
+            handleMessage({ type: 'error', message: response.error.message });
+        }
+    });
+}
+
+const vscode = {
+    postMessage: send,
+    getState: () => nativeVsCode.getState(),
+    setState: (value: any) => nativeVsCode.setState(value),
+};
 
 // ── State ──
 
@@ -207,16 +235,16 @@ function renderMarkdown(text: string): string {
 
 // ── Message handling ──
 
-window.addEventListener('message', (event) => {
-    handleMessage(event.data as ServerMessage);
+connection.subscribe((event) => {
+    handleMessage({ ...event.payload, type: event.type } as ServerMessage);
 });
+window.addEventListener('pagehide', () => {
+    void connection.close();
+}, { once: true });
 
 function handleMessage(msg: ServerMessage): void {
     switch (msg.type) {
         case 'ready':
-            vscode.postMessage({ type: 'getState' });
-            vscode.postMessage({ type: 'getModels' });
-            vscode.postMessage({ type: 'getSkills' });
             break;
         case 'stateSync':
             applyStateSync(msg.state);
@@ -309,13 +337,14 @@ function applyStateSync(s: SerializedAgentState): void {
         draftFiles.set(prevTab, [...currentFileAttachments]);
     }
 
-    // Preserve locally-pushed error banners across server-driven state syncs.
-    // The server replaces state.messages with the SDK's transcript, which does
-    // not include role:'error' entries; without this re-append, error banners
-    // posted by the controller (e.g. provider failures, empty responses) would
-    // render for one frame and then be wiped by the agent_end stateSync.
-    const localErrors = state.messages.filter((m: any) => m?.role === 'error');
-    state.messages = [...(s.messages ?? []), ...localErrors];
+    // Preserve locally-pushed error banners across server-driven state syncs
+    // and surface an idle persisted tail that cannot continue after a host
+    // restart. The interruption notice disappears when a new turn starts.
+    state.messages = mergeStateMessages(
+        s.messages ?? [],
+        state.messages,
+        s.interruptedTurn?.reason === 'incomplete_session_tail',
+    );
     state.isStreaming = s.isStreaming;
     state.isCompacting = s.isCompacting ?? false;
     state.model = s.model;
@@ -5171,7 +5200,16 @@ function bindScrollListener(): void {
 // ── Init ──
 render();
 
-// Proactively request state — the 'ready' message from the extension may
-// have been posted before this script loaded, so don't rely on it.
-vscode.postMessage({ type: 'getState' });
-vscode.postMessage({ type: 'getSkills' });
+async function initializeAgentConnection(): Promise<void> {
+    const response = await connection.request({ type: 'getState' });
+    if (!response.ok) {
+        if (response.error.code !== 'transport_closed') {
+            handleMessage({ type: 'error', message: response.error.message });
+        }
+        return;
+    }
+    vscode.postMessage({ type: 'getModels' });
+    vscode.postMessage({ type: 'getSkills' });
+}
+
+void initializeAgentConnection();

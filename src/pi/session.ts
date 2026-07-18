@@ -2,6 +2,12 @@ import * as vscode from 'vscode';
 import * as process from 'node:process';
 import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@earendil-works/pi-coding-agent';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
+import { TypedEventEmitter } from '../shared/typed-event';
+import {
+    TURN_LIFECYCLE_CUSTOM_TYPE,
+    hasIncompleteTurnTail,
+    hasInterruptedTurnLifecycle,
+} from '../shared/interrupted-turn';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, refreshModelRegistry, disposeModelRegistry } from './models';
@@ -54,11 +60,11 @@ export class PiSessionManager {
     readonly todoStore = new TodoStore();
     private _subagentManager: SubagentManager | undefined;
     private _subagentManagerUnsubscribe?: () => void;
-    private readonly _onSubagentStateChanged = new vscode.EventEmitter<SubagentManagerSnapshot>();
+    private readonly _onSubagentStateChanged = new TypedEventEmitter<SubagentManagerSnapshot>();
     readonly onSubagentStateChanged = this._onSubagentStateChanged.event;
-    private readonly _onSubagentMutation = new vscode.EventEmitter<any>();
+    private readonly _onSubagentMutation = new TypedEventEmitter<any>();
     readonly onSubagentMutation = this._onSubagentMutation.event;
-    private readonly _onSubagentNotification = new vscode.EventEmitter<void>();
+    private readonly _onSubagentNotification = new TypedEventEmitter<void>();
     readonly onSubagentNotification = this._onSubagentNotification.event;
     private readonly _pendingBackgroundNotifications: Array<{ content: string; details: Record<string, unknown> }> = [];
     private _backgroundNotificationUnsubscribe?: () => void;
@@ -725,6 +731,14 @@ export class PiSessionManager {
         }
     }
 
+    markTurnStarted(): void {
+        this._sessionManager?.appendCustomEntry(TURN_LIFECYCLE_CUSTOM_TYPE, { status: 'started' });
+    }
+
+    markTurnCompleted(): void {
+        this._sessionManager?.appendCustomEntry(TURN_LIFECYCLE_CUSTOM_TYPE, { status: 'completed' });
+    }
+
     serializeState(): SerializedAgentState {
         const s = this._session;
         if (!s) {
@@ -735,6 +749,7 @@ export class PiSessionManager {
             };
         }
         const model = s.model;
+        const interruptedLifecycle = hasInterruptedTurnLifecycle(this._sessionManager?.getBranch() ?? []);
         return {
             messages: s.messages.map(safeSerialize),
             model: model ? {
@@ -749,6 +764,10 @@ export class PiSessionManager {
             sessionId: s.sessionId,
             sessionName: s.sessionName,
             contextUsage: this._getContextUsage(),
+            ...(!s.isStreaming && !s.isCompacting
+                && (interruptedLifecycle || hasIncompleteTurnTail(s.messages))
+                ? { interruptedTurn: { reason: 'incomplete_session_tail' as const } }
+                : {}),
         };
     }
 

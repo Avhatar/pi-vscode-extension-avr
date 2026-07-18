@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import type { ClientMessage, ServerMessage } from '../shared/protocol';
+import type { ServerMessage } from '../shared/protocol';
 import { ChatController, ChatViewSink } from '../controllers/chat-controller';
+import { ChatPanelConnection } from './chat-panel-connection';
 
 /**
  * View type used both for created panels and for the panel serializer.
@@ -24,6 +25,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
     private _controller: ChatController;
     private _extensionUri: vscode.Uri;
     private _tabId: string;
+    private _connection: ChatPanelConnection;
     private _disposables: vscode.Disposable[] = [];
 
     /** Panel sinks listen only to events for their bound tab. */
@@ -41,6 +43,11 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         this._tabId = tabId;
         this._controller = controller;
         this._extensionUri = extensionUri;
+        this._connection = new ChatPanelConnection(
+            this._tabId,
+            (message, sourceTabId) => this._controller.handleMessage(message, sourceTabId),
+            (value) => this._panel.webview.postMessage(value),
+        );
         this._panel.iconPath = vscode.Uri.joinPath(this._extensionUri, 'media', 'icons', 'piIcon1.png');
 
         this._panel.webview.options = {
@@ -53,8 +60,8 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         if (initialName) this._panel.title = formatPanelTitle(initialName);
 
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage((msg: ClientMessage) => {
-                this._controller.handleMessage(msg, this._tabId);
+            this._panel.webview.onDidReceiveMessage((value: unknown) => {
+                void this._connection.receive(value);
             }),
             this._controller.onTabRenamed((e) => {
                 if (e.tabId === this._tabId) this._panel.title = formatPanelTitle(e.name);
@@ -81,7 +88,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
     }
 
     post(message: ServerMessage): void {
-        this._panel.webview.postMessage(message);
+        this._connection.publish(message);
     }
 
     /** Bring this panel to the front of its column. */
@@ -94,6 +101,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
     }
 
     dispose(): void {
+        this._connection.dispose();
         this._controller.removeSink(this);
         this._controller.unregisterPanel(this._tabId, this);
         for (const d of this._disposables) {

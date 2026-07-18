@@ -2,8 +2,73 @@ import { describe, it, expect } from 'vitest';
 import type {
     ClientMessage, ServerMessage, SerializedAgentState, LauncherState, LauncherClientMessage,
 } from '../../../shared/protocol';
+import type { AgentClientMessage, AgentServerMessage } from '../../../shared/agent-protocol';
+import type { PlatformClientMessage, PlatformServerMessage } from '../../../shared/platform-protocol';
+import type { VsCodeClientMessage, VsCodeServerMessage } from '../../../shared/vscode-protocol';
+
+type Equal<Left, Right> =
+    (<Value>() => Value extends Left ? 1 : 2) extends
+    (<Value>() => Value extends Right ? 1 : 2) ? true : false;
+type Expect<Value extends true> = Value;
+
+type ClientMessagePartition = Expect<Equal<
+    ClientMessage,
+    AgentClientMessage | PlatformClientMessage | VsCodeClientMessage
+>>;
+type ServerMessagePartition = Expect<Equal<
+    ServerMessage,
+    AgentServerMessage | PlatformServerMessage | VsCodeServerMessage
+>>;
 
 describe('Protocol types', () => {
+    it('keeps portable, platform, and VS Code chat messages in exhaustive partitions', () => {
+        const agentClientTypes = [
+            'prompt', 'steer', 'followUp', 'abort', 'getModels', 'setModel', 'toggleFavorite',
+            'setThinkingLevel', 'newSession', 'loadSession', 'getSessions', 'getState',
+            'undoFileChange', 'restoreCheckpoint', 'redoCheckpoint', 'createTab', 'closeTab',
+            'switchTab', 'getSkills', 'searchWorkspaceFiles', 'queueMessage', 'editQueuedMessage',
+            'removeQueuedMessage', 'cancelQueue', 'setCacheMode',
+        ] as const;
+        const platformClientTypes = ['openFile', 'confirmAction'] as const;
+        const vsCodeClientTypes = ['openDiff', 'openSettings', 'openKeybindings', 'openChangelog'] as const;
+        const agentServerTypes = [
+            'stateSync', 'agentEvent', 'models', 'modelChanged', 'sessions', 'sessionChanged',
+            'fileChange', 'skills', 'workspaceFileSuggestions', 'codexUsage', 'codexUsageError', 'error',
+        ] as const;
+        const platformServerTypes = ['confirmResult'] as const;
+        const vsCodeServerTypes = ['ready'] as const;
+
+        type AgentClientTypes = Expect<Equal<typeof agentClientTypes[number], AgentClientMessage['type']>>;
+        type PlatformClientTypes = Expect<Equal<typeof platformClientTypes[number], PlatformClientMessage['type']>>;
+        type VsCodeClientTypes = Expect<Equal<typeof vsCodeClientTypes[number], VsCodeClientMessage['type']>>;
+        type AgentServerTypes = Expect<Equal<typeof agentServerTypes[number], AgentServerMessage['type']>>;
+        type PlatformServerTypes = Expect<Equal<typeof platformServerTypes[number], PlatformServerMessage['type']>>;
+        type VsCodeServerTypes = Expect<Equal<typeof vsCodeServerTypes[number], VsCodeServerMessage['type']>>;
+
+        const compileTimePartitions: [
+            ClientMessagePartition,
+            ServerMessagePartition,
+            AgentClientTypes,
+            PlatformClientTypes,
+            VsCodeClientTypes,
+            AgentServerTypes,
+            PlatformServerTypes,
+            VsCodeServerTypes,
+        ] = [true, true, true, true, true, true, true, true];
+
+        expect(compileTimePartitions).toEqual([true, true, true, true, true, true, true, true]);
+        expect([
+            ...agentClientTypes,
+            ...platformClientTypes,
+            ...vsCodeClientTypes,
+        ]).toHaveLength(31);
+        expect([
+            ...agentServerTypes,
+            ...platformServerTypes,
+            ...vsCodeServerTypes,
+        ]).toHaveLength(14);
+    });
+
     it('client messages serialize correctly', () => {
         const messages: ClientMessage[] = [
             { type: 'prompt', text: 'hello' },

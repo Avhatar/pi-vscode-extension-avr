@@ -1,72 +1,32 @@
-export interface ContextUsageInfo {
-    tokens: number | null;
-    contextWindow: number;
-    percent: number | null;
-    estimated?: boolean;
-}
+import type { AgentClientMessage, AgentServerMessage, SkillInfo } from './agent-protocol';
+import type { PlatformClientMessage, PlatformServerMessage } from './platform-protocol';
+import type { VsCodeClientMessage, VsCodeServerMessage } from './vscode-protocol';
 
-export interface CodexUsageWindow {
-    /** Percentage already used in this window (0-100). */
-    percentUsed: number;
-    /** Rolling-window duration in minutes, when reported by Codex. */
-    windowMinutes?: number;
-    /** Unix epoch seconds when the window resets, when reported by Codex. */
-    resetAt?: number;
-}
-
-export interface CodexUsageCredits {
-    balance?: string;
-    hasCredits: boolean;
-    unlimited: boolean;
-}
-
-export interface CodexUsageBucket {
-    /** Stable metered-feature id (for example "codex" or "codex_other"). */
-    limitId: string;
-    /** Optional human/model-facing name reported by Codex. */
-    limitName?: string;
-    primary?: CodexUsageWindow;
-    secondary?: CodexUsageWindow;
-}
-
-export interface CodexSpendControlLimit {
-    limit: string;
-    used: string;
-    remainingPercent: number;
-    resetAt: number;
-}
-
-export interface CodexUsageSnapshot {
-    /** Subscription plan label reported by Codex (for example "plus" or "prolite"). */
-    planType?: string;
-    /** Active metered-feature id reported on a provider response. */
-    activeLimit?: string;
-    /** Default and model/feature-specific rate-limit buckets. */
-    buckets: CodexUsageBucket[];
-    credits?: CodexUsageCredits;
-    individualLimit?: CodexSpendControlLimit;
-    rateLimitReachedType?: string;
-    resetCreditsAvailable?: number;
-    /** Unix epoch milliseconds when this state was captured. */
-    capturedAt: number;
-}
-
-export interface CodexTurnWindowDelta {
-    windowMinutes?: number;
-    /** Window usage at the start of the turn from a matching fresh snapshot. */
-    beforePercent: number;
-    /** Window usage right after the turn ended. */
-    afterPercent: number;
-    /** Percent points consumed by this turn. */
-    deltaPercent: number;
-}
-
-export interface CodexTurnUsage {
-    primary?: CodexTurnWindowDelta;
-    secondary?: CodexTurnWindowDelta;
-    /** Unix epoch milliseconds when the post-turn snapshot was captured. */
-    capturedAt: number;
-}
+export type {
+    AgentClientMessage,
+    AgentServerMessage,
+    CacheEffective,
+    CacheMode,
+    CodexSpendControlLimit,
+    CodexTurnUsage,
+    CodexTurnWindowDelta,
+    CodexUsageBucket,
+    CodexUsageCredits,
+    CodexUsageSnapshot,
+    CodexUsageWindow,
+    ContextUsageInfo,
+    FileAttachment,
+    FileChangeInfo,
+    ImageAttachment,
+    ModelInfo,
+    SerializedAgentState,
+    SessionInfo,
+    SkillInfo,
+    TabInfo,
+    WorkspaceFileSuggestion,
+} from './agent-protocol';
+export type { PlatformClientMessage, PlatformServerMessage } from './platform-protocol';
+export type { VsCodeClientMessage, VsCodeServerMessage } from './vscode-protocol';
 
 export interface OAuthProviderInfo {
     id: string;
@@ -115,142 +75,9 @@ export type OAuthFlowState =
     | { kind: 'success' }
     | { kind: 'error'; message: string };
 
-export interface FileChangeInfo {
-    filePath: string;
-    toolCallId: string;
-    toolName: string;
-    isNew: boolean;
-    diff?: string;
-    addedLines: number;
-    removedLines: number;
-    turnIndex: number;
-}
-
-export interface TabInfo {
-    id: string;
-    name: string;
-    isActive: boolean;
-    isStreaming: boolean;
-    hasNotification: boolean;
-}
-
-export type CacheMode = 'short' | 'long' | 'auto';
-export type CacheEffective = 'short' | 'long';
-
-export interface SerializedAgentState {
-    messages: any[];
-    model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
-    thinkingLevel?: string;
-    isStreaming: boolean;
-    isCompacting?: boolean;
-    streamingMessage?: any;
-    errorMessage?: string;
-    tools: string[];
-    sessionId?: string;
-    sessionName?: string;
-    /** Absolute path to the persisted session file (used by webview panels for restoration). */
-    sessionPath?: string;
-    contextUsage?: ContextUsageInfo;
-    fileChanges?: FileChangeInfo[];
-    rollbackPoint?: number | null;
-    tabs?: TabInfo[];
-    activeTabId?: string;
-    streamingText?: string;
-    streamingThinking?: string;
-    isThinking?: boolean;
-    thinkingStartTime?: number;
-    streamingThinkingDuration?: number;
-    queuedMessages?: string[];
-    /** User preference for prompt cache retention. Global, persisted in extension state. */
-    cacheMode?: CacheMode;
-    /** Effective retention applied to the next request for this tab (computed in `auto`). */
-    cacheEffective?: CacheEffective;
-    /** Whether the always-visible File Undo View (changed-files bar with
-     *  Undo / Redo / Review above the input) is enabled for this tab. */
-    fileUndoViewEnabled?: boolean;
-}
-
-export interface ModelInfo {
-    provider: string;
-    id: string;
-    name?: string;
-    supportsImages?: boolean;
-}
-
-export interface ImageAttachment {
-    type: 'image';
-    data: string;
-    mimeType: string;
-    name?: string;
-    size?: number;
-    width?: number;
-    height?: number;
-}
-
-export interface FileAttachment {
-    type: 'file';
-    data: string;
-    mimeType: string;
-    name: string;
-    size: number;
-    binary?: boolean;
-}
-
-export interface SkillInfo {
-    name: string;
-    description: string;
-    filePath: string;
-    source: string;
-    disableModelInvocation: boolean;
-}
-
-export interface WorkspaceFileSuggestion {
-    relativePath: string;
-    basename: string;
-    insertText: string;
-}
-
-export interface SessionInfo {
-    id: string;
-    name?: string;
-    firstMessage?: string;
-    path: string;
-    lastModified?: number;
-}
-
-// Webview -> Extension messages
-export type ClientMessage =
-    | { type: 'prompt'; text: string; images?: ImageAttachment[]; files?: FileAttachment[] }
-    | { type: 'steer'; text: string; images?: ImageAttachment[]; files?: FileAttachment[] }
-    | { type: 'followUp'; text: string; images?: ImageAttachment[]; files?: FileAttachment[] }
-    | { type: 'abort' }
-    | { type: 'getModels' }
-    | { type: 'setModel'; provider: string; modelId: string }
-    | { type: 'toggleFavorite'; provider: string; modelId: string }
-    | { type: 'setThinkingLevel'; level: string }
-    | { type: 'newSession' }
-    | { type: 'loadSession'; sessionPath: string }
-    | { type: 'getSessions' }
-    | { type: 'getState' }
-    | { type: 'openFile'; filePath: string }
-    | { type: 'openDiff'; filePath: string; toolCallId: string }
-    | { type: 'undoFileChange'; filePath: string; toolCallId: string }
-    | { type: 'restoreCheckpoint'; messageIndex: number }
-    | { type: 'redoCheckpoint' }
-    | { type: 'confirmAction'; action: string; message: string; payload?: any }
-    | { type: 'createTab' }
-    | { type: 'closeTab'; tabId: string }
-    | { type: 'switchTab'; tabId: string }
-    | { type: 'openSettings' }
-    | { type: 'openKeybindings' }
-    | { type: 'openChangelog' }
-    | { type: 'getSkills' }
-    | { type: 'searchWorkspaceFiles'; query: string; requestId: number }
-    | { type: 'queueMessage'; text: string }
-    | { type: 'editQueuedMessage'; index: number; text: string }
-    | { type: 'removeQueuedMessage'; index: number }
-    | { type: 'cancelQueue' }
-    | { type: 'setCacheMode'; mode: CacheMode };
+// Webview -> Extension messages. Keep this compatibility union stable while
+// transports migrate to the portable, platform, and VS Code partitions.
+export type ClientMessage = AgentClientMessage | PlatformClientMessage | VsCodeClientMessage;
 
 // ── Launcher (sidebar) ──
 //
@@ -477,22 +304,9 @@ export type SettingsClientMessage =
     | { type: 'oauthSubmitInput'; providerId: string; value: string }
     | { type: 'oauthOpenUrl'; url: string };
 
-// Extension -> Webview messages
-export type ServerMessage =
-    | { type: 'ready' }
-    | { type: 'stateSync'; state: SerializedAgentState }
-    | { type: 'agentEvent'; event: any }
-    | { type: 'models'; models: ModelInfo[]; current?: ModelInfo; thinkingLevel?: string; favorites?: string[] }
-    | { type: 'modelChanged'; model: ModelInfo; thinkingLevel?: string }
-    | { type: 'sessions'; sessions: SessionInfo[]; currentSessionId?: string }
-    | { type: 'sessionChanged'; sessionId: string }
-    | { type: 'fileChange'; change: FileChangeInfo }
-    | { type: 'confirmResult'; action: string; confirmed: boolean; payload?: any }
-    | { type: 'skills'; skills: SkillInfo[] }
-    | { type: 'workspaceFileSuggestions'; requestId: number; query: string; isIndexing?: boolean; items: WorkspaceFileSuggestion[] }
-    | { type: 'codexUsage'; usage: CodexUsageSnapshot | null }
-    | { type: 'codexUsageError'; message: string }
-    | { type: 'error'; message: string; severity?: 'error' | 'warning' | 'info' };
+// Extension -> Webview messages. Keep this compatibility union stable while
+// transports migrate to the portable, platform, and VS Code partitions.
+export type ServerMessage = AgentServerMessage | PlatformServerMessage | VsCodeServerMessage;
 
 // Extension -> Settings webview messages
 export type SettingsServerMessage =

@@ -13,6 +13,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - The CRT desktop spike now closely matches the original phosphor terminal reference with its bundled display font, curved screen, scanlines, rolling beam, glow, and terminal-style controls.
 - Expanded regression coverage for file-change tracking, checkpoint rollback and redo, workspace file mentions, per-tab message queues, and session event rebinding ahead of the shared-backend extraction.
+- Began shared-backend extraction by separating portable agent, platform capability, and VS Code-only chat protocol contracts without changing the existing VS Code interface.
+- Added runtime validation for chat webview commands and versioned transport-neutral request, response, and event contracts with correlation IDs and per-connection sequencing.
+- Editor chat panels now use the versioned connection protocol end to end, with correlated command failures, ordered events, reload rebinding, and automatic state recovery after event gaps.
+- Began the platform-neutral session-runtime extraction by removing VS Code-specific event emitters from subagent session notifications.
+
+### Fixed
+- Restored chats now clearly mark turns interrupted by **Reload Window** instead of appearing stuck on unfinished thinking or tool output.
 
 ## [0.57.3] - 2026-07-17
 

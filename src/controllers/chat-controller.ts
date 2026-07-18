@@ -107,6 +107,10 @@ export interface ChatViewSink {
     post(message: ServerMessage): void;
 }
 
+export type ChatCommandDispatchResult =
+    | { ok: true }
+    | { ok: false; code: 'tab_not_found' | 'command_failed'; message: string };
+
 let tabIdCounter = 0;
 function nextTabId(): string {
     return `tab-${++tabIdCounter}`;
@@ -1383,6 +1387,7 @@ export class ChatController implements vscode.Disposable {
 
     private async _handleTabEvent(tab: TabState, event: any): Promise<void> {
         if (event.type === 'agent_start') {
+            tab.session.markTurnStarted?.();
             tab.turnNotificationGate.onAgentStart();
             tab.streamingText = '';
             tab.streamingThinking = '';
@@ -1474,6 +1479,9 @@ export class ChatController implements vscode.Disposable {
         }
 
         if (event.type === 'agent_end') {
+            // Persist completion before slower post-turn accounting so a window
+            // reload cannot misclassify a settled terminal-tool batch.
+            tab.session.markTurnCompleted?.();
             const lastAssistant = findLastAssistantMessage(tab.session.getMessages());
             if (!tab.errorReportedThisRun && lastAssistant) {
                 const stopReason = lastAssistant.stopReason;
@@ -1765,11 +1773,13 @@ export class ChatController implements vscode.Disposable {
      * sent the message; if omitted, the message is routed to the active tab
      * (matches the sidebar's behaviour of always operating on the active tab).
      */
-    async handleMessage(msg: ClientMessage, sourceTabId?: string): Promise<void> {
+    async handleMessage(msg: ClientMessage, sourceTabId?: string): Promise<ChatCommandDispatchResult> {
         try {
             const targetId = sourceTabId ?? this._activeTabId;
             const tab = this._tabs.get(targetId);
-            if (!tab) return;
+            if (!tab) {
+                return { ok: false, code: 'tab_not_found', message: `Chat tab not found: ${targetId}` };
+            }
 
             switch (msg.type) {
                 case 'prompt': {
@@ -1809,12 +1819,10 @@ export class ChatController implements vscode.Disposable {
                     tab.diffManager.setCurrentTurn(turnIdx);
                     this._prepareCacheForRequest(tab);
                     this._logPromptToolState(tab, 'prompt');
-                    await this._promptUserTask(
-                        tab,
-                        await this._fileMentions.augmentPromptIfNeeded(promptText),
-                        msg.images,
-                        msg.files,
-                    );
+                    const augmentedPrompt = await this._fileMentions.augmentPromptIfNeeded(promptText);
+                    void this._promptUserTask(tab, augmentedPrompt, msg.images, msg.files).catch((error) => {
+                        this._reportCommandFailure(msg.type, tab.id, error);
+                    });
                     break;
                 }
                 case 'steer':
@@ -2064,34 +2072,47 @@ export class ChatController implements vscode.Disposable {
                     this._switchTab(msg.tabId);
                     break;
                 case 'openSettings':
-                    vscode.commands.executeCommand('pi-code.openSettings');
+                    await vscode.commands.executeCommand('pi-code.openSettings');
                     break;
                 case 'openKeybindings':
-                    vscode.commands.executeCommand(
+                    await vscode.commands.executeCommand(
                         'workbench.action.openGlobalKeybindings',
                         '@ext:Avhatar.pi-code',
                     );
                     break;
                 case 'openChangelog':
-                    vscode.commands.executeCommand(
+                    await vscode.commands.executeCommand(
                         'markdown.showPreview',
                         vscode.Uri.joinPath(this._context.extensionUri, 'CHANGELOG.md'),
                     );
                     break;
             }
+            return { ok: true };
         } catch (err: any) {
             // Errors from a panel-bound message route back to that panel; for sidebar
             // (no sourceTabId) they go to whoever currently shows the active tab.
-            const targetId = sourceTabId ?? this._activeTabId;
-            const message = err?.message ?? String(err);
-            this._outputChannel.appendLine(
-                `[handleMessage error] type=${msg?.type ?? 'unknown'} tab=${targetId}: ${message}`,
+            return this._reportCommandFailure(
+                msg?.type ?? 'unknown',
+                sourceTabId ?? this._activeTabId,
+                err,
             );
-            if (err?.stack) {
-                this._outputChannel.appendLine(err.stack);
-            }
-            this._postForTab(targetId, { type: 'error', message });
         }
+    }
+
+    private _reportCommandFailure(
+        messageType: string,
+        targetId: string,
+        err: any,
+    ): Extract<ChatCommandDispatchResult, { ok: false }> {
+        const message = err?.message ?? String(err);
+        this._outputChannel.appendLine(
+            `[handleMessage error] type=${messageType} tab=${targetId}: ${message}`,
+        );
+        if (err?.stack) {
+            this._outputChannel.appendLine(err.stack);
+        }
+        this._postForTab(targetId, { type: 'error', message });
+        return { ok: false, code: 'command_failed', message };
     }
 
     private _postAgentError(tab: TabState, raw: string | undefined, assistantMessage?: any): void {
