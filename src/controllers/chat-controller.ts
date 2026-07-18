@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { unlink } from 'fs/promises';
 import { PiSessionManager } from '../pi/session';
+import type { Logger } from '../core/ports/logger';
+import type { SessionRuntimePorts } from '../core/ports/session-platform';
 import type {
     ClientMessage, ServerMessage, TabInfo,
     LauncherState, LauncherTabInfo, LauncherSessionInfo,
@@ -271,6 +273,8 @@ function turnCompletionOutcome(message: any): TurnCompletionOutcome {
  */
 export class ChatController implements vscode.Disposable {
     private _outputChannel: vscode.OutputChannel;
+    private readonly _sessionLogger: Logger;
+    private readonly _sessionPorts: SessionRuntimePorts;
     private _context: vscode.ExtensionContext;
 
     private _cacheMode: CacheMode = 'auto';
@@ -368,6 +372,8 @@ export class ChatController implements vscode.Disposable {
     ) {
         this._context = context;
         this._outputChannel = outputChannel;
+        this._sessionLogger = initialSession.logger;
+        this._sessionPorts = initialSession.ports;
         this._turnNotifier = new TurnNotifier(outputChannel);
         this._subagentCoordinator = subagentCoordinator;
         this._subagentGate = new SubagentCapabilityGate(
@@ -684,16 +690,25 @@ export class ChatController implements vscode.Disposable {
         if (this._activeTabId) this.sendStateSync(this._activeTabId);
     }
 
+    private _createSessionManager(): PiSessionManager {
+        return new PiSessionManager(
+            this._sessionLogger,
+            this._context.secrets,
+            this._subagentCoordinator,
+            this._subagentStore,
+            this._writeIsolation,
+            this._childToolFactories,
+            this._sessionPorts,
+        );
+    }
+
     /**
      * Load a session from disk into a brand-new tab and return its id.
      * Used by the panel serializer when restoring a panel whose session
      * is not currently represented by any tab.
      */
     async createTabFromSessionPath(sessionPath: string): Promise<string> {
-        const session = new PiSessionManager(
-            this._outputChannel, this._context.secrets, this._subagentCoordinator,
-            this._subagentStore, this._writeIsolation, this._childToolFactories,
-        );
+        const session = this._createSessionManager();
         await session.initializeFromPath(sessionPath);
 
         const checkpoint = new CheckpointManager();
@@ -2273,10 +2288,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     private async _createTab(): Promise<string> {
-        const newSession = new PiSessionManager(
-            this._outputChannel, this._context.secrets, this._subagentCoordinator,
-            this._subagentStore, this._writeIsolation, this._childToolFactories,
-        );
+        const newSession = this._createSessionManager();
         await newSession.initialize();
 
         const newCheckpoint = new CheckpointManager();
@@ -2376,10 +2388,7 @@ export class ChatController implements vscode.Disposable {
 
         for (const { name, sessionPath } of persisted.tabs) {
             try {
-                const session = new PiSessionManager(
-                    this._outputChannel, this._context.secrets, this._subagentCoordinator,
-                    this._subagentStore, this._writeIsolation, this._childToolFactories,
-                );
+                const session = this._createSessionManager();
                 await session.initializeFromPath(sessionPath);
 
                 const checkpoint = new CheckpointManager();

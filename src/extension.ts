@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { VsCodeOutputChannelLogger } from './adapters/vscode/output-channel-logger';
+import { createVsCodeSessionRuntimePorts } from './adapters/vscode/session-platform';
 import { PiSessionManager } from './pi/session';
 import { getCodexUsageStore } from './pi/codex-usage-store';
 import { LauncherView } from './providers/launcher-view';
@@ -44,8 +46,11 @@ export async function activate(context: vscode.ExtensionContext) {
             (message) => outputChannel.appendLine(message),
         );
         const childToolFactories = new ChildToolFactoryRegistry();
+        const sessionLogger = new VsCodeOutputChannelLogger(outputChannel);
+        const sessionPorts = createVsCodeSessionRuntimePorts();
         const initialSession = new PiSessionManager(
-            outputChannel, context.secrets, subagentCoordinator, subagentStore, writeIsolation, childToolFactories,
+            sessionLogger, context.secrets, subagentCoordinator, subagentStore, writeIsolation, childToolFactories,
+            sessionPorts,
         );
         await initialSession.initialize();
 

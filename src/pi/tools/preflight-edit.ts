@@ -1,4 +1,4 @@
-import type * as vscode from 'vscode';
+import type { Logger } from '../../core/ports/logger';
 
 // Preflight normalizer for the built-in Pi `edit` tool.
 //
@@ -40,7 +40,7 @@ const NEW_TEXT_KEYS = ['newText', 'new_string', 'newStr', 'new'] as const;
 
 export function installEditToolPreflight(
     session: unknown,
-    log?: vscode.OutputChannel,
+    log?: Logger,
 ): void {
     const s = session as SessionLike | null | undefined;
     if (!s || typeof s !== 'object') return;
@@ -64,7 +64,7 @@ export function installEditToolPreflight(
     }
 }
 
-function patchEditTools(session: SessionLike, log?: vscode.OutputChannel): void {
+function patchEditTools(session: SessionLike, log?: Logger): void {
     const targets = collectEditTools(session);
     for (const tool of targets) {
         if (tool.__piCodePreflightPatched) continue;
@@ -117,7 +117,7 @@ function collectEditTools(session: SessionLike): AnyTool[] {
     return [...found.keys()];
 }
 
-function normalizeEditArgs(input: unknown, log?: vscode.OutputChannel): unknown {
+function normalizeEditArgs(input: unknown, log?: Logger): unknown {
     if (!input || typeof input !== 'object') return input;
     const original = input as Record<string, unknown>;
     let args: Record<string, unknown> = original;

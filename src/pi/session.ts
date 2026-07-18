@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import * as process from 'node:process';
 import type { AgentSession, AgentSessionEvent, SessionManager, ModelRegistry, ResourceLoader } from '@earendil-works/pi-coding-agent';
+import type { Logger } from '../core/ports/logger';
+import {
+    DEFAULT_SESSION_RUNTIME_PORTS,
+    type SessionRuntimePorts,
+} from '../core/ports/session-platform';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
 import { TypedEventEmitter } from '../shared/typed-event';
 import {
@@ -54,7 +59,7 @@ export class PiSessionManager {
     private _sessionManager: SessionManager | undefined;
     private _modelRegistry: ModelRegistry | undefined;
     private _unsubscribe: (() => void) | undefined;
-    private _outputChannel: vscode.OutputChannel;
+    private _outputChannel: Logger;
     private _secrets: vscode.SecretStorage | undefined;
     readonly events = new EventRouter();
     readonly todoStore = new TodoStore();
@@ -71,12 +76,13 @@ export class PiSessionManager {
     private _subagentParentTabId = 'unbound';
 
     constructor(
-        outputChannel: vscode.OutputChannel,
+        outputChannel: Logger,
         secrets?: vscode.SecretStorage,
         private readonly _subagentCoordinator?: SubagentCoordinator,
         private readonly _subagentStore?: SubagentRunStore,
         private readonly _writeIsolation?: WriteIsolationManager,
         private readonly _childToolFactories?: ChildToolFactoryRegistry,
+        private readonly _ports: SessionRuntimePorts = DEFAULT_SESSION_RUNTIME_PORTS,
     ) {
         this._outputChannel = outputChannel;
         this._secrets = secrets;
@@ -85,8 +91,20 @@ export class PiSessionManager {
         });
     }
 
+    get logger(): Logger {
+        return this._outputChannel;
+    }
+
+    get ports(): SessionRuntimePorts {
+        return this._ports;
+    }
+
     async reloadCredentials(): Promise<void> {
         await reloadCredentials();
+    }
+
+    private _getCwd(): string {
+        return this._ports.workspace.getRoot() ?? process.cwd();
     }
 
     get session(): AgentSession | undefined {
@@ -101,7 +119,7 @@ export class PiSessionManager {
         this._outputChannel.appendLine('Initializing Pi session...');
         const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
 
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const cwd = this._getCwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
         // typically the VS Code install directory, not the workspace, so those configs are missed.
@@ -112,8 +130,7 @@ export class PiSessionManager {
 
         this._sessionManager = SM.create(cwd);
 
-        const config = vscode.workspace.getConfiguration('pi-code');
-        const allowedTools = config.get<string[]>('allowedTools', []);
+        const allowedTools = this._ports.settings.get('allowedTools', []);
 
         const resourceLoader = await this._buildResourceLoader(cwd);
 
@@ -266,11 +283,10 @@ export class PiSessionManager {
         // whatever guidelines it was created with, since the SDK
         // captures tool definitions at session-creation time.
         const todoGuidelines = parseTodoPromptGuidelines(
-            vscode.workspace.getConfiguration('pi-code').get<string>('todo.promptGuidelines'),
+            this._ports.settings.get('todo.promptGuidelines', undefined),
         );
-        const piCodeConfig = vscode.workspace.getConfiguration('pi-code');
-        const lspEnabled = piCodeConfig.get<boolean>('lsp.enabled', false);
-        const importClaudeCodeMcp = piCodeConfig.get<boolean>('mcp.importClaudeCode', false);
+        const lspEnabled = this._ports.settings.get('lsp.enabled', false);
+        const importClaudeCodeMcp = this._ports.settings.get('mcp.importClaudeCode', false);
         try {
             const result = syncClaudeCodeMcpImport(importClaudeCodeMcp);
             if (result.changed) {
@@ -288,16 +304,18 @@ export class PiSessionManager {
         const claudeInfrastructure = await detectClaudeInfrastructure(cwd, {
             collectNestedClaudeFiles: true,
             collectNestedClaudeSkillFiles: true,
-            findNestedClaudeFiles: async () => {
-                const pattern = new vscode.RelativePattern(cwd, '**/{CLAUDE.md,CLAUDE.local.md}');
-                const matches = await vscode.workspace.findFiles(pattern, CLAUDE_NESTED_SEARCH_EXCLUDE, 1);
-                return matches.map((uri) => uri.fsPath);
-            },
-            findNestedClaudeSkillFiles: async () => {
-                const pattern = new vscode.RelativePattern(cwd, '**/.claude/skills/**/SKILL.md');
-                const matches = await vscode.workspace.findFiles(pattern, CLAUDE_NESTED_SEARCH_EXCLUDE, 500);
-                return matches.map((uri) => uri.fsPath);
-            },
+            findNestedClaudeFiles: () => this._ports.workspace.findFiles(
+                cwd,
+                '**/{CLAUDE.md,CLAUDE.local.md}',
+                CLAUDE_NESTED_SEARCH_EXCLUDE,
+                1,
+            ),
+            findNestedClaudeSkillFiles: () => this._ports.workspace.findFiles(
+                cwd,
+                '**/.claude/skills/**/SKILL.md',
+                CLAUDE_NESTED_SEARCH_EXCLUDE,
+                500,
+            ),
         });
         const availableChildTools = [
             ...CHILD_SAFE_TOOLS,
@@ -306,7 +324,7 @@ export class PiSessionManager {
         const claudeAgents = claudeInfrastructure.active
             ? await indexClaudeAgents({
                 cwd,
-                workspaceTrusted: vscode.workspace.isTrusted,
+                workspaceTrusted: this._ports.workspace.isTrusted(),
                 availableChildTools,
                 projectAgentDirectories: claudeInfrastructure.agentDirectories,
             })
@@ -314,7 +332,7 @@ export class PiSessionManager {
         const packageAgents = await indexPackageAgents(bundledPackagePaths);
         const subagentRegistry = new AgentRegistry({
             cwd,
-            workspaceTrusted: vscode.workspace.isTrusted,
+            workspaceTrusted: this._ports.workspace.isTrusted(),
             packageDefinitions: packageAgents.definitions,
             claudeDefinitions: claudeAgents.definitions,
             additionalDiagnostics: [...packageAgents.diagnostics, ...claudeAgents.diagnostics],
@@ -417,14 +435,12 @@ export class PiSessionManager {
     }
 
     private async _applyDefaultSettings(session: AgentSession): Promise<void> {
-        const config = vscode.workspace.getConfiguration('pi-code');
-
-        const thinkingLevel = config.get<string>('thinkingLevel', 'off');
+        const thinkingLevel = this._ports.settings.get('thinkingLevel', 'off');
         if (thinkingLevel && thinkingLevel !== 'off') {
             session.setThinkingLevel(thinkingLevel as any);
         }
 
-        const defaultModel = config.get<string>('defaultModel', '');
+        const defaultModel = this._ports.settings.get('defaultModel', '');
         if (defaultModel && this._modelRegistry) {
             const available = getAvailableModels(this._modelRegistry);
             const match = available.find(m => m.id === defaultModel);
@@ -512,7 +528,7 @@ export class PiSessionManager {
         this._unsubscribe?.();
         this._session.dispose();
         const { createAgentSession } = await import('@earendil-works/pi-coding-agent');
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const cwd = this._getCwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
         // typically the VS Code install directory, not the workspace, so those configs are missed.
@@ -522,8 +538,7 @@ export class PiSessionManager {
         await refreshModelRegistry((message) => this._outputChannel.appendLine(message));
         this._sessionManager = SM.create(cwd);
 
-        const config = vscode.workspace.getConfiguration('pi-code');
-        const allowedTools = config.get<string[]>('allowedTools', []);
+        const allowedTools = this._ports.settings.get('allowedTools', []);
 
         const resourceLoader = await this._buildResourceLoader(cwd);
 
@@ -555,7 +570,7 @@ export class PiSessionManager {
     async initializeFromPath(sessionPath: string): Promise<void> {
         this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
         const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const cwd = this._getCwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
         // typically the VS Code install directory, not the workspace, so those configs are missed.
@@ -565,8 +580,7 @@ export class PiSessionManager {
         this._modelRegistry = await getModelRegistry((message) => this._outputChannel.appendLine(message));
         this._sessionManager = SM.open(sessionPath, undefined);
 
-        const config = vscode.workspace.getConfiguration('pi-code');
-        const allowedTools = config.get<string[]>('allowedTools', []);
+        const allowedTools = this._ports.settings.get('allowedTools', []);
 
         const resourceLoader = await this._buildResourceLoader(cwd);
 
@@ -598,7 +612,7 @@ export class PiSessionManager {
 
     async getSessions(): Promise<SessionInfo[]> {
         const { SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const cwd = this._getCwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
         // typically the VS Code install directory, not the workspace, so those configs are missed.
@@ -621,7 +635,7 @@ export class PiSessionManager {
         this._unsubscribe?.();
         this._session.dispose();
         const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const cwd = this._getCwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
         // typically the VS Code install directory, not the workspace, so those configs are missed.
@@ -888,15 +902,17 @@ export class PiSessionManager {
             );
         }
 
-        const config = vscode.workspace.getConfiguration('pi-code');
-        const defaultModel = config.get<string>('subagents.defaultModel', '').trim();
+        const defaultModel = this._ports.settings.get('subagents.defaultModel', '').trim();
         const spec = resolveAgentSpec(registry, invocation, {
             availableModels: getAvailableModels(this._modelRegistry),
             parentModel: { provider: parentModel.provider, id: parentModel.id },
             parentThinkingLevel: session.thinkingLevel,
             ...(defaultModel ? { defaultModel } : {}),
-            allowedModels: config.get<string[]>('subagents.allowedModels', []),
-            allowInvocationModelOverride: config.get<boolean>('subagents.allowInvocationModelOverride', true),
+            allowedModels: this._ports.settings.get('subagents.allowedModels', []),
+            allowInvocationModelOverride: this._ports.settings.get(
+                'subagents.allowInvocationModelOverride',
+                true,
+            ),
             registeredTools: [
                 ...session.getAllTools().map((tool) => tool.name),
                 ...(this._childToolFactories?.listNames() ?? []),
@@ -907,9 +923,9 @@ export class PiSessionManager {
             ],
             childSafeTools: [...CHILD_SAFE_TOOLS, ...(this._childToolFactories?.listNames() ?? [])],
             nonChildSafeTools: ['subagent'],
-            defaultMaxTurns: config.get<number>('subagents.defaultMaxTurns', 30),
+            defaultMaxTurns: this._ports.settings.get('subagents.defaultMaxTurns', 30),
             maxTurns: 100,
-            defaultTimeoutMinutes: config.get<number>('subagents.defaultTimeoutMinutes', 10),
+            defaultTimeoutMinutes: this._ports.settings.get('subagents.defaultTimeoutMinutes', 10),
             maxTimeoutMinutes: 120,
             defaultContextMode: 'fresh',
             defaultIsolation: 'shared-workspace',
@@ -990,7 +1006,7 @@ export class PiSessionManager {
             }
             const isolation = this._writeIsolation;
             const worktreePath = existing.isolationPath;
-            const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            const workspace = this._ports.workspace.getRoot();
             if (!isolation || !worktreePath || !workspace) {
                 throw new Error(`Preserved worktree for subagent ${agentId} is unavailable.`);
             }
@@ -1083,7 +1099,7 @@ export class PiSessionManager {
             : undefined;
         const childFactory = new PiChildSessionFactory({
             cwd,
-            workspaceTrusted: vscode.workspace.isTrusted,
+            workspaceTrusted: this._ports.workspace.isTrusted(),
             authStorage,
             modelRegistry: this._modelRegistry,
             ...(transcriptDirectory ? { transcriptDirectory } : {}),
@@ -1095,8 +1111,7 @@ export class PiSessionManager {
         this._subagentManager = new SubagentManager(this._subagentCoordinator, childFactory, {
             parentSessionId: session.sessionId,
             parentTabId: this._subagentParentTabId,
-            maxConcurrentRuns: vscode.workspace.getConfiguration('pi-code')
-                .get<number>('subagents.maxConcurrentPerChat', 2),
+            maxConcurrentRuns: this._ports.settings.get('subagents.maxConcurrentPerChat', 2),
             restoredRecords,
             ...(this._subagentStore ? {
                 persistRun: (run, spec) => this._subagentStore!.save(
