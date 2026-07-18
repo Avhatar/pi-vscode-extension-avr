@@ -51,10 +51,15 @@ export interface SessionWorkspacePort {
     findFiles(root: string, include: string, exclude: string, maxResults: number): Promise<string[]>;
 }
 
+export interface SessionResourcePaths {
+    readonly bundledPiPackagePaths: readonly string[];
+}
+
 export interface SessionRuntimePorts {
     workspace: SessionWorkspacePort;
     settings: SessionSettingsPort;
     dialogs: SessionDialogPort;
+    resources: SessionResourcePaths;
 }
 
 export const DEFAULT_SESSION_RUNTIME_PORTS: SessionRuntimePorts = {
@@ -69,5 +74,8 @@ export const DEFAULT_SESSION_RUNTIME_PORTS: SessionRuntimePorts = {
     dialogs: {
         showWarning: () => undefined,
         selectModel: async () => undefined,
+    },
+    resources: {
+        bundledPiPackagePaths: [],
     },
 };

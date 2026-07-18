@@ -18,7 +18,6 @@ import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, refreshModelRegistry, disposeModelRegistry } from './models';
 import { createCodexMonitorExtension } from './codex-monitor';
 import { getCodexUsageStore } from './codex-usage-store';
-import { getBundledPiPackagePaths } from './bundled-packages';
 import { getStandardSkillPaths } from './standard-resources';
 import { createClaudeContextExtension } from './claude-compat/context-extension';
 import { getRootClaudeFiles } from './claude-compat/context';
@@ -303,7 +302,7 @@ export class PiSessionManager {
                 `Claude Code MCP import sync failed: ${error instanceof Error ? error.message : String(error)}`,
             );
         }
-        const bundledPackagePaths = getBundledPiPackagePaths((msg) => this._outputChannel.appendLine(msg));
+        const bundledPackagePaths = [...this._ports.resources.bundledPiPackagePaths];
         const standardSkillPaths = getStandardSkillPaths(cwd);
         const claudeInfrastructure = await detectClaudeInfrastructure(cwd, {
             collectNestedClaudeFiles: true,

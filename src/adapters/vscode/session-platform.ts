@@ -4,6 +4,7 @@ import type {
     ModelSelectionOption,
     SecretStore,
     SessionDialogPort,
+    SessionResourcePaths,
     SessionRuntimePorts,
     SessionSettingValues,
     SessionSettingsPort,
@@ -97,10 +98,13 @@ export class VsCodeSessionDialogs implements SessionDialogPort {
     }
 }
 
-export function createVsCodeSessionRuntimePorts(): SessionRuntimePorts {
+export function createVsCodeSessionRuntimePorts(
+    resources?: SessionResourcePaths,
+): SessionRuntimePorts {
     return {
         workspace: new VsCodeWorkspacePort(),
         settings: new VsCodeSessionSettings(),
         dialogs: new VsCodeSessionDialogs(),
+        resources: resources ?? { bundledPiPackagePaths: [] },
     };
 }

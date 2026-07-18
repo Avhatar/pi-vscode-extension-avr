@@ -189,7 +189,7 @@ Pi extensions (npm packages keyed `pi-package`, e.g. `pi-web-access`) ship **ins
 ### How to add a new Pi extension
 
 1. `npm install <package> --save` — it MUST be a production dependency. `devDependencies` are stripped by `npm prune --omit=dev` before packaging and will not appear in the VSIX.
-2. Append the package name to `BUNDLED_PI_PACKAGES` in `src/pi/bundled-packages.ts`. That list is consumed by `_buildResourceLoader` in `src/pi/session.ts`, which resolves each name to an absolute path under `node_modules/<pkg>/` and passes the directory to `DefaultResourceLoader` via `additionalExtensionPaths`. Pi's package manager treats it as a local pi-package and auto-discovers `pi.extensions` and `pi.skills` from the package's own `package.json` manifest — no separate skills wiring needed.
+2. Append the package name to `BUNDLED_PI_PACKAGES` in `src/pi/bundled-packages.ts`. Extension activation resolves that list from `ExtensionContext.extensionUri.fsPath` with `getBundledPiPackagePaths(...)`, injects the absolute package directories through the session resource paths, and `_buildResourceLoader` passes them to `DefaultResourceLoader` via `additionalExtensionPaths`. Pi's package manager treats each directory as a local pi-package and auto-discovers `pi.extensions` and `pi.skills` from the package's own `package.json` manifest — no separate skills wiring needed.
 3. Confirm `.vscodeignore` does not exclude `node_modules/<pkg>/**`. The current rules leave `node_modules/` alone, so most packages ship without changes.
 4. Smoke-test the produced VSIX in a clean VS Code window: open a chat, confirm the new tools appear in the active tool list, and any new skills show up in the slash-command menu (`/`).
 

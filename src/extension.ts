@@ -5,6 +5,7 @@ import {
     createVsCodeSessionRuntimePorts,
 } from './adapters/vscode/session-platform';
 import { PiSessionManager } from './pi/session';
+import { getBundledPiPackagePaths } from './pi/bundled-packages';
 import { getCodexUsageStore } from './pi/codex-usage-store';
 import { LauncherView } from './providers/launcher-view';
 import { StatusBarManager } from './providers/status-bar';
@@ -51,7 +52,13 @@ export async function activate(context: vscode.ExtensionContext) {
         const childToolFactories = new ChildToolFactoryRegistry();
         const sessionLogger = new VsCodeOutputChannelLogger(outputChannel);
         const sessionSecrets = new VsCodeSecretStore(context.secrets);
-        const sessionPorts = createVsCodeSessionRuntimePorts();
+        const bundledPackagePaths = getBundledPiPackagePaths(
+            context.extensionUri.fsPath,
+            (msg) => sessionLogger.appendLine(msg),
+        );
+        const sessionPorts = createVsCodeSessionRuntimePorts({
+            bundledPiPackagePaths: bundledPackagePaths,
+        });
         const initialSession = new PiSessionManager(
             sessionLogger, sessionSecrets, subagentCoordinator, subagentStore, writeIsolation, childToolFactories,
             sessionPorts,

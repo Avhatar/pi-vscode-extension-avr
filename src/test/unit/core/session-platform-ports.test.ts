@@ -3,6 +3,7 @@ import type { SessionRuntimePorts } from '../../../core/ports/session-platform';
 import {
     VsCodeSessionSettings,
     VsCodeWorkspacePort,
+    createVsCodeSessionRuntimePorts,
 } from '../../../adapters/vscode/session-platform';
 import { ChatController } from '../../../controllers/chat-controller';
 import { PiSessionManager } from '../../../pi/session';
@@ -37,6 +38,15 @@ describe('portable session workspace and settings ports', () => {
         expect(source.getConfiguration).toHaveBeenCalledWith('pi-code');
     });
 
+    it('composes explicit bundled-package paths without deriving host locations', () => {
+        const bundledPiPackagePaths = ['X:/extensions/pi-code/node_modules/pi-web-access'];
+
+        const ports = createVsCodeSessionRuntimePorts({ bundledPiPackagePaths });
+
+        expect(ports.resources.bundledPiPackagePaths).toBe(bundledPiPackagePaths);
+        expect(createVsCodeSessionRuntimePorts().resources.bundledPiPackagePaths).toEqual([]);
+    });
+
     it('preserves one port set for replacement session construction', () => {
         const ports: SessionRuntimePorts = {
             workspace: {
@@ -48,6 +58,9 @@ describe('portable session workspace and settings ports', () => {
             dialogs: {
                 showWarning: () => undefined,
                 selectModel: async () => undefined,
+            },
+            resources: {
+                bundledPiPackagePaths: ['/extension/node_modules/pi-web-access'],
             },
         };
         const secrets = {
