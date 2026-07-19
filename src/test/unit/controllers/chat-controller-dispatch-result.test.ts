@@ -7,68 +7,105 @@ describe('ChatController command dispatch results', () => {
     it('acknowledges a prompt after dispatch without waiting for the model turn', async () => {
         let settleTurn!: () => void;
         const turn = new Promise<void>((resolve) => { settleTurn = resolve; });
+        const prompt = vi.fn(() => turn);
+        const tab = createPromptTab({ prompt });
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', {
-            id: 'tab-1',
-            session: {},
-            checkpointManager: {
-                rollbackPoint: null,
-                startTurn: vi.fn(),
-                discardSuspended: vi.fn(),
-            },
-            diffManager: {
-                setCurrentTurn: vi.fn(),
-                discardSuspended: vi.fn(),
-            },
-            suspendedMessages: [],
-            turnCounter: 0,
-        }]]);
+        controller._tabs = new Map([['tab-1', tab]]);
         controller._activeTabId = 'tab-1';
+        controller._chatService = new ChatService({ now: () => 0 });
         controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
         controller._isPlanModeEnabledFor = vi.fn(() => false);
         controller._prepareCacheForRequest = vi.fn();
         controller._logPromptToolState = vi.fn();
-        controller._promptUserTask = vi.fn(() => turn);
         controller._outputChannel = { appendLine: vi.fn() };
         controller._postForTab = vi.fn();
 
+        const images = [{ type: 'image', data: 'abc', mimeType: 'image/png' }] as any;
+        const files = [{
+            type: 'file', data: 'text', mimeType: 'text/plain', name: 'notes.txt', size: 4,
+        }] as any;
         let result: unknown;
-        void controller.handleMessage({ type: 'prompt', text: 'hello' }, 'tab-1')
+        void controller.handleMessage({ type: 'prompt', text: 'hello', images, files }, 'tab-1')
             .then((value: unknown) => { result = value; });
         await vi.waitFor(() => expect(result).toEqual({ ok: true }));
-        expect(controller._promptUserTask).toHaveBeenCalledOnce();
+        expect(prompt).toHaveBeenCalledWith('hello', images, files);
 
         settleTurn();
         await turn;
     });
 
+    it('applies Plan Mode only to ordinary direct prompts, not compact commands', async () => {
+        const prompt = vi.fn(async () => undefined);
+        const compact = vi.fn(async () => undefined);
+        const tab = createPromptTab({ prompt, compact });
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', tab]]);
+        controller._activeTabId = 'tab-1';
+        controller._chatService = new ChatService({ now: () => 0 });
+        controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
+        controller._isPlanModeEnabledFor = vi.fn(() => true);
+        controller._prepareCacheForRequest = vi.fn();
+        controller._logPromptToolState = vi.fn();
+        controller.sendStateSync = vi.fn();
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._postForTab = vi.fn();
+
+        await controller.handleMessage({ type: 'prompt', text: 'make a plan' }, 'tab-1');
+        await controller.handleMessage({ type: 'prompt', text: '/compact focus' }, 'tab-1');
+
+        expect(prompt).toHaveBeenCalledWith(
+            expect.stringMatching(/<plan-mode-instructions>[\s\S]*make a plan/),
+            undefined,
+            undefined,
+        );
+        expect(compact).toHaveBeenCalledWith('focus');
+        expect(controller._isPlanModeEnabledFor).toHaveBeenCalledOnce();
+        expect(controller.sendStateSync).toHaveBeenCalledWith('tab-1');
+    });
+
+    it('returns command_failed when direct mention augmentation rejects after turn setup', async () => {
+        const prompt = vi.fn(async () => undefined);
+        const tab = createPromptTab({ prompt });
+        const error = new Error('mention indexing failed');
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', tab]]);
+        controller._activeTabId = 'tab-1';
+        controller._chatService = new ChatService({ now: () => 0 });
+        controller._fileMentions = {
+            augmentPromptIfNeeded: vi.fn(async () => { throw error; }),
+        };
+        controller._isPlanModeEnabledFor = vi.fn(() => false);
+        controller._prepareCacheForRequest = vi.fn();
+        controller._logPromptToolState = vi.fn();
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._postForTab = vi.fn();
+
+        await expect(controller.handleMessage({
+            type: 'prompt', text: 'read @missing',
+        }, 'tab-1')).resolves.toEqual({
+            ok: false,
+            code: 'command_failed',
+            message: 'mention indexing failed',
+        });
+        expect(tab.turnCounter).toBe(1);
+        expect(prompt).not.toHaveBeenCalled();
+        expect(controller._postForTab).toHaveBeenCalledWith('tab-1', {
+            type: 'error',
+            message: 'mention indexing failed',
+        });
+    });
+
     it('handles /name locally instead of sending it to the model or queue', async () => {
         const setSessionName = vi.fn();
-        const promptUserTask = vi.fn(async () => undefined);
+        const prompt = vi.fn(async () => undefined);
         const controller = Object.create(ChatController.prototype) as any;
-        const tab = {
-            id: 'tab-1',
-            session: { setSessionName },
-            checkpointManager: {
-                rollbackPoint: null,
-                startTurn: vi.fn(),
-                discardSuspended: vi.fn(),
-            },
-            diffManager: {
-                setCurrentTurn: vi.fn(),
-                discardSuspended: vi.fn(),
-            },
-            suspendedMessages: [],
-            queuedMessages: [],
-            turnCounter: 0,
-        };
+        const tab = createPromptTab({ setSessionName, prompt });
         controller._tabs = new Map([['tab-1', tab]]);
         controller._activeTabId = 'tab-1';
         controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
         controller._isPlanModeEnabledFor = vi.fn(() => false);
         controller._prepareCacheForRequest = vi.fn();
         controller._logPromptToolState = vi.fn();
-        controller._promptUserTask = promptUserTask;
         controller._updateTabName = vi.fn();
         controller.sendStateSync = vi.fn();
         controller._outputChannel = { appendLine: vi.fn() };
@@ -85,7 +122,7 @@ describe('ChatController command dispatch results', () => {
 
         expect(setSessionName).toHaveBeenNthCalledWith(1, 'Authentication cleanup');
         expect(setSessionName).toHaveBeenNthCalledWith(2, 'Streaming rename');
-        expect(promptUserTask).not.toHaveBeenCalled();
+        expect(prompt).not.toHaveBeenCalled();
         expect(tab.queuedMessages).toEqual([]);
         expect(tab.turnCounter).toBe(0);
     });
@@ -119,31 +156,17 @@ describe('ChatController command dispatch results', () => {
     });
 
     it('rejects an empty /name command without capturing similar prompts', async () => {
-        const promptUserTask = vi.fn(async () => undefined);
+        const prompt = vi.fn(async () => undefined);
         const postForTab = vi.fn();
+        const tab = createPromptTab({ setSessionName: vi.fn(), prompt });
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', {
-            id: 'tab-1',
-            session: { setSessionName: vi.fn() },
-            checkpointManager: {
-                rollbackPoint: null,
-                startTurn: vi.fn(),
-                discardSuspended: vi.fn(),
-            },
-            diffManager: {
-                setCurrentTurn: vi.fn(),
-                discardSuspended: vi.fn(),
-            },
-            suspendedMessages: [],
-            queuedMessages: [],
-            turnCounter: 0,
-        }]]);
+        controller._tabs = new Map([['tab-1', tab]]);
         controller._activeTabId = 'tab-1';
+        controller._chatService = new ChatService({ now: () => 0 });
         controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
         controller._isPlanModeEnabledFor = vi.fn(() => false);
         controller._prepareCacheForRequest = vi.fn();
         controller._logPromptToolState = vi.fn();
-        controller._promptUserTask = promptUserTask;
         controller._updateTabName = vi.fn();
         controller.sendStateSync = vi.fn();
         controller._outputChannel = { appendLine: vi.fn() };
@@ -166,7 +189,7 @@ describe('ChatController command dispatch results', () => {
             { type: 'prompt', text: '/nameplate cleanup' },
             'tab-1',
         )).resolves.toEqual({ ok: true });
-        expect(promptUserTask).toHaveBeenCalledOnce();
+        expect(prompt).toHaveBeenCalledOnce();
     });
 
     it('unsubscribes tabs without disposing tab or host-owned resources on controller shutdown', () => {
@@ -236,3 +259,22 @@ describe('ChatController command dispatch results', () => {
         });
     });
 });
+
+function createPromptTab(session: Record<string, unknown>): any {
+    return new TabRuntime<any, any, any>({
+        id: 'tab-1',
+        session: { dispose: vi.fn(), ...session },
+        diffManager: {
+            fileChanges: [],
+            setCurrentTurn: vi.fn(),
+            discardSuspended: vi.fn(),
+            dispose: vi.fn(),
+        },
+        checkpointManager: {
+            rollbackPoint: null,
+            startTurn: vi.fn(),
+            discardSuspended: vi.fn(),
+            dispose: vi.fn(),
+        },
+    });
+}

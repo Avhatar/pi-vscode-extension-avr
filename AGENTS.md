@@ -211,7 +211,7 @@ Pi extensions (npm packages keyed `pi-package`, e.g. `pi-web-access`) ship **ins
 | `src/pi/auth.ts` | Auth storage singleton |
 | `src/pi/events.ts` | EventRouter for agent session events |
 | `src/controllers/chat-controller.ts` | VS Code chat orchestration, transport, host effects, and command routing |
-| `src/core/chat/chat-service.ts` | Portable Pi event-derived tab projection, queue controls and dispatch, and serialized chat state assembly |
+| `src/core/chat/chat-service.ts` | Portable Pi event-derived tab projection, direct prompt and queue lifecycle, and serialized chat state assembly |
 | `src/providers/launcher-view.ts` | Activity-bar `WebviewViewProvider` (launcher: new chat, settings, history, Plan Mode toggle, per-tab ToDo) |
 | `src/providers/chat-panel.ts` | Editor-area `WebviewPanel` per chat |
 | `src/providers/chat-panel-serializer.ts` | Restores chat panels across `Reload Window` |

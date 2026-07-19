@@ -8,6 +8,7 @@ import {
     type MessageEventSource,
 } from './vscode-agent-connection';
 import { mergeStateMessages } from './interrupted-turn-notice';
+import { prepareUserMessageContent } from './user-message-content';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: unknown): void;
@@ -2087,7 +2088,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
         }
         const rawText = extractText(msg);
         const images = extractImages(msg);
-        const { cleanText, fileNames } = stripFileBlocks(stripPlanModeBlock(rawText));
+        const { cleanText, fileNames } = prepareUserMessageContent(rawText);
         const { skillName, userText } = parseSkillFromUserMessage(cleanText);
         if (skillName) {
             const badge = el('span', 'skill-badge');
@@ -4990,38 +4991,6 @@ function extractText(msg: any): string {
     }
     return msg.text ?? '';
 }
-
-/** Pattern for file blocks inserted by _augmentTextWithFiles.
- *  Binary files: [File: name] (binary file)\n[/File]\n
- *  Text files:   [File: name]\ncontent\n[/File]\n */
-const FILE_BLOCK_RE = /\[File:\s*(.+?)\]\s*(?:\(binary file\))?[\s\S]*?\[\/File\]\s*\n?/g;
-
-/** Pattern for the Plan Mode instruction prefix injected by chat-controller
- *  when the Plan Mode toggle is on. Always lives at the very start of the
- *  prompt. Keep in sync with the wrapper tags in chat-controller.ts. */
-const PLAN_MODE_BLOCK_RE = /^<plan-mode-instructions>[\s\S]*?<\/plan-mode-instructions>\s*\n?/;
-
-interface StrippedFileInfo {
-    cleanText: string;
-    fileNames: string[];
-}
-
-/** Remove [File: name]...[/File] blocks from the text and extract file names. */
-function stripFileBlocks(text: string): StrippedFileInfo {
-    const fileNames: string[] = [];
-    const cleanText = text.replace(FILE_BLOCK_RE, (_, name: string) => {
-        fileNames.push(name.trim());
-        return '';
-    });
-    return { cleanText, fileNames };
-}
-
-/** Strip the leading <plan-mode-instructions>...</plan-mode-instructions> block
- *  so the chat bubble shows only what the user typed. */
-function stripPlanModeBlock(text: string): string {
-    return text.replace(PLAN_MODE_BLOCK_RE, '');
-}
-
 
 function extractImages(msg: any): ImageAttachment[] {
     if (!Array.isArray(msg.content)) return [];

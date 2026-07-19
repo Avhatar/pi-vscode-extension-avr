@@ -3,7 +3,9 @@ import type {
     CacheEffective,
     CacheMode,
     CodexTurnUsage,
+    FileAttachment,
     FileChangeInfo,
+    ImageAttachment,
     SerializedAgentState,
     TabInfo,
 } from '../../shared/agent-protocol';
@@ -71,6 +73,27 @@ export interface QueueControlResult {
     readonly changed: boolean;
     readonly queueLength: number;
 }
+
+export interface DirectPromptRequest {
+    readonly text: string;
+    readonly images?: ImageAttachment[];
+    readonly files?: FileAttachment[];
+}
+
+export interface DirectPromptCallbacks {
+    decoratePrompt(text: string): string;
+    augmentPrompt(text: string): Promise<string>;
+    compact(instructions?: string): Promise<void>;
+    prompt(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void>;
+    prepareRequest(): void;
+    logPrompt(): void;
+    publishState(): void;
+    reportDetachedFailure(error: unknown): void;
+}
+
+export type DirectPromptDispatchResult =
+    | { readonly kind: 'prompt_dispatched' }
+    | { readonly kind: 'compacted' };
 
 export interface QueuedDispatchCallbacks {
     augmentPrompt(text: string): Promise<string>;
@@ -217,6 +240,43 @@ export class ChatService {
         return tab.turnNotificationGate.onAgentSettled();
     }
 
+    async dispatchDirectPrompt(
+        tab: ChatServiceTab,
+        request: DirectPromptRequest,
+        callbacks: DirectPromptCallbacks,
+    ): Promise<DirectPromptDispatchResult> {
+        const compactInstructions = parseCompactCommand(request.text);
+        if (compactInstructions !== null) {
+            callbacks.prepareRequest();
+            try {
+                await callbacks.compact(compactInstructions);
+            } catch {
+                // The concrete session reports compaction failures through its event stream.
+            }
+            callbacks.publishState();
+            return { kind: 'compacted' };
+        }
+
+        const promptText = callbacks.decoratePrompt(request.text);
+        if (tab.checkpointManager.rollbackPoint !== null) {
+            tab.checkpointManager.discardSuspended();
+            tab.diffManager.discardSuspended();
+            tab.suspendedMessages = [];
+        }
+        tab.turnCounter++;
+        const turnIndex = tab.turnCounter;
+        tab.checkpointManager.startTurn(turnIndex);
+        tab.diffManager.setCurrentTurn(turnIndex);
+        callbacks.prepareRequest();
+        callbacks.logPrompt();
+        const augmentedPrompt = await callbacks.augmentPrompt(promptText);
+        void this._runUserPrompt(
+            tab,
+            () => callbacks.prompt(augmentedPrompt, request.images, request.files),
+        ).catch(callbacks.reportDetachedFailure);
+        return { kind: 'prompt_dispatched' };
+    }
+
     applyQueueControl(
         tab: ChatServiceTab,
         command: QueueControlCommand,
@@ -331,6 +391,18 @@ export class ChatService {
                 callbacks.publishState();
             }
         });
+    }
+
+    private async _runUserPrompt(
+        tab: ChatServiceTab,
+        prompt: () => Promise<void>,
+    ): Promise<void> {
+        const armToken = tab.turnNotificationGate.arm();
+        try {
+            await prompt();
+        } finally {
+            tab.turnNotificationGate.cancelArm(armToken);
+        }
     }
 
     updateTabName(tab: ChatServiceTab): TabNameUpdate {

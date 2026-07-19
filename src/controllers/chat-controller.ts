@@ -7,7 +7,7 @@ import type { ChatPlatformPorts, FileMentionsPort, StateStore } from '../core/po
 import type { FileChangePlatformPorts } from '../core/ports/file-state';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
-import { ChatService, parseCompactCommand } from '../core/chat/chat-service';
+import { ChatService } from '../core/chat/chat-service';
 import { TabRuntime } from '../core/chat/tab-runtime';
 import type {
     ClientMessage, ServerMessage, TabInfo,
@@ -223,7 +223,7 @@ export class ChatController implements vscode.Disposable {
      *  the Plan Mode toggle is on. No tool restriction, no phase state —
      *  the agent decides per-prompt whether the request warrants a plan.
      *  The wrapper tags must stay in sync with PLAN_MODE_BLOCK_RE in
-     *  webview/main.ts so the block is stripped from the rendered bubble. */
+     *  webview/user-message-content.ts so the block is hidden in the rendered bubble. */
     private static readonly PLAN_MODE_INSTRUCTIONS =
         '<plan-mode-instructions>\n' +
         'Plan Mode is on. Not every prompt needs a plan — use judgment:\n' +
@@ -1568,45 +1568,21 @@ export class ChatController implements vscode.Disposable {
                 case 'prompt': {
                     if (this._handleNameCommand(tab, msg.text)) break;
 
-                    const compactInstructions = parseCompactCommand(msg.text);
-                    if (compactInstructions !== null) {
-                        this._prepareCacheForRequest(tab);
-                        try {
-                            await tab.session.compact(compactInstructions);
-                        } catch {
-                            // The SDK emits compaction_end with a user-facing error message.
-                        }
-                        this.sendStateSync(tab.id);
-                        break;
-                    }
-
-                    // Plan Mode injection — when the toggle is on, prepend a
-                    // fixed <plan-mode-instructions> block that tells the agent
-                    // to plan before making changes and to re-read files before
-                    // editing them. No tool restriction, no state machine — the
-                    // agent decides per-prompt whether the task needs a plan.
-                    // The wrapper tags let the webview strip the block from the
-                    // rendered user bubble; keep them in sync with
-                    // PLAN_MODE_BLOCK_RE in webview/main.ts.
-                    let promptText = msg.text;
-                    if (this._isPlanModeEnabledFor(tab)) {
-                        promptText = ChatController.PLAN_MODE_INSTRUCTIONS + '\n\n' + promptText;
-                    }
-
-                    if (tab.checkpointManager.rollbackPoint !== null) {
-                        tab.checkpointManager.discardSuspended();
-                        tab.diffManager.discardSuspended();
-                        tab.suspendedMessages = [];
-                    }
-                    tab.turnCounter++;
-                    const turnIdx = tab.turnCounter;
-                    tab.checkpointManager.startTurn(turnIdx);
-                    tab.diffManager.setCurrentTurn(turnIdx);
-                    this._prepareCacheForRequest(tab);
-                    this._logPromptToolState(tab, 'prompt');
-                    const augmentedPrompt = await this._fileMentions.augmentPromptIfNeeded(promptText);
-                    void this._promptUserTask(tab, augmentedPrompt, msg.images, msg.files).catch((error) => {
-                        this._reportCommandFailure(msg.type, tab.id, error);
+                    await this._chatService.dispatchDirectPrompt(tab, msg, {
+                        // Plan Mode remains a host preference. The service calls
+                        // this only for ordinary prompts, never `/compact`.
+                        decoratePrompt: (text) => this._isPlanModeEnabledFor(tab)
+                            ? ChatController.PLAN_MODE_INSTRUCTIONS + '\n\n' + text
+                            : text,
+                        augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
+                        compact: (instructions) => tab.session.compact(instructions),
+                        prompt: (text, images, files) => tab.session.prompt(text, images, files),
+                        prepareRequest: () => this._prepareCacheForRequest(tab),
+                        logPrompt: () => this._logPromptToolState(tab, 'prompt'),
+                        publishState: () => this.sendStateSync(tab.id),
+                        reportDetachedFailure: (error) => {
+                            this._reportCommandFailure(msg.type, tab.id, error);
+                        },
                     });
                     break;
                 }

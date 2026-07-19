@@ -229,6 +229,157 @@ describe('portable ChatService event and state projection', () => {
     });
 });
 
+function createDirectPromptCallbacks(overrides: Record<string, unknown> = {}): any {
+    return {
+        decoratePrompt: vi.fn((text: string) => text),
+        augmentPrompt: vi.fn(async (text: string) => text),
+        compact: vi.fn(async () => undefined),
+        prompt: vi.fn(async () => undefined),
+        prepareRequest: vi.fn(),
+        logPrompt: vi.fn(),
+        publishState: vi.fn(),
+        reportDetachedFailure: vi.fn(),
+        ...overrides,
+    };
+}
+
+describe('portable ChatService direct prompt lifecycle', () => {
+    it('starts a direct prompt in order and returns without awaiting the model turn', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        const order: string[] = [];
+        const images = [{ type: 'image', data: 'abc', mimeType: 'image/png' }] as any;
+        const files = [{
+            type: 'file', data: 'text', mimeType: 'text/plain', name: 'notes.txt', size: 4,
+        }] as any;
+        let finishTurn!: () => void;
+        const turn = new Promise<void>((resolve) => { finishTurn = resolve; });
+        let turnSettled = false;
+        void turn.then(() => { turnSettled = true; });
+
+        tab.checkpointManager.discardSuspended.mockImplementation(() => {
+            order.push('discard-checkpoint');
+            tab.checkpointManager.rollbackPoint = null;
+        });
+        tab.diffManager.discardSuspended.mockImplementation(() => order.push('discard-diff'));
+        tab.checkpointManager.startTurn.mockImplementation(() => order.push('start-checkpoint'));
+        tab.diffManager.setCurrentTurn.mockImplementation(() => order.push('start-diff'));
+        const callbacks = createDirectPromptCallbacks({
+            decoratePrompt: vi.fn((text: string) => {
+                order.push('decorate');
+                return `<plan>${text}</plan>`;
+            }),
+            prepareRequest: vi.fn(() => order.push('prepare-cache')),
+            logPrompt: vi.fn(() => order.push('log-tools')),
+            augmentPrompt: vi.fn(async (text: string) => {
+                order.push(`augment:${text}`);
+                return `${text}\nfiles`;
+            }),
+            prompt: vi.fn((text: string, passedImages: any, passedFiles: any) => {
+                order.push(`prompt:${text}`);
+                expect(passedImages).toBe(images);
+                expect(passedFiles).toBe(files);
+                return turn;
+            }),
+        });
+
+        const result = await service.dispatchDirectPrompt(tab, {
+            text: 'task', images, files,
+        }, callbacks);
+
+        expect(result).toEqual({ kind: 'prompt_dispatched' });
+        expect(order).toEqual([
+            'decorate',
+            'discard-checkpoint',
+            'discard-diff',
+            'start-checkpoint',
+            'start-diff',
+            'prepare-cache',
+            'log-tools',
+            'augment:<plan>task</plan>',
+            'prompt:<plan>task</plan>\nfiles',
+        ]);
+        expect(tab.turnCounter).toBe(1);
+        expect(tab.checkpointManager.startTurn).toHaveBeenCalledWith(1);
+        expect(tab.diffManager.setCurrentTurn).toHaveBeenCalledWith(1);
+        expect(turnSettled).toBe(false);
+        finishTurn();
+        await turn;
+    });
+
+    it('reports detached prompt failure after cancelling its notification arm', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        const error = new Error('preflight failed');
+        let leakedCompletion: unknown;
+        const callbacks = createDirectPromptCallbacks({
+            prompt: vi.fn(async () => { throw error; }),
+            reportDetachedFailure: vi.fn(() => {
+                tab.turnNotificationGate.onAgentStart();
+                tab.turnNotificationGate.onAgentEnd({
+                    tabName: tab.name,
+                    outcome: 'completed',
+                    durationMs: 1,
+                });
+                leakedCompletion = tab.turnNotificationGate.onAgentSettled();
+            }),
+        });
+
+        await expect(service.dispatchDirectPrompt(tab, { text: 'task' }, callbacks)).resolves.toEqual({
+            kind: 'prompt_dispatched',
+        });
+        await vi.waitFor(() => expect(callbacks.reportDetachedFailure).toHaveBeenCalledWith(error));
+        expect(leakedCompletion).toBeUndefined();
+    });
+
+    it('preserves turn mutations when mention augmentation rejects before prompt dispatch', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        const error = new Error('mention indexing failed');
+        const callbacks = createDirectPromptCallbacks({
+            augmentPrompt: vi.fn(async () => { throw error; }),
+        });
+
+        await expect(service.dispatchDirectPrompt(tab, { text: 'read @file' }, callbacks))
+            .rejects.toThrow('mention indexing failed');
+
+        expect(tab.turnCounter).toBe(1);
+        expect(tab.checkpointManager.startTurn).toHaveBeenCalledWith(1);
+        expect(tab.diffManager.setCurrentTurn).toHaveBeenCalledWith(1);
+        expect(callbacks.prepareRequest).toHaveBeenCalledOnce();
+        expect(callbacks.logPrompt).toHaveBeenCalledOnce();
+        expect(callbacks.prompt).not.toHaveBeenCalled();
+    });
+
+    it('handles direct compact before decoration or turn mutation and publishes after rejection', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        const order: string[] = [];
+        const callbacks = createDirectPromptCallbacks({
+            prepareRequest: vi.fn(() => order.push('prepare-cache')),
+            compact: vi.fn(async () => {
+                order.push('compact');
+                throw new Error('session too small');
+            }),
+            publishState: vi.fn(() => order.push('publish')),
+        });
+
+        await expect(service.dispatchDirectPrompt(tab, {
+            text: '/compact focus on tests',
+        }, callbacks)).resolves.toEqual({ kind: 'compacted' });
+
+        expect(order).toEqual(['prepare-cache', 'compact', 'publish']);
+        expect(callbacks.prepareRequest).toHaveBeenCalledOnce();
+        expect(callbacks.compact).toHaveBeenCalledWith('focus on tests');
+        expect(callbacks.publishState).toHaveBeenCalledOnce();
+        expect(callbacks.decoratePrompt).not.toHaveBeenCalled();
+        expect(callbacks.augmentPrompt).not.toHaveBeenCalled();
+        expect(callbacks.prompt).not.toHaveBeenCalled();
+        expect(tab.turnCounter).toBe(0);
+        expect(tab.checkpointManager.startTurn).not.toHaveBeenCalled();
+    });
+});
+
 function createQueueCallbacks(overrides: Record<string, unknown> = {}): any {
     return {
         augmentPrompt: vi.fn(async (text: string) => text),

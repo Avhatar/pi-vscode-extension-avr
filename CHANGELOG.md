@@ -15,8 +15,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Moved chat event-derived streaming state and serialized snapshot assembly into a portable shared service without changing tab, queue, or panel behavior.
 - Moved queued prompt preparation and FIFO dispatch into the portable chat service while preserving settlement, retry, compaction, and tab-isolation behavior.
 - Moved queued-message add, edit, remove, and cancel validation into the portable chat service without changing chat controls.
+- Moved direct prompt and compaction lifecycle into the portable chat service while preserving Plan Mode, attachments, and immediate acknowledgement.
 
 ### Fixed
+- Plan Mode instructions no longer appear in user chat bubbles when a file is attached.
 - Queued messages now start after the active agent fully settles instead of being dropped while the SDK still considers the previous run busy.
 
 ## [0.58.0] - 2026-07-18
