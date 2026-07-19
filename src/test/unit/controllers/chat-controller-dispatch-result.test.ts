@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
+import { ChatService } from '../../../core/chat/chat-service';
 import { TabRuntime } from '../../../core/chat/tab-runtime';
 
 describe('ChatController command dispatch results', () => {
@@ -87,6 +88,34 @@ describe('ChatController command dispatch results', () => {
         expect(promptUserTask).not.toHaveBeenCalled();
         expect(tab.queuedMessages).toEqual([]);
         expect(tab.turnCounter).toBe(0);
+    });
+
+    it('applies queue controls through the service and publishes every command', async () => {
+        const tab = { id: 'tab-1', queuedMessages: [] as string[] };
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', tab]]);
+        controller._activeTabId = 'tab-1';
+        controller._chatService = new ChatService({ now: () => 0 });
+        controller._handleNameCommand = vi.fn(() => false);
+        controller.sendStateSync = vi.fn();
+        controller._postForTab = vi.fn();
+
+        await controller.handleMessage({ type: 'queueMessage', text: '  raw  ' }, 'tab-1');
+        await controller.handleMessage({
+            type: 'editQueuedMessage', index: 0, text: '  edited  ',
+        }, 'tab-1');
+        await controller.handleMessage({
+            type: 'editQueuedMessage', index: 4, text: 'ignored',
+        }, 'tab-1');
+        await controller.handleMessage({ type: 'removeQueuedMessage', index: 3 }, 'tab-1');
+        await controller.handleMessage({ type: 'removeQueuedMessage', index: 0 }, 'tab-1');
+        const queueBeforeCancel = tab.queuedMessages;
+        await controller.handleMessage({ type: 'cancelQueue' }, 'tab-1');
+
+        expect(tab.queuedMessages).toEqual([]);
+        expect(tab.queuedMessages).not.toBe(queueBeforeCancel);
+        expect(controller.sendStateSync).toHaveBeenCalledTimes(6);
+        expect(controller.sendStateSync).toHaveBeenCalledWith('tab-1');
     });
 
     it('rejects an empty /name command without capturing similar prompts', async () => {

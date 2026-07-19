@@ -1617,23 +1617,13 @@ export class ChatController implements vscode.Disposable {
                     break;
                 case 'queueMessage':
                     if (this._handleNameCommand(tab, msg.text)) break;
-                    tab.queuedMessages.push(msg.text);
+                    this._chatService.applyQueueControl(tab, msg);
                     this.sendStateSync(tab.id);
                     break;
                 case 'editQueuedMessage':
-                    if (msg.index >= 0 && msg.index < tab.queuedMessages.length && msg.text.trim()) {
-                        tab.queuedMessages[msg.index] = msg.text.trim();
-                    }
-                    this.sendStateSync(tab.id);
-                    break;
                 case 'removeQueuedMessage':
-                    if (msg.index >= 0 && msg.index < tab.queuedMessages.length) {
-                        tab.queuedMessages.splice(msg.index, 1);
-                    }
-                    this.sendStateSync(tab.id);
-                    break;
                 case 'cancelQueue':
-                    tab.queuedMessages = [];
+                    this._chatService.applyQueueControl(tab, msg);
                     this.sendStateSync(tab.id);
                     break;
                 case 'followUp':

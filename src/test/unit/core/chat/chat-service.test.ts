@@ -244,6 +244,52 @@ function createQueueCallbacks(overrides: Record<string, unknown> = {}): any {
 }
 
 describe('portable ChatService queue orchestration', () => {
+    it('applies validated queue controls to only the supplied tab', () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        const otherTab = createTab();
+        otherTab.queuedMessages = ['other'];
+
+        expect(service.applyQueueControl(tab, {
+            type: 'queueMessage',
+            text: '  raw queued text  ',
+        })).toEqual({ changed: true, queueLength: 1 });
+        expect(tab.queuedMessages).toEqual(['  raw queued text  ']);
+
+        expect(service.applyQueueControl(tab, {
+            type: 'editQueuedMessage',
+            index: 0,
+            text: '  edited text  ',
+        })).toEqual({ changed: true, queueLength: 1 });
+        expect(tab.queuedMessages).toEqual(['edited text']);
+
+        expect(service.applyQueueControl(tab, {
+            type: 'editQueuedMessage',
+            index: 0,
+            text: '   ',
+        })).toEqual({ changed: false, queueLength: 1 });
+        expect(service.applyQueueControl(tab, {
+            type: 'removeQueuedMessage',
+            index: 4,
+        })).toEqual({ changed: false, queueLength: 1 });
+
+        service.applyQueueControl(tab, { type: 'queueMessage', text: 'second' });
+        expect(service.applyQueueControl(tab, {
+            type: 'removeQueuedMessage',
+            index: 0,
+        })).toEqual({ changed: true, queueLength: 1 });
+        expect(tab.queuedMessages).toEqual(['second']);
+
+        const previousQueue = tab.queuedMessages;
+        expect(service.applyQueueControl(tab, { type: 'cancelQueue' })).toEqual({
+            changed: true,
+            queueLength: 0,
+        });
+        expect(tab.queuedMessages).toEqual([]);
+        expect(tab.queuedMessages).not.toBe(previousQueue);
+        expect(otherTab.queuedMessages).toEqual(['other']);
+    });
+
     it('reserves only a tab with a queued head', () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
@@ -376,7 +422,11 @@ describe('portable ChatService queue orchestration', () => {
         service.reserveQueuedDispatch(tab);
         const dispatch = service.dispatchNextQueued(tab, callbacks);
         await vi.waitFor(() => expect(callbacks.augmentPrompt).toHaveBeenCalledWith('stale head'));
-        tab.queuedMessages[0] = 'current head';
+        service.applyQueueControl(tab, {
+            type: 'editQueuedMessage',
+            index: 0,
+            text: 'current head',
+        });
         finishStale('stale expansion');
         await dispatch;
 

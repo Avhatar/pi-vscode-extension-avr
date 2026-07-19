@@ -1,4 +1,5 @@
 import type {
+    AgentClientMessage,
     CacheEffective,
     CacheMode,
     CodexTurnUsage,
@@ -59,6 +60,16 @@ export interface AgentEndProjection {
 export interface TabNameUpdate {
     readonly changed: boolean;
     readonly name: string;
+}
+
+export type QueueControlCommand = Extract<
+    AgentClientMessage,
+    { type: 'queueMessage' | 'editQueuedMessage' | 'removeQueuedMessage' | 'cancelQueue' }
+>;
+
+export interface QueueControlResult {
+    readonly changed: boolean;
+    readonly queueLength: number;
 }
 
 export interface QueuedDispatchCallbacks {
@@ -204,6 +215,40 @@ export class ChatService {
 
     settleAgent(tab: ChatServiceTab): TurnCompletionInfo | undefined {
         return tab.turnNotificationGate.onAgentSettled();
+    }
+
+    applyQueueControl(
+        tab: ChatServiceTab,
+        command: QueueControlCommand,
+    ): QueueControlResult {
+        let changed = false;
+        switch (command.type) {
+            case 'queueMessage':
+                tab.queuedMessages.push(command.text);
+                changed = true;
+                break;
+            case 'editQueuedMessage': {
+                const trimmed = command.text.trim();
+                if (command.index >= 0
+                    && command.index < tab.queuedMessages.length
+                    && trimmed) {
+                    tab.queuedMessages[command.index] = trimmed;
+                    changed = true;
+                }
+                break;
+            }
+            case 'removeQueuedMessage':
+                if (command.index >= 0 && command.index < tab.queuedMessages.length) {
+                    tab.queuedMessages.splice(command.index, 1);
+                    changed = true;
+                }
+                break;
+            case 'cancelQueue':
+                changed = tab.queuedMessages.length > 0;
+                tab.queuedMessages = [];
+                break;
+        }
+        return { changed, queueLength: tab.queuedMessages.length };
     }
 
     reserveQueuedDispatch(tab: ChatServiceTab): boolean {
