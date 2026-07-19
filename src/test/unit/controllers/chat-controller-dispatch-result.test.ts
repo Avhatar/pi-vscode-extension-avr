@@ -95,6 +95,69 @@ describe('ChatController command dispatch results', () => {
         });
     });
 
+    it('awaits and forwards steer and follow-up commands through the selected tab', async () => {
+        const steer = vi.fn(async () => undefined);
+        const followUp = vi.fn(async () => undefined);
+        const tab = createPromptTab({ steer, followUp });
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', tab]]);
+        controller._activeTabId = 'tab-1';
+        controller._chatService = new ChatService({ now: () => 0 });
+        controller._fileMentions = {
+            augmentPromptIfNeeded: vi.fn(async (text: string) => `${text} expanded`),
+        };
+        controller._prepareCacheForRequest = vi.fn();
+        controller._logPromptToolState = vi.fn();
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._postForTab = vi.fn();
+        const images = [{ type: 'image', data: 'abc', mimeType: 'image/png' }] as any;
+        const files = [{
+            type: 'file', data: 'text', mimeType: 'text/plain', name: 'notes.txt', size: 4,
+        }] as any;
+
+        await expect(controller.handleMessage({
+            type: 'steer', text: 'redirect', images, files,
+        }, 'tab-1')).resolves.toEqual({ ok: true });
+        await expect(controller.handleMessage({
+            type: 'followUp', text: 'continue', images, files,
+        }, 'tab-1')).resolves.toEqual({ ok: true });
+
+        expect(controller._prepareCacheForRequest).toHaveBeenCalledTimes(2);
+        expect(controller._logPromptToolState).toHaveBeenNthCalledWith(1, tab, 'steer');
+        expect(controller._logPromptToolState).toHaveBeenNthCalledWith(2, tab, 'followUp');
+        expect(steer).toHaveBeenCalledWith('redirect expanded', images, files);
+        expect(followUp).toHaveBeenCalledWith('continue expanded', images, files);
+    });
+
+    it('maps streaming-command augmentation failure through the existing error transport', async () => {
+        const steer = vi.fn(async () => undefined);
+        const tab = createPromptTab({ steer });
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = new Map([['tab-1', tab]]);
+        controller._activeTabId = 'tab-1';
+        controller._chatService = new ChatService({ now: () => 0 });
+        controller._fileMentions = {
+            augmentPromptIfNeeded: vi.fn(async () => { throw new Error('mention failed'); }),
+        };
+        controller._prepareCacheForRequest = vi.fn();
+        controller._logPromptToolState = vi.fn();
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._postForTab = vi.fn();
+
+        await expect(controller.handleMessage({
+            type: 'steer', text: 'inspect @missing',
+        }, 'tab-1')).resolves.toEqual({
+            ok: false,
+            code: 'command_failed',
+            message: 'mention failed',
+        });
+        expect(steer).not.toHaveBeenCalled();
+        expect(controller._postForTab).toHaveBeenCalledWith('tab-1', {
+            type: 'error',
+            message: 'mention failed',
+        });
+    });
+
     it('handles /name locally instead of sending it to the model or queue', async () => {
         const setSessionName = vi.fn();
         const prompt = vi.fn(async () => undefined);
@@ -245,6 +308,7 @@ describe('ChatController command dispatch results', () => {
             session: { abort: vi.fn().mockRejectedValue(new Error('Abort failed')) },
         }]]);
         controller._activeTabId = 'tab-1';
+        controller._chatService = new ChatService({ now: () => 0 });
         controller._outputChannel = { appendLine: vi.fn() };
         controller._postForTab = vi.fn();
 

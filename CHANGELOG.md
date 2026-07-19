@@ -16,6 +16,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Moved queued prompt preparation and FIFO dispatch into the portable chat service while preserving settlement, retry, compaction, and tab-isolation behavior.
 - Moved queued-message add, edit, remove, and cancel validation into the portable chat service without changing chat controls.
 - Moved direct prompt and compaction lifecycle into the portable chat service while preserving Plan Mode, attachments, and immediate acknowledgement.
+- Moved steering, follow-up, and stop dispatch into the portable chat service without changing attachment, acknowledgement, or active-turn behavior.
 
 ### Fixed
 - Plan Mode instructions no longer appear in user chat bubbles when a file is attached.

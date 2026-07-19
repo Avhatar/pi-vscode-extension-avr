@@ -380,6 +380,130 @@ describe('portable ChatService direct prompt lifecycle', () => {
     });
 });
 
+function createStreamingCommandCallbacks(overrides: Record<string, unknown> = {}): any {
+    return {
+        augmentPrompt: vi.fn(async (text: string) => text),
+        prepareRequest: vi.fn(),
+        logPrompt: vi.fn(),
+        steer: vi.fn(async () => undefined),
+        followUp: vi.fn(async () => undefined),
+        abort: vi.fn(async () => undefined),
+        ...overrides,
+    };
+}
+
+describe('portable ChatService streaming command dispatch', () => {
+    it('awaits steer acceptance after preserving preparation order and attachments', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const order: string[] = [];
+        const images = [{ type: 'image', data: 'abc', mimeType: 'image/png' }] as any;
+        const files = [{
+            type: 'file', data: 'text', mimeType: 'text/plain', name: 'notes.txt', size: 4,
+        }] as any;
+        let acceptSteer!: () => void;
+        const steerAcceptance = new Promise<void>((resolve) => { acceptSteer = resolve; });
+        let acknowledged = false;
+        const callbacks = createStreamingCommandCallbacks({
+            prepareRequest: vi.fn(() => order.push('prepare-cache')),
+            logPrompt: vi.fn((kind: string) => order.push(`log:${kind}`)),
+            augmentPrompt: vi.fn(async (text: string) => {
+                order.push(`augment:${text}`);
+                return `${text}\nmentions`;
+            }),
+            steer: vi.fn((text: string, passedImages: any, passedFiles: any) => {
+                order.push(`steer:${text}`);
+                expect(passedImages).toBe(images);
+                expect(passedFiles).toBe(files);
+                return steerAcceptance;
+            }),
+        });
+
+        const dispatch = service.dispatchStreamingCommand({
+            type: 'steer', text: 'redirect', images, files,
+        }, callbacks).then(() => { acknowledged = true; });
+
+        await vi.waitFor(() => expect(callbacks.steer).toHaveBeenCalledOnce());
+        expect(acknowledged).toBe(false);
+        expect(order).toEqual([
+            'prepare-cache',
+            'log:steer',
+            'augment:redirect',
+            'steer:redirect\nmentions',
+        ]);
+        expect(callbacks.followUp).not.toHaveBeenCalled();
+        expect(callbacks.abort).not.toHaveBeenCalled();
+
+        acceptSteer();
+        await dispatch;
+        expect(acknowledged).toBe(true);
+    });
+
+    it('routes follow-up text and attachments without invoking steer or abort', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const images = [{ type: 'image', data: 'abc', mimeType: 'image/png' }] as any;
+        const files = [{
+            type: 'file', data: 'text', mimeType: 'text/plain', name: 'next.txt', size: 4,
+        }] as any;
+        const callbacks = createStreamingCommandCallbacks({
+            augmentPrompt: vi.fn(async () => 'expanded next'),
+        });
+
+        await service.dispatchStreamingCommand({
+            type: 'followUp', text: 'next', images, files,
+        }, callbacks);
+
+        expect(callbacks.prepareRequest).toHaveBeenCalledOnce();
+        expect(callbacks.logPrompt).toHaveBeenCalledWith('followUp');
+        expect(callbacks.augmentPrompt).toHaveBeenCalledWith('next');
+        expect(callbacks.followUp).toHaveBeenCalledWith('expanded next', images, files);
+        expect(callbacks.steer).not.toHaveBeenCalled();
+        expect(callbacks.abort).not.toHaveBeenCalled();
+    });
+
+    it('propagates mention augmentation failure after preparation without session dispatch', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const error = new Error('mention indexing failed');
+        const callbacks = createStreamingCommandCallbacks({
+            augmentPrompt: vi.fn(async () => { throw error; }),
+        });
+
+        await expect(service.dispatchStreamingCommand({
+            type: 'steer', text: 'inspect @missing',
+        }, callbacks)).rejects.toThrow('mention indexing failed');
+
+        expect(callbacks.prepareRequest).toHaveBeenCalledOnce();
+        expect(callbacks.logPrompt).toHaveBeenCalledWith('steer');
+        expect(callbacks.steer).not.toHaveBeenCalled();
+        expect(callbacks.followUp).not.toHaveBeenCalled();
+        expect(callbacks.abort).not.toHaveBeenCalled();
+    });
+
+    it('awaits abort without preparing or augmenting a text request', async () => {
+        const service = new ChatService({ now: () => 0 });
+        let finishAbort!: () => void;
+        const abortCompletion = new Promise<void>((resolve) => { finishAbort = resolve; });
+        let acknowledged = false;
+        const callbacks = createStreamingCommandCallbacks({
+            abort: vi.fn(() => abortCompletion),
+        });
+
+        const dispatch = service.dispatchStreamingCommand({ type: 'abort' }, callbacks)
+            .then(() => { acknowledged = true; });
+
+        await vi.waitFor(() => expect(callbacks.abort).toHaveBeenCalledOnce());
+        expect(acknowledged).toBe(false);
+        expect(callbacks.prepareRequest).not.toHaveBeenCalled();
+        expect(callbacks.logPrompt).not.toHaveBeenCalled();
+        expect(callbacks.augmentPrompt).not.toHaveBeenCalled();
+        expect(callbacks.steer).not.toHaveBeenCalled();
+        expect(callbacks.followUp).not.toHaveBeenCalled();
+
+        finishAbort();
+        await dispatch;
+        expect(acknowledged).toBe(true);
+    });
+});
+
 function createQueueCallbacks(overrides: Record<string, unknown> = {}): any {
     return {
         augmentPrompt: vi.fn(async (text: string) => text),

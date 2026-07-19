@@ -95,6 +95,20 @@ export type DirectPromptDispatchResult =
     | { readonly kind: 'prompt_dispatched' }
     | { readonly kind: 'compacted' };
 
+export type StreamingCommand = Extract<
+    AgentClientMessage,
+    { type: 'steer' | 'followUp' | 'abort' }
+>;
+
+export interface StreamingCommandCallbacks {
+    augmentPrompt(text: string): Promise<string>;
+    prepareRequest(): void;
+    logPrompt(kind: 'steer' | 'followUp'): void;
+    steer(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void>;
+    followUp(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void>;
+    abort(): Promise<void>;
+}
+
 export interface QueuedDispatchCallbacks {
     augmentPrompt(text: string): Promise<string>;
     compact(instructions?: string): Promise<void>;
@@ -275,6 +289,25 @@ export class ChatService {
             () => callbacks.prompt(augmentedPrompt, request.images, request.files),
         ).catch(callbacks.reportDetachedFailure);
         return { kind: 'prompt_dispatched' };
+    }
+
+    async dispatchStreamingCommand(
+        command: StreamingCommand,
+        callbacks: StreamingCommandCallbacks,
+    ): Promise<void> {
+        if (command.type === 'abort') {
+            await callbacks.abort();
+            return;
+        }
+
+        callbacks.prepareRequest();
+        callbacks.logPrompt(command.type);
+        const text = await callbacks.augmentPrompt(command.text);
+        if (command.type === 'steer') {
+            await callbacks.steer(text, command.images, command.files);
+            return;
+        }
+        await callbacks.followUp(text, command.images, command.files);
     }
 
     applyQueueControl(

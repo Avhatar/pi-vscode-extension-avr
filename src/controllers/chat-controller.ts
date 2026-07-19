@@ -1587,9 +1587,16 @@ export class ChatController implements vscode.Disposable {
                     break;
                 }
                 case 'steer':
-                    this._prepareCacheForRequest(tab);
-                    this._logPromptToolState(tab, 'steer');
-                    await tab.session.steer(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
+                case 'followUp':
+                case 'abort':
+                    await this._chatService.dispatchStreamingCommand(msg, {
+                        augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
+                        prepareRequest: () => this._prepareCacheForRequest(tab),
+                        logPrompt: (kind) => this._logPromptToolState(tab, kind),
+                        steer: (text, images, files) => tab.session.steer(text, images, files),
+                        followUp: (text, images, files) => tab.session.followUp(text, images, files),
+                        abort: () => tab.session.abort(),
+                    });
                     break;
                 case 'queueMessage':
                     if (this._handleNameCommand(tab, msg.text)) break;
@@ -1601,11 +1608,6 @@ export class ChatController implements vscode.Disposable {
                 case 'cancelQueue':
                     this._chatService.applyQueueControl(tab, msg);
                     this.sendStateSync(tab.id);
-                    break;
-                case 'followUp':
-                    this._prepareCacheForRequest(tab);
-                    this._logPromptToolState(tab, 'followUp');
-                    await tab.session.followUp(await this._fileMentions.augmentPromptIfNeeded(msg.text), msg.images, msg.files);
                     break;
                 case 'setCacheMode': {
                     const next = msg.mode;
@@ -1622,9 +1624,6 @@ export class ChatController implements vscode.Disposable {
                     }
                     break;
                 }
-                case 'abort':
-                    await tab.session.abort();
-                    break;
                 case 'getModels': {
                     const models = tab.session.getModels();
                     const current = tab.session.getCurrentModel();
