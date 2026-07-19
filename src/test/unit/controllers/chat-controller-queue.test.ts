@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
 import { ChatService } from '../../../core/chat/chat-service';
+import { TabRegistry } from '../../../core/chat/tab-registry';
 import { TabRuntime } from '../../../core/chat/tab-runtime';
 import { EventRouter } from '../../../pi/events';
 
@@ -43,8 +44,8 @@ describe('ChatController queued messages', () => {
         controller = createControllerHarness();
         const firstTab = createTab('tab-a');
         const secondTab = createTab('tab-b');
-        controller._tabs.set(firstTab.id, firstTab);
-        controller._tabs.set(secondTab.id, secondTab);
+        registerTab(controller, firstTab);
+        registerTab(controller, secondTab);
         controller._subscribeTab(firstTab);
         controller._subscribeTab(secondTab);
 
@@ -100,7 +101,7 @@ describe('ChatController queued messages', () => {
     it('reserves the tab while queued file mentions are prepared', async () => {
         controller = createControllerHarness();
         const tab = createTab('tab-a');
-        controller._tabs.set(tab.id, tab);
+        registerTab(controller, tab);
         controller._subscribeTab(tab);
 
         let finishAugmentation!: (text: string) => void;
@@ -132,8 +133,8 @@ describe('ChatController queued messages', () => {
         controller = createControllerHarness();
         const beforeStart = createTab('tab-a');
         const afterStart = createTab('tab-b');
-        controller._tabs.set(beforeStart.id, beforeStart);
-        controller._tabs.set(afterStart.id, afterStart);
+        registerTab(controller, beforeStart);
+        registerTab(controller, afterStart);
         controller._subscribeTab(beforeStart);
         controller._subscribeTab(afterStart);
 
@@ -161,7 +162,7 @@ describe('ChatController queued messages', () => {
     it('continues to the next queued prompt after queued compaction finishes', async () => {
         controller = createControllerHarness();
         const tab = createTab('tab-a');
-        controller._tabs.set(tab.id, tab);
+        registerTab(controller, tab);
         controller._subscribeTab(tab);
 
         await controller.handleMessage({ type: 'queueMessage', text: '/compact focus on tests' }, tab.id);
@@ -181,7 +182,7 @@ describe('ChatController queued messages', () => {
         controller = createControllerHarness();
         const tab = createTab('tab-a');
         tab.codexTurnModelId = 'codex-model';
-        controller._tabs.set(tab.id, tab);
+        registerTab(controller, tab);
         controller._subscribeTab(tab);
 
         let finishAccounting!: () => void;
@@ -208,8 +209,7 @@ describe('ChatController queued messages', () => {
 
 function createControllerHarness(): any {
     const controller = Object.create(ChatController.prototype) as any;
-    controller._tabs = new Map();
-    controller._activeTabId = 'tab-a';
+    controller._tabs = new TabRegistry();
     controller._sinks = new Set();
     controller._cacheMode = 'short';
     controller._subagentSmokeSnapshot = undefined;
@@ -227,6 +227,11 @@ function createControllerHarness(): any {
     controller._sweepPendingTools = vi.fn();
     controller.sendStateSync = vi.fn();
     return controller;
+}
+
+function registerTab(controller: any, tab: any): void {
+    controller._tabs.register(tab);
+    if (!controller._tabs.activeId) controller._tabs.activate(tab.id);
 }
 
 function createTab(id: string): any {

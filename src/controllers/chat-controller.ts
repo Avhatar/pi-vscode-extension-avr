@@ -8,6 +8,7 @@ import type { FileChangePlatformPorts } from '../core/ports/file-state';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
 import { ChatService } from '../core/chat/chat-service';
+import { TabRegistry } from '../core/chat/tab-registry';
 import { TabRuntime } from '../core/chat/tab-runtime';
 import type {
     ClientMessage, ServerMessage, TabInfo,
@@ -191,8 +192,11 @@ export class ChatController implements vscode.Disposable {
     private static readonly NOTIFICATION_SHOW_POPUP_KEY = 'pi-code.notifications.showPopup';
     private static readonly NOTIFICATION_PLAY_SOUND_KEY = 'pi-code.notifications.playSound';
 
-    private _tabs = new Map<string, TabState>();
-    private _activeTabId = '';
+    private readonly _tabs = new TabRegistry<TabState>();
+
+    private get _activeTabId(): string {
+        return this._tabs.activeId;
+    }
     private _authChangedSubscription?: vscode.Disposable;
     private _codexUsageUnsubscribe?: () => void;
     private readonly _fileMentions: FileMentionsPort;
@@ -311,8 +315,8 @@ export class ChatController implements vscode.Disposable {
             checkpointManager: initialCheckpointManager,
             projectToolDefault: this._getProjectToolSelectionDefault(),
         });
-        this._tabs.set(id, tab);
-        this._activeTabId = id;
+        this._tabs.register(tab);
+        this._tabs.activate(id);
         this._subscribeTab(tab);
 
         this._authChangedSubscription = onAuthChanged((providerId) => {
@@ -380,7 +384,7 @@ export class ChatController implements vscode.Disposable {
     /** Called by `ChatPanel` when its constructor finishes. */
     registerPanel(tabId: string, panel: { reveal(viewColumn?: vscode.ViewColumn): void }): void {
         this._openPanels.set(tabId, panel);
-        this._activeTabId = tabId;
+        this._tabs.activate(tabId);
         this._persistTabs();
         this._onLauncherStateChanged.fire();
     }
@@ -393,9 +397,7 @@ export class ChatController implements vscode.Disposable {
      * once panels have been created.
      */
     markActiveTab(tabId: string): void {
-        if (!this._tabs.has(tabId)) return;
-        if (this._activeTabId === tabId) return;
-        this._activeTabId = tabId;
+        if (!this._tabs.activate(tabId)) return;
         this._onLauncherStateChanged.fire();
     }
 
@@ -440,12 +442,7 @@ export class ChatController implements vscode.Disposable {
         }
 
         await tab.disposeResources();
-        this._tabs.delete(tabId);
-
-        if (tabId === this._activeTabId) {
-            const next = this._tabs.keys().next().value;
-            this._activeTabId = next ?? '';
-        }
+        this._tabs.remove(tabId);
 
         this._persistTabs();
         this._onLauncherStateChanged.fire();
@@ -545,7 +542,7 @@ export class ChatController implements vscode.Disposable {
     /** Lookup an existing tab whose session was loaded from `sessionPath`. */
     findTabIdBySessionPath(sessionPath: string): string | undefined {
         if (!sessionPath) return undefined;
-        for (const [id, tab] of this._tabs) {
+        for (const [id, tab] of this._tabs.entries()) {
             if (tab.session.sessionPath === sessionPath) return id;
         }
         return undefined;
@@ -580,10 +577,7 @@ export class ChatController implements vscode.Disposable {
             const tab = this._tabs.get(loadedTabId);
             if (tab) {
                 await tab.disposeResources();
-                this._tabs.delete(loadedTabId);
-                if (loadedTabId === this._activeTabId) {
-                    this._activeTabId = this._tabs.keys().next().value ?? '';
-                }
+                this._tabs.remove(loadedTabId);
             }
         }
 
@@ -635,7 +629,7 @@ export class ChatController implements vscode.Disposable {
         });
         this._updateTabName(tab);
 
-        this._tabs.set(id, tab);
+        this._tabs.register(tab);
         this._subscribeTab(tab);
         this._persistTabs();
         return id;
@@ -1995,10 +1989,10 @@ export class ChatController implements vscode.Disposable {
             checkpointManager: newCheckpoint,
             projectToolDefault: this._getProjectToolSelectionDefault(),
         });
-        this._tabs.set(id, tab);
+        this._tabs.register(tab);
         this._subscribeTab(tab);
 
-        this._activeTabId = id;
+        this._tabs.activate(id);
         this._persistTabs();
         this._onLauncherStateChanged.fire();
         // Auto-open an editor panel for the new tab. After Phase 3 the
@@ -2015,14 +2009,8 @@ export class ChatController implements vscode.Disposable {
         const tab = this._tabs.get(tabId);
         if (!tab) return;
 
-        const wasActive = tabId === this._activeTabId;
-
         await tab.disposeResources();
-        this._tabs.delete(tabId);
-
-        if (wasActive) {
-            this._activeTabId = this._tabs.keys().next().value ?? '';
-        }
+        this._tabs.remove(tabId);
 
         this._persistTabs();
         this._onLauncherStateChanged.fire();
@@ -2030,9 +2018,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _switchTab(tabId: string): void {
-        if (!this._tabs.has(tabId) || tabId === this._activeTabId) return;
-
-        this._activeTabId = tabId;
+        if (!this._tabs.activate(tabId)) return;
 
         const tab = this._activeTab;
         if (!tab) return;
@@ -2093,7 +2079,7 @@ export class ChatController implements vscode.Disposable {
                 tab.name = name;
                 this._updateTabName(tab); // re-derive name from first message if needed
 
-                this._tabs.set(id, tab);
+                this._tabs.register(tab);
                 this._subscribeTab(tab);
                 restoredIds.push(id);
             } catch (err: any) {
@@ -2106,12 +2092,12 @@ export class ChatController implements vscode.Disposable {
         // Dispose the initial empty tab
         if (initialTab) {
             await initialTab.disposeResources();
-            this._tabs.delete(initialTabId);
+            this._tabs.remove(initialTabId);
         }
 
         // Restore active tab
         const activeIdx = Math.min(persisted.activeIndex ?? 0, restoredIds.length - 1);
-        this._activeTabId = restoredIds[activeIdx];
+        this._tabs.activate(restoredIds[activeIdx]);
 
         this._outputChannel.appendLine(`Restored ${restoredIds.length} tab(s).`);
         this.sendStateSync(this._activeTabId);

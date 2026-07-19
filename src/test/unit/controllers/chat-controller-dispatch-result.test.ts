@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
 import { ChatService } from '../../../core/chat/chat-service';
+import { TabRegistry } from '../../../core/chat/tab-registry';
 import { TabRuntime } from '../../../core/chat/tab-runtime';
 
 describe('ChatController command dispatch results', () => {
@@ -10,8 +11,7 @@ describe('ChatController command dispatch results', () => {
         const prompt = vi.fn(() => turn);
         const tab = createPromptTab({ prompt });
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });
         controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
         controller._isPlanModeEnabledFor = vi.fn(() => false);
@@ -39,8 +39,7 @@ describe('ChatController command dispatch results', () => {
         const compact = vi.fn(async () => undefined);
         const tab = createPromptTab({ prompt, compact });
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });
         controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
         controller._isPlanModeEnabledFor = vi.fn(() => true);
@@ -68,8 +67,7 @@ describe('ChatController command dispatch results', () => {
         const tab = createPromptTab({ prompt });
         const error = new Error('mention indexing failed');
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });
         controller._fileMentions = {
             augmentPromptIfNeeded: vi.fn(async () => { throw error; }),
@@ -100,8 +98,7 @@ describe('ChatController command dispatch results', () => {
         const followUp = vi.fn(async () => undefined);
         const tab = createPromptTab({ steer, followUp });
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });
         controller._fileMentions = {
             augmentPromptIfNeeded: vi.fn(async (text: string) => `${text} expanded`),
@@ -133,8 +130,7 @@ describe('ChatController command dispatch results', () => {
         const steer = vi.fn(async () => undefined);
         const tab = createPromptTab({ steer });
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });
         controller._fileMentions = {
             augmentPromptIfNeeded: vi.fn(async () => { throw new Error('mention failed'); }),
@@ -163,8 +159,7 @@ describe('ChatController command dispatch results', () => {
         const prompt = vi.fn(async () => undefined);
         const controller = Object.create(ChatController.prototype) as any;
         const tab = createPromptTab({ setSessionName, prompt });
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
         controller._isPlanModeEnabledFor = vi.fn(() => false);
         controller._prepareCacheForRequest = vi.fn();
@@ -193,8 +188,7 @@ describe('ChatController command dispatch results', () => {
     it('applies queue controls through the service and publishes every command', async () => {
         const tab = { id: 'tab-1', queuedMessages: [] as string[] };
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });
         controller._handleNameCommand = vi.fn(() => false);
         controller.sendStateSync = vi.fn();
@@ -223,8 +217,7 @@ describe('ChatController command dispatch results', () => {
         const postForTab = vi.fn();
         const tab = createPromptTab({ setSessionName: vi.fn(), prompt });
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });
         controller._fileMentions = { augmentPromptIfNeeded: vi.fn(async (text: string) => text) };
         controller._isPlanModeEnabledFor = vi.fn(() => false);
@@ -269,7 +262,7 @@ describe('ChatController command dispatch results', () => {
         tab.addSubscription(unsubscribe);
 
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
+        controller._tabs = createTabRegistry([tab]);
         controller._authChangedSubscription = { dispose: vi.fn() };
         controller._codexUsageUnsubscribe = vi.fn();
         const fileMentionsDispose = vi.fn();
@@ -291,8 +284,7 @@ describe('ChatController command dispatch results', () => {
 
     it('reports a missing target tab without dispatching', async () => {
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map();
-        controller._activeTabId = 'missing-tab';
+        controller._tabs = createTabRegistry([]);
 
         await expect(controller.handleMessage({ type: 'abort' }, 'missing-tab')).resolves.toEqual({
             ok: false,
@@ -303,11 +295,10 @@ describe('ChatController command dispatch results', () => {
 
     it('returns command_failed while preserving the existing error event', async () => {
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', {
+        controller._tabs = createTabRegistry([{
             id: 'tab-1',
             session: { abort: vi.fn().mockRejectedValue(new Error('Abort failed')) },
-        }]]);
-        controller._activeTabId = 'tab-1';
+        }], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });
         controller._outputChannel = { appendLine: vi.fn() };
         controller._postForTab = vi.fn();
@@ -323,6 +314,13 @@ describe('ChatController command dispatch results', () => {
         });
     });
 });
+
+function createTabRegistry(tabs: any[], activeId?: string): TabRegistry<any> {
+    const registry = new TabRegistry<any>();
+    for (const tab of tabs) registry.register(tab);
+    if (activeId) registry.activate(activeId);
+    return registry;
+}
 
 function createPromptTab(session: Record<string, unknown>): any {
     return new TabRuntime<any, any, any>({

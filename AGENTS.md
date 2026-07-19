@@ -212,6 +212,7 @@ Pi extensions (npm packages keyed `pi-package`, e.g. `pi-web-access`) ship **ins
 | `src/pi/events.ts` | EventRouter for agent session events |
 | `src/controllers/chat-controller.ts` | VS Code chat orchestration, transport, host effects, and command routing |
 | `src/core/chat/chat-service.ts` | Portable Pi event-derived tab projection, prompt, streaming-command, and queue lifecycle, and serialized chat state assembly |
+| `src/core/chat/tab-registry.ts` | Portable tab membership, insertion order, lookup, and active-tab selection |
 | `src/providers/launcher-view.ts` | Activity-bar `WebviewViewProvider` (launcher: new chat, settings, history, Plan Mode toggle, per-tab ToDo) |
 | `src/providers/chat-panel.ts` | Editor-area `WebviewPanel` per chat |
 | `src/providers/chat-panel-serializer.ts` | Restores chat panels across `Reload Window` |

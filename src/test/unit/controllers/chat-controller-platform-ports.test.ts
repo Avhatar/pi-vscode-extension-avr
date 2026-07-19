@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
+import { TabRegistry } from '../../../core/chat/tab-registry';
 import type { StateStore } from '../../../core/ports/chat-platform';
+
+function createTabRegistry(tabs: any[], activeId?: string): TabRegistry<any> {
+    const registry = new TabRegistry<any>();
+    for (const tab of tabs) registry.register(tab);
+    if (activeId) registry.activate(activeId);
+    return registry;
+}
 
 function createStateStore(initial: Record<string, unknown> = {}): StateStore & {
     values: Map<string, unknown>;
@@ -92,7 +100,7 @@ describe('ChatController platform ports', () => {
             queuedMessages: [],
         };
         const controller = Object.create(ChatController.prototype) as any;
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = {
             reduceEvent: vi.fn(() => order.push('reduce-event')),
         };
@@ -116,8 +124,7 @@ describe('ChatController platform ports', () => {
         const diffManager = { getReview: vi.fn(() => review) };
         const openDiff = vi.fn(async () => undefined);
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', { id: 'tab-1', diffManager }]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([{ id: 'tab-1', diffManager }], 'tab-1');
         controller._fileChangePorts = { diffPresenter: { openDiff } };
         controller._outputChannel = { appendLine: vi.fn() };
 
@@ -151,8 +158,7 @@ describe('ChatController platform ports', () => {
             suspendedMessages: [],
         };
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', tab]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._outputChannel = { appendLine: vi.fn() };
         controller.sendStateSync = vi.fn(() => order.push('state-sync'));
 
@@ -190,8 +196,7 @@ describe('ChatController platform ports', () => {
         };
         const postForTab = vi.fn();
         const controller = Object.create(ChatController.prototype) as any;
-        controller._tabs = new Map([['tab-1', { id: 'tab-1' }]]);
-        controller._activeTabId = 'tab-1';
+        controller._tabs = createTabRegistry([{ id: 'tab-1' }], 'tab-1');
         controller._fileMentions = fileMentions;
         controller._postForTab = postForTab;
         controller._outputChannel = { appendLine: vi.fn() };

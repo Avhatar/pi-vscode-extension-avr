@@ -17,6 +17,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Moved queued-message add, edit, remove, and cancel validation into the portable chat service without changing chat controls.
 - Moved direct prompt and compaction lifecycle into the portable chat service while preserving Plan Mode, attachments, and immediate acknowledgement.
 - Moved steering, follow-up, and stop dispatch into the portable chat service without changing attachment, acknowledgement, or active-turn behavior.
+- Moved chat-tab membership and active-tab selection into a portable registry without changing panel, session-restoration, or close behavior.
 
 ### Fixed
 - Plan Mode instructions no longer appear in user chat bubbles when a file is attached.
