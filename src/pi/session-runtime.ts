@@ -1,8 +1,10 @@
 import type { AgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
+import type { SessionLockHandle } from '../core/ports/session-platform';
 
 export interface PiSessionRuntimeState {
     readonly session: AgentSession;
     readonly sessionManager: SessionManager;
+    readonly sessionLock?: SessionLockHandle;
 }
 
 type SessionFactory<State extends PiSessionRuntimeState> = () => Promise<State>;
@@ -46,8 +48,14 @@ export class PiSessionRuntime {
             if (!this._state) {
                 throw new Error('No active session to replace');
             }
-            this._invalidateCurrent();
+            await this._invalidateCurrent();
             return this._install(await create());
+        });
+    }
+
+    clear(): Promise<void> {
+        return this._runTransition(async () => {
+            await this._invalidateCurrent();
         });
     }
 
@@ -66,7 +74,7 @@ export class PiSessionRuntime {
                 }
             }
             try {
-                this._invalidateCurrent();
+                await this._invalidateCurrent();
             } finally {
                 this._state = undefined;
                 this._sessionDisposed = false;
@@ -104,7 +112,7 @@ export class PiSessionRuntime {
         });
     }
 
-    private _install<State extends PiSessionRuntimeState>(state: State): State {
+    private async _install<State extends PiSessionRuntimeState>(state: State): Promise<State> {
         this._state = state;
         this._sessionDisposed = false;
         try {
@@ -112,7 +120,7 @@ export class PiSessionRuntime {
             return state;
         } catch (error) {
             try {
-                this._invalidateCurrent();
+                await this._invalidateCurrent();
             } catch {
                 // Preserve the binding failure while still attempting complete cleanup.
             }
@@ -120,7 +128,7 @@ export class PiSessionRuntime {
         }
     }
 
-    private _invalidateCurrent(): void {
+    private async _invalidateCurrent(): Promise<void> {
         const state = this._state;
         if (!state) {
             return;
@@ -143,6 +151,12 @@ export class PiSessionRuntime {
             } catch (error) {
                 firstError ??= error;
             }
+        }
+
+        try {
+            await state.sessionLock?.release();
+        } catch (error) {
+            firstError ??= error;
         }
 
         if (firstError !== undefined) {

@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Added exclusive writable-session ownership across VS Code and standalone hosts, with typed conflicts and explicit stale-lock recovery safeguards.
+
 ## [0.59.0] - 2026-07-20
 
 ### Added

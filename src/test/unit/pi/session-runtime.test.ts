@@ -42,6 +42,41 @@ describe('Pi session runtime ownership', () => {
         expect(runtime.isReady).toBe(false);
     });
 
+    it('releases each session lock only after its session is invalidated', async () => {
+        const order: string[] = [];
+        const first = {
+            ...createState('first', order),
+            sessionLock: { release: vi.fn(async () => { order.push('first:unlock'); }) },
+        };
+        const second = {
+            ...createState('second', order),
+            sessionLock: { release: vi.fn(async () => { order.push('second:unlock'); }) },
+        };
+        const runtime = new PiSessionRuntime((session) => {
+            order.push(`${session.sessionId}:bind`);
+            return () => order.push(`${session.sessionId}:unbind`);
+        });
+        await runtime.start(async () => first as any);
+
+        await runtime.replace(async () => {
+            order.push('second:create');
+            return second as any;
+        });
+        await runtime.dispose();
+
+        expect(order).toEqual([
+            'first:bind',
+            'first:unbind',
+            'first:dispose',
+            'first:unlock',
+            'second:create',
+            'second:bind',
+            'second:unbind',
+            'second:dispose',
+            'second:unlock',
+        ]);
+    });
+
     it('retains a created replacement for cleanup when host binding fails', async () => {
         const first = createState('first', []);
         const second = createState('second', []);

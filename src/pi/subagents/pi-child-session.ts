@@ -18,6 +18,7 @@ import type {
 import type { AvailableModel, ResolvedAgentSpec } from './types';
 import type { WriteExecutionLease, WriteIsolationManager } from './write-isolation';
 import type { ChildToolFactoryRegistry } from './child-tools';
+import type { SessionLockHandle, SessionLockPort } from '../../core/ports/session-platform';
 
 export const CHILD_SAFE_TOOLS = ['read', 'grep', 'find', 'ls', 'edit', 'write'] as const;
 export const READ_ONLY_CHILD_TOOLS = CHILD_SAFE_TOOLS.slice(0, 4);
@@ -32,30 +33,50 @@ export interface PiChildSessionFactoryOptions {
     parentSessionPath?: string;
     writeIsolation?: WriteIsolationManager;
     childToolFactories?: ChildToolFactoryRegistry;
+    sessionLocks?: SessionLockPort;
     log?: (message: string) => void;
 }
 
 export class PiChildSessionFactory implements ChildSessionFactory {
-    constructor(private readonly options: PiChildSessionFactoryOptions) {}
+    constructor(private readonly options: PiChildSessionFactoryOptions) {
+        if (options.transcriptDirectory && !options.sessionLocks) {
+            throw new Error('Persistent child sessions require writable-session locking.');
+        }
+    }
 
     async create(spec: ResolvedAgentSpec, context: { agentId: string; signal: AbortSignal }): Promise<ChildSessionHandle> {
         const lease = this.options.writeIsolation
             ? await this.options.writeIsolation.prepare(this.options.cwd, context.agentId, spec)
             : { cwd: this.options.cwd, release: async () => {} };
         const { SessionManager } = await import('@earendil-works/pi-coding-agent');
-        let sessionManager: SessionManager;
-        if (this.options.transcriptDirectory) {
-            await fs.mkdir(this.options.transcriptDirectory, { recursive: true });
-            sessionManager = SessionManager.create(lease.cwd, this.options.transcriptDirectory, {
-                id: context.agentId,
-                ...(this.options.parentSessionPath ? { parentSession: this.options.parentSessionPath } : {}),
-            });
-        } else {
-            sessionManager = SessionManager.inMemory(lease.cwd, { id: context.agentId });
-        }
+        let sessionLock: SessionLockHandle | undefined;
         try {
-            return await this.createWithSessionManager(spec, context, sessionManager, lease);
+            let sessionManager: SessionManager;
+            if (this.options.transcriptDirectory) {
+                await fs.mkdir(this.options.transcriptDirectory, { recursive: true });
+                sessionManager = SessionManager.create(lease.cwd, this.options.transcriptDirectory, {
+                    id: context.agentId,
+                    ...(this.options.parentSessionPath ? { parentSession: this.options.parentSessionPath } : {}),
+                });
+                const transcriptPath = sessionManager.getSessionFile();
+                if (!transcriptPath) {
+                    throw new Error('Persistent child session did not provide a transcript path.');
+                }
+                sessionLock = await this.options.sessionLocks!.acquire(transcriptPath);
+            } else {
+                sessionManager = SessionManager.inMemory(lease.cwd, { id: context.agentId });
+            }
+            const handle = await this.createWithSessionManager(
+                spec,
+                context,
+                sessionManager,
+                lease,
+                sessionLock,
+            );
+            sessionLock = undefined;
+            return handle;
         } catch (error) {
+            await sessionLock?.release().catch(() => undefined);
             await lease.release();
             throw error;
         }
@@ -77,10 +98,25 @@ export class PiChildSessionFactory implements ChildSessionFactory {
         const lease = this.options.writeIsolation
             ? await this.options.writeIsolation.prepare(this.options.cwd, context.agentId, spec)
             : { cwd: this.options.cwd, release: async () => {} };
-        const sessionManager = SessionManager.open(transcriptPath, this.options.transcriptDirectory, lease.cwd);
+        let sessionLock: SessionLockHandle | undefined;
         try {
-            return await this.createWithSessionManager(spec, context, sessionManager, lease);
+            sessionLock = await this.options.sessionLocks!.acquire(transcriptPath);
+            const sessionManager = SessionManager.open(
+                transcriptPath,
+                this.options.transcriptDirectory,
+                lease.cwd,
+            );
+            const handle = await this.createWithSessionManager(
+                spec,
+                context,
+                sessionManager,
+                lease,
+                sessionLock,
+            );
+            sessionLock = undefined;
+            return handle;
         } catch (error) {
+            await sessionLock?.release().catch(() => undefined);
             await lease.release();
             throw error;
         }
@@ -91,6 +127,7 @@ export class PiChildSessionFactory implements ChildSessionFactory {
         context: { agentId: string; signal: AbortSignal },
         sessionManager: SessionManager,
         lease: WriteExecutionLease,
+        sessionLock?: SessionLockHandle,
     ): Promise<ChildSessionHandle> {
         const contributedToolNames = new Set(this.options.childToolFactories?.listNames() ?? []);
         const unsafeTools = spec.tools.filter((tool) => !CHILD_SAFE_TOOL_SET.has(tool) && !contributedToolNames.has(tool));
@@ -148,46 +185,56 @@ export class PiChildSessionFactory implements ChildSessionFactory {
             },
         });
 
-        const { session } = await createAgentSession({
-            cwd: lease.cwd,
-            model,
-            thinkingLevel: spec.thinkingLevel as any,
-            authStorage: this.options.authStorage,
-            modelRegistry: this.options.modelRegistry,
-            sessionManager,
-            settingsManager,
-            resourceLoader,
-            tools: [...spec.tools, 'complete_subagent'],
-            customTools: [completionTool as any, ...contributedTools as any[]],
-        });
-        const unsubscribe = session.subscribe((event) => {
-            const mapped = mapSessionEvent(event);
-            if (!mapped) return;
-            if (mapped.type === 'turn-ended' && mapped.assistantText) lastAssistantText = mapped.assistantText;
-            emit(mapped);
-        });
-        const abortFromSignal = (): void => { void session.abort(); };
-        context.signal.addEventListener('abort', abortFromSignal, { once: true });
-        if (context.signal.aborted) abortFromSignal();
+        let session: AgentSession | undefined;
+        try {
+            ({ session } = await createAgentSession({
+                cwd: lease.cwd,
+                model,
+                thinkingLevel: spec.thinkingLevel as any,
+                authStorage: this.options.authStorage,
+                modelRegistry: this.options.modelRegistry,
+                sessionManager,
+                settingsManager,
+                resourceLoader,
+                tools: [...spec.tools, 'complete_subagent'],
+                customTools: [completionTool as any, ...contributedTools as any[]],
+            }));
+            const unsubscribe = session.subscribe((event) => {
+                const mapped = mapSessionEvent(event);
+                if (!mapped) return;
+                if (mapped.type === 'turn-ended' && mapped.assistantText) lastAssistantText = mapped.assistantText;
+                emit(mapped);
+            });
+            const abortFromSignal = (): void => { void session!.abort(); };
+            context.signal.addEventListener('abort', abortFromSignal, { once: true });
+            if (context.signal.aborted) abortFromSignal();
 
-        this.options.log?.(
-            `[subagent child created] agentId=${context.agentId} sessionId=${session.sessionId} ` +
-            `model=${formatModelRef(spec.model)} tools=${spec.tools.join(',') || '(none)'}`,
-        );
-        return new PiChildSessionHandle(
-            session,
-            sessionManager.getSessionFile(),
-            lease.isolationPath,
-            { provider: spec.model.provider, id: spec.model.id, name: spec.model.name },
-            listeners,
-            () => completion ? cloneCompletion(completion) : undefined,
-            () => lastAssistantText,
-            () => {
-                context.signal.removeEventListener('abort', abortFromSignal);
-                unsubscribe();
-                void lease.release();
-            },
-        );
+            this.options.log?.(
+                `[subagent child created] agentId=${context.agentId} sessionId=${session.sessionId} ` +
+                `model=${formatModelRef(spec.model)} tools=${spec.tools.join(',') || '(none)'}`,
+            );
+            return new PiChildSessionHandle(
+                session,
+                sessionManager.getSessionFile(),
+                lease.isolationPath,
+                { provider: spec.model.provider, id: spec.model.id, name: spec.model.name },
+                listeners,
+                () => completion ? cloneCompletion(completion) : undefined,
+                () => lastAssistantText,
+                async () => {
+                    let firstError: unknown;
+                    context.signal.removeEventListener('abort', abortFromSignal);
+                    try { unsubscribe(); } catch (error) { firstError ??= error; }
+                    try { session!.dispose(); } catch (error) { firstError ??= error; }
+                    try { await sessionLock?.release(); } catch (error) { firstError ??= error; }
+                    try { await lease.release(); } catch (error) { firstError ??= error; }
+                    if (firstError !== undefined) throw firstError;
+                },
+            );
+        } catch (error) {
+            try { session?.dispose(); } catch { /* preserve the creation failure */ }
+            throw error;
+        }
     }
 }
 
@@ -200,8 +247,9 @@ class PiChildSessionHandle implements ChildSessionHandle {
         private readonly listeners: Set<(event: ChildSessionEvent) => void>,
         private readonly completion: () => SubagentCompletion | undefined,
         private readonly lastAssistantText: () => string | undefined,
-        private readonly cleanup: () => void,
+        private readonly cleanup: () => Promise<void>,
     ) {}
+    private disposePromise: Promise<void> | undefined;
 
     get sessionId(): string {
         return this.session.sessionId;
@@ -224,10 +272,12 @@ class PiChildSessionHandle implements ChildSessionHandle {
         await this.session.abort();
     }
 
-    dispose(): void {
-        this.cleanup();
-        this.listeners.clear();
-        this.session.dispose();
+    dispose(): Promise<void> {
+        this.disposePromise ??= (async () => {
+            this.listeners.clear();
+            await this.cleanup();
+        })();
+        return this.disposePromise;
     }
 
     getCompletion(): SubagentCompletion | undefined {

@@ -4,6 +4,7 @@ import type { Logger } from '../core/ports/logger';
 import {
     DEFAULT_SESSION_RUNTIME_PORTS,
     type SecretStore,
+    type SessionLockHandle,
     type SessionRuntimePorts,
 } from '../core/ports/session-platform';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
@@ -62,6 +63,7 @@ interface CreatedSessionRuntime extends PiSessionRuntimeState {
 type SessionCreationKind = 'initial' | 'restore' | 'new' | 'load';
 
 export class PiSessionManager {
+    private static readonly _instances = new Set<PiSessionManager>();
     private readonly _runtime: PiSessionRuntime;
     private _modelRegistry: ModelRegistry | undefined;
     private _outputChannel: Logger;
@@ -94,6 +96,7 @@ export class PiSessionManager {
     ) {
         this._outputChannel = outputChannel;
         this._secrets = secrets;
+        PiSessionManager._instances.add(this);
         this._runtime = new PiSessionRuntime(
             (session) => session.subscribe(this.events.asSessionListener()),
         );
@@ -146,12 +149,14 @@ export class PiSessionManager {
         return this._runLifecycleTransition(async () => {
             this._outputChannel.appendLine('Initializing Pi session...');
             const state = await this._runtime.start(() => this._createSessionRuntime('initial'));
-            await this._activateSessionRuntime(state);
+            await this._completeCandidateActivation(async () => {
+                await this._activateSessionRuntime(state);
 
-            if (state.modelFallbackMessage) {
-                this._outputChannel.appendLine(`Model fallback: ${state.modelFallbackMessage}`);
-            }
-            await this._applyDefaultSettings(state.session);
+                if (state.modelFallbackMessage) {
+                    this._outputChannel.appendLine(`Model fallback: ${state.modelFallbackMessage}`);
+                }
+                await this._applyDefaultSettings(state.session);
+            });
 
             // Initial todo visibility is decided by the controller from the
             // per-session persisted toggle (see ChatController._subscribeTab
@@ -291,33 +296,76 @@ export class PiSessionManager {
         if ((kind === 'restore' || kind === 'load') && !sessionPath) {
             throw new Error(`Session path is required for ${kind}`);
         }
-        const sessionManager = kind === 'initial' || kind === 'new'
-            ? SM.create(cwd)
-            : SM.open(sessionPath!, undefined);
-        const allowedTools = kind === 'load'
-            ? []
-            : this._ports.settings.get('allowedTools', []);
-        const resourceLoader = await this._buildResourceLoader(cwd);
-        authStorage ??= await getAuthStorage(this._secrets);
+        let sessionLock: SessionLockHandle | undefined;
+        let candidateSession: AgentSession | undefined;
+        try {
+            let sessionManager;
+            if (kind === 'initial' || kind === 'new') {
+                sessionManager = SM.create(cwd);
+                const createdSessionPath = sessionManager.getSessionFile();
+                if (!createdSessionPath) {
+                    throw new Error('Writable Pi session did not provide a session file path.');
+                }
+                sessionLock = await this._ports.sessionLocks.acquire(createdSessionPath);
+            } else {
+                // SessionManager.open() may migrate and rewrite an older session, so
+                // existing sessions must be locked before the SDK opens them.
+                sessionLock = await this._ports.sessionLocks.acquire(sessionPath!);
+                sessionManager = SM.open(sessionPath!, undefined);
+            }
+            const allowedTools = kind === 'load'
+                ? []
+                : this._ports.settings.get('allowedTools', []);
+            const resourceLoader = await this._buildResourceLoader(cwd);
+            authStorage ??= await getAuthStorage(this._secrets);
 
-        const opts: any = {
-            cwd,
-            authStorage,
-            modelRegistry: this._modelRegistry,
-            sessionManager,
-            resourceLoader,
-        };
-        if (allowedTools.length > 0) {
-            opts.tools = allowedTools;
+            const opts: any = {
+                cwd,
+                authStorage,
+                modelRegistry: this._modelRegistry,
+                sessionManager,
+                resourceLoader,
+            };
+            if (allowedTools.length > 0) {
+                opts.tools = allowedTools;
+            }
+
+            const { session, modelFallbackMessage } = await createAgentSession(opts);
+            candidateSession = session;
+            await this._bindExtensions(session);
+            return { session, sessionManager, sessionLock, cwd, modelFallbackMessage };
+        } catch (error) {
+            try {
+                candidateSession?.dispose();
+            } catch {
+                // Preserve the creation error while attempting complete candidate cleanup.
+            }
+            try {
+                await sessionLock?.release();
+            } catch {
+                // Preserve the creation error; a surviving sidecar remains safely locked.
+            }
+            throw error;
         }
-
-        const { session, modelFallbackMessage } = await createAgentSession(opts);
-        await this._bindExtensions(session);
-        return { session, sessionManager, cwd, modelFallbackMessage };
     }
 
     private async _activateSessionRuntime(state: CreatedSessionRuntime): Promise<void> {
         await this._resetSubagentManager(state.cwd, state.session);
+    }
+
+    private async _completeCandidateActivation(
+        activate: () => Promise<void>,
+    ): Promise<void> {
+        try {
+            await activate();
+        } catch (error) {
+            try {
+                await this._runtime.clear();
+            } catch {
+                // Preserve the activation failure while completing safe teardown where possible.
+            }
+            throw error;
+        }
     }
 
     private async _buildResourceLoader(cwd: string): Promise<ResourceLoader> {
@@ -575,8 +623,10 @@ export class PiSessionManager {
             await this._subagentManager?.dispose();
             this._subagentManager = undefined;
             const state = await this._runtime.replace(() => this._createSessionRuntime('new'));
-            await this._activateSessionRuntime(state);
-            await this._applyDefaultSettings(state.session);
+            await this._completeCandidateActivation(async () => {
+                await this._activateSessionRuntime(state);
+                await this._applyDefaultSettings(state.session);
+            });
         });
     }
 
@@ -590,8 +640,10 @@ export class PiSessionManager {
             const state = await this._runtime.start(
                 () => this._createSessionRuntime('restore', sessionPath),
             );
-            await this._activateSessionRuntime(state);
-            await this._applyDefaultSettings(state.session);
+            await this._completeCandidateActivation(async () => {
+                await this._activateSessionRuntime(state);
+                await this._applyDefaultSettings(state.session);
+            });
 
             const model = state.session.model;
             this._outputChannel.appendLine(
@@ -626,7 +678,7 @@ export class PiSessionManager {
             const state = await this._runtime.replace(
                 () => this._createSessionRuntime('load', sessionPath),
             );
-            await this._activateSessionRuntime(state);
+            await this._completeCandidateActivation(() => this._activateSessionRuntime(state));
         });
     }
 
@@ -1081,6 +1133,7 @@ export class PiSessionManager {
             ...(parentSessionPath ? { parentSessionPath } : {}),
             ...(this._writeIsolation ? { writeIsolation: this._writeIsolation } : {}),
             ...(this._childToolFactories ? { childToolFactories: this._childToolFactories } : {}),
+            sessionLocks: this._ports.sessionLocks,
             log: (message) => this._outputChannel.appendLine(message),
         });
         this._subagentManager = new SubagentManager(this._subagentCoordinator, childFactory, {
@@ -1171,6 +1224,7 @@ export class PiSessionManager {
             await runCleanup(() => this._onSubagentMutation.dispose());
             await runCleanup(() => this._onSubagentNotification.dispose());
             await runCleanup(() => this.events.clear());
+            PiSessionManager._instances.delete(this);
 
             if (firstError !== undefined) throw firstError;
         })();
@@ -1178,8 +1232,17 @@ export class PiSessionManager {
     }
 
     static async disposeGlobal(): Promise<void> {
+        let firstError: unknown;
+        for (const manager of [...PiSessionManager._instances]) {
+            try {
+                await manager.dispose();
+            } catch (error) {
+                firstError ??= error;
+            }
+        }
         disposeAuthStorage();
         disposeModelRegistry();
+        if (firstError !== undefined) throw firstError;
     }
 }
 

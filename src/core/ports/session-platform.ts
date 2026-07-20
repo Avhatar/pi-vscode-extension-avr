@@ -59,12 +59,55 @@ export interface SessionCodexUsagePort {
     updateFromHeaders(headers: Record<string, string>): boolean;
 }
 
+export interface SessionLockOwner {
+    readonly ownerId: string;
+    readonly applicationId: string;
+    readonly processId: number;
+    readonly hostname: string;
+    readonly acquiredAt: number;
+}
+
+export type SessionLockOwnerLiveness = 'alive' | 'dead' | 'unknown';
+
+export interface SessionLockConflict {
+    readonly sessionPath: string;
+    readonly lockPath: string;
+    readonly owner: SessionLockOwner | undefined;
+    readonly ownerLiveness: SessionLockOwnerLiveness;
+    readonly ageMs: number | undefined;
+    readonly staleRecoveryAllowed: boolean;
+}
+
+export class SessionLockConflictError extends Error {
+    readonly code = 'SESSION_LOCK_CONFLICT';
+
+    constructor(readonly conflict: SessionLockConflict) {
+        super(conflict.owner
+            ? `Session is already open for writing by ${conflict.owner.applicationId} `
+                + `(process ${conflict.owner.processId} on ${conflict.owner.hostname}).`
+            : 'Session is already locked for writing.');
+        this.name = 'SessionLockConflictError';
+    }
+}
+
+export interface SessionLockHandle {
+    readonly sessionPath: string;
+    readonly owner: SessionLockOwner;
+    release(): Promise<void>;
+}
+
+export interface SessionLockPort {
+    acquire(sessionPath: string): Promise<SessionLockHandle>;
+    recoverStale(sessionPath: string, expectedOwnerId: string): Promise<SessionLockHandle>;
+}
+
 export interface SessionRuntimePorts {
     workspace: SessionWorkspacePort;
     settings: SessionSettingsPort;
     dialogs: SessionDialogPort;
     resources: SessionResourcePaths;
     codexUsage: SessionCodexUsagePort;
+    sessionLocks: SessionLockPort;
 }
 
 export const DEFAULT_SESSION_RUNTIME_PORTS: SessionRuntimePorts = {
@@ -86,4 +129,22 @@ export const DEFAULT_SESSION_RUNTIME_PORTS: SessionRuntimePorts = {
     codexUsage: {
         updateFromHeaders: () => false,
     },
+    sessionLocks: {
+        acquire: async (sessionPath) => createUnlockedSessionHandle(sessionPath),
+        recoverStale: async (sessionPath) => createUnlockedSessionHandle(sessionPath),
+    },
 };
+
+function createUnlockedSessionHandle(sessionPath: string): SessionLockHandle {
+    return {
+        sessionPath,
+        owner: {
+            ownerId: 'unlocked-session',
+            applicationId: 'none',
+            processId: 0,
+            hostname: '',
+            acquiredAt: 0,
+        },
+        release: async () => undefined,
+    };
+}

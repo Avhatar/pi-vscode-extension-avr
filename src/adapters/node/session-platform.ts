@@ -8,11 +8,13 @@ import {
     type ModelSelectionOption,
     type SessionCodexUsagePort,
     type SessionDialogPort,
+    type SessionLockPort,
     type SessionRuntimePorts,
     type SessionSettingValues,
     type SessionSettingsPort,
     type SessionWorkspacePort,
 } from '../../core/ports/session-platform';
+import { NodeSessionLock } from './session-lock';
 
 const MATCH_OPTIONS = {
     dot: true,
@@ -93,6 +95,7 @@ export interface NodeSessionRuntimePortOptions {
     dialogs?: SessionDialogPort;
     bundledPiPackagePaths?: readonly string[];
     codexUsage?: SessionCodexUsagePort;
+    sessionLocks?: SessionLockPort;
 }
 
 export function createNodeSessionRuntimePorts(
@@ -106,6 +109,9 @@ export function createNodeSessionRuntimePorts(
             bundledPiPackagePaths: [...(options.bundledPiPackagePaths ?? [])],
         },
         codexUsage: options.codexUsage ?? DEFAULT_SESSION_RUNTIME_PORTS.codexUsage,
+        sessionLocks: options.sessionLocks ?? new NodeSessionLock({
+            applicationId: 'pi-code-node',
+        }),
     };
 }
 

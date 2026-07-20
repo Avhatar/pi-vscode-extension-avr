@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { SessionRuntimePorts } from '../../../core/ports/session-platform';
+import {
+    DEFAULT_SESSION_RUNTIME_PORTS,
+    type SessionRuntimePorts,
+} from '../../../core/ports/session-platform';
 import {
     VsCodeSessionSettings,
     VsCodeWorkspacePort,
     createVsCodeSessionRuntimePorts,
 } from '../../../adapters/vscode/session-platform';
+import { NodeSessionLock } from '../../../adapters/node/session-lock';
 import { ChatController } from '../../../controllers/chat-controller';
 import { PiSessionManager } from '../../../pi/session';
 
@@ -51,6 +55,7 @@ describe('portable session workspace and settings ports', () => {
 
         expect(ports.resources.bundledPiPackagePaths).toBe(bundledPiPackagePaths);
         expect(ports.codexUsage).toBe(codexUsage);
+        expect(ports.sessionLocks).toBeInstanceOf(NodeSessionLock);
         expect(createVsCodeSessionRuntimePorts().resources.bundledPiPackagePaths).toEqual([]);
     });
 
@@ -85,6 +90,7 @@ describe('portable session workspace and settings ports', () => {
             codexUsage: {
                 updateFromHeaders: () => false,
             },
+            sessionLocks: DEFAULT_SESSION_RUNTIME_PORTS.sessionLocks,
         };
         const secrets = {
             get: vi.fn(async () => undefined),

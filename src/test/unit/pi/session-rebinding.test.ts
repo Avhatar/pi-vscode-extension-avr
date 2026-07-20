@@ -58,8 +58,8 @@ describe('PiSessionManager session replacement', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         setTestWorkspaceRoot(process.cwd());
-        sdkMocks.createSessionManager.mockReturnValue({ getSessionFile: () => undefined });
-        sdkMocks.openSessionManager.mockReturnValue({ getSessionFile: () => undefined });
+        sdkMocks.createSessionManager.mockReturnValue({ getSessionFile: () => 'X:/sessions/new.jsonl' });
+        sdkMocks.openSessionManager.mockReturnValue({ getSessionFile: () => 'X:/sessions/existing.jsonl' });
     });
 
     afterEach(async () => {
@@ -97,6 +97,45 @@ describe('PiSessionManager session replacement', () => {
         expectReplacementLifecycle(harness, false);
     });
 
+    it('releases a failed replacement candidate lock without restoring writable state', async () => {
+        const harness = await createReplacementHarness();
+        activeManager = harness.manager;
+        sdkMocks.createAgentSession.mockRejectedValueOnce(new Error('candidate failed'));
+
+        await expect(harness.manager.newSession()).rejects.toThrow('candidate failed');
+
+        expect(harness.releaseReplacementLock).toHaveBeenCalledOnce();
+        expect(harness.original.session.dispose).toHaveBeenCalledOnce();
+        expect(harness.manager.isReady).toBe(false);
+        expectLifecycleOrder(harness.order, [
+            'original:dispose',
+            'manager:create',
+            'replacement:lock',
+            'replacement:unlock',
+        ]);
+    });
+
+    it('invalidates and unlocks a candidate whose post-install activation fails', async () => {
+        const harness = await createReplacementHarness();
+        activeManager = harness.manager;
+        (harness.manager as any)._activateSessionRuntime = vi.fn(async () => {
+            harness.order.push('replacement-activation:fail');
+            throw new Error('activation failed');
+        });
+
+        await expect(harness.manager.newSession()).rejects.toThrow('activation failed');
+
+        expect(harness.replacement.session.dispose).toHaveBeenCalledOnce();
+        expect(harness.releaseReplacementLock).toHaveBeenCalledOnce();
+        expect(harness.manager.isReady).toBe(false);
+        expectLifecycleOrder(harness.order, [
+            'replacement:subscribe',
+            'replacement-activation:fail',
+            'replacement:dispose',
+            'replacement:unlock',
+        ]);
+    });
+
     it('waits for activation and defaults before disposing a replacement', async () => {
         const harness = await createReplacementHarness();
         activeManager = harness.manager;
@@ -126,6 +165,35 @@ describe('PiSessionManager session replacement', () => {
             'replacement:dispose',
         ]);
         expect(harness.manager.isReady).toBe(false);
+    });
+
+    it('releases active session ownership during global extension shutdown', async () => {
+        const manager = new PiSessionManager({ appendLine: vi.fn() } as any) as any;
+        const release = vi.fn(async () => undefined);
+        await manager._runtime.start(async () => ({
+            session: {
+                sessionId: 'shutdown-session',
+                subscribe: () => () => undefined,
+                dispose: vi.fn(),
+            },
+            sessionManager: { getSessionFile: () => 'X:/sessions/shutdown.jsonl' },
+            sessionLock: {
+                sessionPath: 'X:/sessions/shutdown.jsonl',
+                owner: {
+                    ownerId: 'shutdown-owner',
+                    applicationId: 'test',
+                    processId: 1,
+                    hostname: 'test-host',
+                    acquiredAt: 0,
+                },
+                release,
+            },
+        }));
+
+        await PiSessionManager.disposeGlobal();
+
+        expect(release).toHaveBeenCalledOnce();
+        expect(manager.isReady).toBe(false);
     });
 
     it('cleans local emitters and routing even when runtime teardown rejects', async () => {
@@ -162,6 +230,8 @@ interface ReplacementHarness {
     observedEvents: string[];
     resetSubagentManager: ReturnType<typeof vi.fn>;
     applyDefaultSettings: ReturnType<typeof vi.fn>;
+    acquireSessionLock: ReturnType<typeof vi.fn>;
+    releaseReplacementLock: ReturnType<typeof vi.fn>;
 }
 
 async function createReplacementHarness(): Promise<ReplacementHarness> {
@@ -169,6 +239,23 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
     const original = createFakeAgentSession('original', order);
     const replacement = createFakeAgentSession('replacement', order);
     const outputChannel = { appendLine: vi.fn() };
+    const releaseReplacementLock = vi.fn(async () => {
+        order.push('replacement:unlock');
+    });
+    const acquireSessionLock = vi.fn(async (sessionPath: string) => {
+        order.push('replacement:lock');
+        return {
+            sessionPath,
+            owner: {
+                ownerId: 'replacement-owner',
+                applicationId: 'test',
+                processId: 1,
+                hostname: 'test-host',
+                acquiredAt: 0,
+            },
+            release: releaseReplacementLock,
+        };
+    });
     const manager = new PiSessionManager(
         outputChannel as any,
         undefined,
@@ -181,6 +268,10 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
             settings: {
                 get: ((key: string, fallback: unknown) =>
                     key === 'allowedTools' ? ['read'] : fallback) as any,
+            },
+            sessionLocks: {
+                acquire: acquireSessionLock,
+                recoverStale: vi.fn(),
             },
         },
     );
@@ -217,6 +308,14 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
         order.push('auth:get');
         return {};
     });
+    sdkMocks.createSessionManager.mockImplementation(() => {
+        order.push('manager:create');
+        return { getSessionFile: () => 'X:/sessions/new.jsonl' };
+    });
+    sdkMocks.openSessionManager.mockImplementation(() => {
+        order.push('manager:open');
+        return { getSessionFile: () => 'X:/sessions/existing.jsonl' };
+    });
     sdkMocks.createAgentSession.mockImplementation(async () => {
         order.push('replacement:create');
         return { session: replacement.session };
@@ -235,6 +334,8 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
         observedEvents,
         resetSubagentManager,
         applyDefaultSettings,
+        acquireSessionLock,
+        releaseReplacementLock,
     };
 }
 
@@ -247,6 +348,8 @@ function expectReplacementLifecycle(harness: ReplacementHarness, appliesDefaults
         observedEvents,
         resetSubagentManager,
         applyDefaultSettings,
+        acquireSessionLock,
+        releaseReplacementLock,
     } = harness;
 
     expect((manager as any).session).toBe(replacement.session);
@@ -257,12 +360,19 @@ function expectReplacementLifecycle(harness: ReplacementHarness, appliesDefaults
     expect(resetSubagentManager).toHaveBeenCalledOnce();
     if (appliesDefaults) expect(applyDefaultSettings).toHaveBeenCalledOnce();
     else expect(applyDefaultSettings).not.toHaveBeenCalled();
+    expect(acquireSessionLock).toHaveBeenCalledWith(
+        appliesDefaults ? 'X:/sessions/new.jsonl' : 'X:/sessions/existing.jsonl',
+    );
+    expect(releaseReplacementLock).not.toHaveBeenCalled();
 
     expectLifecycleOrder(order, [
         'original-subagents:dispose',
         'original:unsubscribe',
         'original:dispose',
         'models:refresh',
+        ...(appliesDefaults
+            ? ['manager:create', 'replacement:lock']
+            : ['replacement:lock', 'manager:open']),
         'resources:build',
         'auth:get',
         'replacement:create',

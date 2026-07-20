@@ -12,6 +12,7 @@ import {
     type SessionSettingsPort,
     type SessionWorkspacePort,
 } from '../../core/ports/session-platform';
+import { NodeSessionLock } from '../node/session-lock';
 
 type WorkspaceSource = Pick<
     typeof vscode.workspace,
@@ -110,5 +111,6 @@ export function createVsCodeSessionRuntimePorts(
         dialogs: new VsCodeSessionDialogs(),
         resources: resources ?? { bundledPiPackagePaths: [] },
         codexUsage,
+        sessionLocks: new NodeSessionLock({ applicationId: 'pi-code-vscode' }),
     };
 }

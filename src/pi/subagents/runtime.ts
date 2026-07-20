@@ -28,7 +28,7 @@ export interface ChildSessionHandle {
     prompt(text: string): Promise<void>;
     steer(text: string): Promise<void>;
     abort(): Promise<void>;
-    dispose(): void;
+    dispose(): void | Promise<void>;
     getCompletion(): SubagentCompletion | undefined;
     getLastAssistantText(): string | undefined;
 }

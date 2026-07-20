@@ -495,7 +495,7 @@ export class SubagentManager {
                 } finally {
                     if (timeout) clearTimeout(timeout);
                     unsubscribe?.();
-                    child?.dispose();
+                    await child?.dispose();
                     active.child = undefined;
                 }
             }));
