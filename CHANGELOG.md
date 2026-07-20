@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Added production Node adapters for workspace discovery, filesystem state, session settings, persistent application state, dialogs, and logging as the foundation of the standalone host.
+
 ### Changed
 - Continued the shared session-runtime extraction by moving host capabilities behind platform-neutral ports and centralizing Pi session ownership and replacement in a portable runtime.
 - Improved chat-tab isolation by moving each tab's transient state, subscriptions, and resource lifecycle into a portable shared runtime.
