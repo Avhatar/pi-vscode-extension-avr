@@ -1,6 +1,6 @@
 ---
 name: wiki-maintain
-description: Use to keep the repo wiki synchronized with the repo as it evolves (game code, tooling, assets, pipelines). Triggers — after a code change that added / renamed / deleted types appearing as wiki keywords; on explicit user request ("update wiki", "check wiki", "update wiki for X"); quarterly drift audit.
+description: Use to keep the repo wiki synchronized with the repo as it evolves (code, tooling, assets, pipelines). Triggers — after a code change that added / renamed / deleted types appearing as wiki keywords; on explicit user request ("update wiki", "check wiki", "update wiki for X"); quarterly drift audit.
 ---
 
 # wiki-maintain
@@ -16,7 +16,7 @@ Maintain the repo wiki at `<repo-root>/wiki/` — `index.md` (book-chapters TOC)
 ## Scope
 
 - **Wiki location:** `<repo-root>/wiki/`. Structure: `index.md` (TOC) + `parts/<NN-part-slug>/<chapter-slug>/<article-slug>.md` + `parts/<NN-part>/<chapter>/_intro.md` (one intro per chapter) + optional `appendix-a-seam-types.md` (cheatsheet routing cross-cutting concepts to their chapter homes).
-- **Scripts:** `.claude/skills/wiki-maintain/scripts/validate.py`, `compute-used-by.py`, `structure-enum-check.py`, `reciprocal.py` (demoted). Pass the wiki directory as argument.
+- **Scripts:** `.agents/skills/wiki-maintain/scripts/validate.py`, `compute-used-by.py`, `structure-enum-check.py`, `reciprocal.py` (demoted). Pass the wiki directory as argument.
 
 ## Invariants
 
@@ -26,7 +26,7 @@ Enforced by validators; break any of these and the scripts fail (or surface warn
 - **No `TBD` leftovers.** Every article + intro is fully authored.
 - **English-only.** No Cyrillic in any file under `wiki/`.
 - **One-idea-per-article.** Each article covers one system / concept. Subsystems are hinted inside an existing article (Stance / See also), not split into new files unless they meet the chapter-expansion bar (≥7 distinct types + distinct reader-task).
-- **Single-source-of-truth structural enumeration.** Only `wiki/index.md` enumerates the Parts and chapters at the top level; per-chapter article rosters live in each chapter's `_intro.md` (the `## Article roster` section). Other files (CLAUDE.md, skills) cite specific articles by topic, never enumerate the structure. Checked by `structure-enum-check.py`.
+- **Single-source-of-truth structural enumeration.** Only `wiki/index.md` enumerates the Parts and chapters at the top level; per-chapter article rosters live in each chapter's `_intro.md` (the `## Article roster` section). Other files (`AGENTS.md`, `CLAUDE.md`, SKILL.md) cite specific articles by topic, never enumerate the structure. Checked by `structure-enum-check.py`.
 - **Wiki-self-contained.** Wiki content should not reference project-specific task-management systems, ticket IDs, or in-flight-work files. Wiki captures architectural knowledge, not workflow state.
 
 ## Conventions
@@ -52,7 +52,7 @@ Ask if unclear: _What changed?_ New type? Renamed? Deleted? New subsystem? New r
 Concrete sources of change:
 - Agent reports from previous work ("added `XxxPart` to handle Y").
 - `git log` / `git diff` on the paths that changed.
-- Code-index / OmniSharp search for a new name.
+- Code search / IDE symbol search for a new name.
 
 **Discovery hygiene:**
 - Prefer commit messages when they're detailed; fall back to `git diff --name-status` over the commit range when messages are thin; targeted code search is for disambiguating a specific name, not bulk enumeration.
@@ -80,8 +80,9 @@ Routing rubric. **Approval column = does this need user sign-off before editing 
 **What NOT to update.** Some code changes look wiki-relevant but stay outside the wiki:
 - **Editor-side types** (validators, importers, tooling UI, editor-scoped code paths). The wiki is a runtime-code reference; editor tooling is out of scope. If a validator encodes a design constraint worth surfacing, capture it as a See-also Rule bullet on the owning article, never as a Keyword.
 - **Test classes.** The testing-system articles cover the framework as a whole; individual test classes do not appear in article Keywords.
+- **Webview-only UI wiring for this project.** The extension host is the runtime surface documented in the wiki. Webview event handlers, DOM plumbing, and CSS live in the code but are out of scope for wiki keywords unless they surface a cross-boundary invariant.
 
-**Attribute-based component ownership follows the target, not source location.** If the project uses attribute annotations to bind data-model components to their target types (e.g. an `[AllowedOn(SomeBlueprint)]`-style attribute), the component lives in the wiki article that hosts its target — regardless of where the source file sits. The component serializes into the target's payload, so it's data-model-side regardless of source-folder. Adapt this rule to whatever equivalent attribute your project uses.
+**Attribute-based component ownership follows the target, not source location.** If the project uses attribute annotations to bind data-model components to their target types, the component lives in the wiki article that hosts its target — regardless of where the source file sits. The component serializes into the target's payload, so it's data-model-side regardless of source-folder. Adapt this rule to whatever equivalent attribute your project uses.
 
 **Rename-vs-replace migrations.** When a delete + new-type pair is a migration (the old type replaced by a new one filling the same semantic slot), classify each item under its rubric row and surface the migration explicitly: a See-also Pattern/Pitfall bullet on the affected article, or in the commit message.
 
@@ -107,9 +108,9 @@ Routing rubric. **Approval column = does this need user sign-off before editing 
 ### Step 4 — Validate
 
 ```bash
-python3 .claude/skills/wiki-maintain/scripts/validate.py wiki
-python3 .claude/skills/wiki-maintain/scripts/compute-used-by.py wiki
-python3 .claude/skills/wiki-maintain/scripts/structure-enum-check.py wiki .claude   # only if you edited a SKILL.md or CLAUDE.md
+python3 .agents/skills/wiki-maintain/scripts/validate.py wiki
+python3 .agents/skills/wiki-maintain/scripts/compute-used-by.py wiki
+python3 .agents/skills/wiki-maintain/scripts/structure-enum-check.py wiki .agents   # only if you edited a SKILL.md or AGENTS.md
 ```
 
 `validate.py` exits 0 if no `[E]` errors. `[W]` warnings (THIN articles <80 lines or intros <50 lines) are non-blocking. `[I]` info hints — usually resolved by running `compute-used-by.py`.
@@ -167,9 +168,9 @@ Recompute every article's `**Used by:**` section from inverse Depends-on graph. 
 Run after every Depends-on edit (Step 4).
 
 ### `scripts/structure-enum-check.py`
-Single-source-of-truth check. Counts `wiki/parts/<NN-part>/` markdown links per file in `wiki/CLAUDE.md`, `<extra>/CLAUDE.md`, `<extra>/SKILL.md`. Files (other than `wiki/index.md`) with >5 such links flagged as duplicate-enumeration smell.
+Single-source-of-truth check. Counts `wiki/parts/<NN-part>/` markdown links per file in `wiki/AGENTS.md`, `wiki/CLAUDE.md`, `<extra>/AGENTS.md`, `<extra>/CLAUDE.md`, `<extra>/SKILL.md`. Files (other than `wiki/index.md`) with >5 such links flagged as duplicate-enumeration smell.
 
-Run when editing CLAUDE.md or SKILL.md files.
+Run when editing `AGENTS.md`, `CLAUDE.md`, or SKILL.md files.
 
 ### `scripts/reciprocal.py` (DEMOTED)
 Legacy bidirectional asymmetry check. Demoted because forward-only Depends-on + computed Used-by replaced the bidirectional invariant. Use this script for first-pass migration validation, rare manual asymmetry checks, or post-`compute-used-by` verification. `--fix` mode survives unchanged for legacy use; for the steady-state workflow, prefer `compute-used-by.py`.
@@ -179,3 +180,7 @@ Legacy bidirectional asymmetry check. Demoted because forward-only Depends-on + 
 - Wiki TOC: `wiki/index.md`.
 - Seam-type cheatsheet: `wiki/appendix-a-seam-types.md` (optional).
 - Per-chapter intros: `wiki/parts/<NN-part>/<chapter>/_intro.md`.
+
+## Cross-harness notes
+
+This skill file is stored under `.agents/skills/wiki-maintain/` per the [Agent Skills](https://agentskills.io) convention. Validator scripts live alongside it under `scripts/` so any agent that can read this SKILL.md can also invoke the scripts with the same relative paths. Python 3.9+ is the only tooling requirement.

@@ -18,7 +18,8 @@ Code is one important subject of the repo, not the whole story. Pipelines, asset
 ## When NOT to invoke
 
 - You are editing wiki content (new type, rename, pitfall revision) → `wiki-maintain`.
-- You already know the target article and want to read it directly → just Read the file; no skill needed.
+- You already know the target article and want to read it directly → just read the file; no skill needed.
+- The wiki is empty (no `wiki/parts/**` content yet). Say so and fall back to source-first investigation.
 
 ## Output format (always produced)
 
@@ -50,7 +51,7 @@ The output format does not change between modes — only who runs the workflow.
 
 ## Scope-to-chapter heuristics
 
-Once the wiki has been populated for this project, add project-specific routing hints here — e.g. "runtime entity substrate → Part I, `runtime-entities-state`". Until then, rely on the TOC + grep workflow above. Do NOT enumerate the full chapter list here — that duplicates `wiki/index.md`, which is the single source of truth for structure (see `structure-enum-check.py`).
+Once the wiki has been populated for this project, add project-specific routing hints here — e.g. "chat session lifecycle → Part I, `pi-session-runtime`". Until then, rely on the TOC + grep workflow above. Do NOT enumerate the full chapter list here — that duplicates `wiki/index.md`, which is the single source of truth for structure (see `structure-enum-check.py`).
 
 ## Hypothesis, not truth
 
@@ -60,4 +61,8 @@ Wiki articles are primes, not gospel. Before acting on a non-obvious claim (a pi
 
 - `wiki/index.md` — book-chapters TOC.
 - `wiki/appendix-a-seam-types.md` — cross-cutting seam-type cheatsheet (optional; present only if the project has cross-cutting concepts worth cataloguing).
-- `wiki/CLAUDE.md` — conventions for wiki content (auto-loaded when reading any wiki file).
+- `wiki/AGENTS.md` — conventions for wiki content (vendor-neutral; open before editing or navigating wiki content the first time in a session).
+
+## Cross-harness notes
+
+This skill file is stored under `.agents/skills/wiki-read/` per the [Agent Skills](https://agentskills.io) convention. Harnesses with native discovery (Claude Code, Pi Code, others) invoke it automatically; other agents (Codex, Cursor, Aider, Continue) can execute this markdown workflow inline — no vendor-specific tool calls are required from inside the workflow above.

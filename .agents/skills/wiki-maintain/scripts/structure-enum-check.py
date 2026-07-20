@@ -4,8 +4,8 @@
 `wiki/index.md` enumerates the wiki's top-level structure (8 Parts / 32 chapters)
 with one-line per-chapter descriptions. Per-chapter article rosters (the leaf-level
 list of `[Article](slug.md)` entries) live in each chapter's `_intro.md` § Article
-roster. Other files (CLAUDE.md, skills, nested CLAUDE.md under Tools/, etc.) cite
-specific articles by topic as needed but must NOT duplicate the structural list.
+roster. Other files (AGENTS.md, CLAUDE.md, skills, nested instruction files, etc.)
+cite specific articles by topic as needed but must NOT duplicate the structural list.
 
 Heuristic: count markdown links pointing into `wiki/parts/<NN-part>/...` (or the
 relative `parts/...` / `../parts/...` shapes) per file. Files (other than
@@ -17,7 +17,8 @@ excluded from the duplication smell check.
 Usage:
     python3 structure-enum-check.py <wiki-dir> [<extra-dir> ...]
 
-Default extra-dirs: none. Caller passes `.claude/` to scan skills.
+Default extra-dirs: none. Caller passes `.agents/` (universal layout) or `.claude/`
+(Claude Code layout) to scan skill and instruction files.
 """
 
 from __future__ import annotations
@@ -44,12 +45,14 @@ def main() -> int:
 
     targets: list[Path] = []
     targets.append(index_md)
+    targets.append(wiki / "AGENTS.md")
     targets.append(wiki / "CLAUDE.md")
     for extra in sys.argv[2:]:
         extra_path = Path(extra).resolve()
         if not extra_path.is_dir():
             print(f"WARN: skipping non-directory {extra_path}", file=sys.stderr)
             continue
+        targets.extend(extra_path.rglob("AGENTS.md"))
         targets.extend(extra_path.rglob("CLAUDE.md"))
         targets.extend(extra_path.rglob("SKILL.md"))
 
@@ -72,7 +75,7 @@ def main() -> int:
         if n > THRESHOLD:
             violations.append((f, n))
         if n > 0:
-            print(f"  {f}: {n} wiki/parts/ links" + (" 🔴 OVER THRESHOLD" if n > THRESHOLD else ""))
+            print(f"  {f}: {n} wiki/parts/ links" + (" [!] OVER THRESHOLD" if n > THRESHOLD else ""))
 
     print()
     if violations:

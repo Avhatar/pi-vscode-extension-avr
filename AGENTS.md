@@ -102,6 +102,8 @@ These skills apply to work on this TypeScript VS Code extension. The `pi-code-` 
 | `pi-code-verification-before-completion` | Before claiming work is fixed, complete, passing, performant, merge-ready, package-ready, or release-ready. Unavailable checks remain explicitly unverified. | `.agents/skills/pi-code-verification-before-completion/SKILL.md` |
 | `build-deploy` | The user asks to build, compile, package, deploy, install, create a VSIX, bump/release a version, or supplies the documented standalone test-deploy shortcut. | `.agents/skills/build-deploy/SKILL.md` |
 | `commit` | The user asks to inspect/finalize uncommitted work, draft a commit message, or commit changes. | `.agents/skills/commit/SKILL.md` |
+| `wiki-read` | Orienting on any system, tool, or pipeline in this repo before greping code or planning changes touching it. Read the wiki before the code so reasoning starts from real context. Skip when the wiki is empty (no `wiki/parts/**` content), when reading a specific file you already know, or when the task is a small localized edit inside a file you just touched. | `.agents/skills/wiki-read/SKILL.md` |
+| `wiki-maintain` | Wiki content needs syncing to code — a new / renamed / removed type appearing as wiki keywords, a rule/pitfall contradiction, or an explicit user request ("update wiki"). Escalate before creating a new article, chapter, or appendix entry. | `.agents/skills/wiki-maintain/SKILL.md` |
 
 #### Workflow composition
 
@@ -112,14 +114,11 @@ These skills apply to work on this TypeScript VS Code extension. The `pi-code-` 
 - **Review:** for meaningful or risky changes, use `pi-code-requesting-code-review`; the reviewer follows `pi-code-code-reviewer`. Process findings with `pi-code-receiving-code-review`, then re-review materially changed areas.
 - **Completion:** apply `pi-code-verification-before-completion` before final status claims. Verification is proportional to the claim; compile, unit, integration, manual F5, and installed-VSIX checks prove different boundaries.
 - **Deployment and commit:** `build-deploy` and `commit` are explicit user-intent workflows, not automatic final steps. Never package, install, bump a version, or commit merely because implementation finished.
+- **Repo orientation (soft):** When working with an unfamiliar system, tool, or pipeline in this repo, consult the wiki at [`wiki/`](wiki/) via `wiki-read` before greping code — the wiki is hypothesis-priming, not authoritative. If the wiki is still empty (no `wiki/parts/**` content), skip this step and fall back to source-first investigation; report the gap so it can be filled later. This is guidance, not a gate — trivial local edits and tasks in files you just touched don't need it.
 
 The parent agent always retains integration, final diff review, fresh verification, package/release acceptance, and user-facing reporting.
 
-#### Wiki skill package
-
-`.agents/packages/wiki-skill-package/` is a deployment bundle, not an active project skill. It lives outside `.agents/skills/` because skill discovery is recursive and its nested `files/.claude/skills/` tree is a target template that must not auto-load in this repository. Read the package's `AGENTS.md` and then `AGENT_DEPLOY.md` only when the user explicitly asks to deploy the wiki system to a named target repository. Do not invoke its templated `wiki-read` or `wiki-maintain` workflows until the package has been deployed to that target and its wiki exists. During deployment, preserve the target's existing instructions and content, require explicit consent before overwriting, and do not treat generated `.claude/` copies as replacements for a target repository's `.agents/` source-of-truth policy.
-
-Keep these catalogs and package-routing notes synchronized when project skills or workflow bundles are added, renamed, or removed.
+Keep the skill catalog above synchronized when project skills or workflow bundles are added, renamed, or removed.
 
 ## Subagent Orchestration
 

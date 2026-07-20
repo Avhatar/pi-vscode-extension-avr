@@ -6,7 +6,7 @@ Navigation map of the repo — organized as a book: **Parts → chapters → art
 
 Fill in the reading order once the structure exists — usually a top-down walk that frames substrate first, then core loops, then peripheral concerns. Each chapter starts with `_intro.md` framing what cluster of articles it owns and listing the article roster; articles carry the `Stance / Role / Keywords / Lifecycle edges / See also` schema.
 
-> **Deployment note.** This file is a bootstrap template. Replace the placeholder Parts below with real chapters as you discover the shape of the codebase. Only this file (`wiki/index.md`) may enumerate the top-level structure — see the single-source-of-truth invariant in `.claude/skills/wiki-maintain/SKILL.md`.
+> **Bootstrap note.** This file is a template. Replace the placeholder Parts below with real chapters as you discover the shape of the codebase. Only this file (`wiki/index.md`) may enumerate the top-level structure — see the single-source-of-truth invariant in `.agents/skills/wiki-maintain/SKILL.md`.
 
 ---
 

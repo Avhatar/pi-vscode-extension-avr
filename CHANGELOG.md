@@ -9,9 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - Added exclusive writable-session ownership across VS Code and standalone hosts, with typed conflicts and explicit stale-lock recovery safeguards.
+- Added active project wiki skills `wiki-read` and `wiki-maintain` under `.agents/skills/` alongside a `wiki/` scaffold at repo root, so any agent runtime that discovers `.agents/` skills can orient on and maintain repo documentation without depending on a Claude-specific `.claude/skills/` layout.
 
 ### Changed
 - Routed chat lifecycle, commands, queue settlement, preferences, and state projection through a shared headless host so VS Code and desktop clients can use the same backend behavior.
+- Documented the wiki-first repo orientation soft rule in `AGENTS.md` and updated the project skill catalog with the new wiki workflows.
 
 ## [0.59.0] - 2026-07-20
 
