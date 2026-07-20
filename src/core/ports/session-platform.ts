@@ -55,6 +55,11 @@ export interface SessionResourcePaths {
     readonly bundledPiPackagePaths: readonly string[];
 }
 
+export interface SessionExtensionPort {
+    createLspExtension(enabled: boolean): ((api: any) => void) | undefined;
+    syncClaudeCodeMcpImport?(enabled: boolean): { changed: boolean; path: string };
+}
+
 export interface SessionCodexUsagePort {
     updateFromHeaders(headers: Record<string, string>): boolean;
 }
@@ -106,6 +111,7 @@ export interface SessionRuntimePorts {
     settings: SessionSettingsPort;
     dialogs: SessionDialogPort;
     resources: SessionResourcePaths;
+    extensions?: SessionExtensionPort;
     codexUsage: SessionCodexUsagePort;
     sessionLocks: SessionLockPort;
 }
@@ -125,6 +131,9 @@ export const DEFAULT_SESSION_RUNTIME_PORTS: SessionRuntimePorts = {
     },
     resources: {
         bundledPiPackagePaths: [],
+    },
+    extensions: {
+        createLspExtension: () => undefined,
     },
     codexUsage: {
         updateFromHeaders: () => false,

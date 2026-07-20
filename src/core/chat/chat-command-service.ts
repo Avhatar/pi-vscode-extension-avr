@@ -51,6 +51,14 @@ export type ChatCommandTab = ChatServiceTab
     & FileHistoryTarget
     & { readonly session: ChatServiceTab['session'] & FileHistoryTarget['session'] & ChatCommandSession };
 
+export function parseNameCommand(text: string): string | undefined | null {
+    const trimmed = text.trim();
+    if (trimmed === '/name') return undefined;
+    const match = /^\/name\s+([\s\S]+)$/.exec(trimmed);
+    if (!match) return null;
+    return match[1].replace(/\s+/g, ' ').trim().slice(0, 60) || undefined;
+}
+
 /** Portable routing for commands whose semantics belong to the shared agent application. */
 export class ChatCommandService {
     constructor(private readonly chat: ChatService) {}

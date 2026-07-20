@@ -56,6 +56,7 @@ describe('portable session workspace and settings ports', () => {
         expect(ports.resources.bundledPiPackagePaths).toBe(bundledPiPackagePaths);
         expect(ports.codexUsage).toBe(codexUsage);
         expect(ports.sessionLocks).toBeInstanceOf(NodeSessionLock);
+        expect(ports.extensions?.createLspExtension).toBeTypeOf('function');
         expect(createVsCodeSessionRuntimePorts().resources.bundledPiPackagePaths).toEqual([]);
     });
 
@@ -69,6 +70,8 @@ describe('portable session workspace and settings ports', () => {
         expect(authSource).not.toMatch(/from ['"]vscode['"]/);
         expect(codexSource).not.toMatch(/from ['"]vscode['"]/);
         expect(sessionSource).not.toMatch(/from ['"].*codex-usage-store['"]/);
+        expect(sessionSource).not.toMatch(/from ['"].*\/lsp\/extension['"]/);
+        expect(sessionSource).not.toMatch(/from ['"].*\/mcp\/claude-code-import['"]/);
         expect(tabSource).not.toMatch(/notifications\/turn-notification-gate/);
     });
 

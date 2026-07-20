@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { ClientMessage, ServerMessage } from '../../../shared/protocol';
+import type {
+    AgentClientMessage,
+    ClientMessage,
+    ServerMessage,
+} from '../../../shared/protocol';
 import {
     AGENT_PROTOCOL_VERSION,
     AgentEventSequencer,
@@ -8,6 +12,8 @@ import {
     createSuccessResponse,
 } from '../../../shared/connection-protocol';
 import {
+    isAgentClientMessage,
+    isAgentClientRequestEnvelope,
     isAgentEventEnvelope,
     isAgentRequestEnvelope,
     isAgentResponseEnvelope,
@@ -62,6 +68,30 @@ describe('chat protocol runtime validation', () => {
 
         expect(messages).toHaveLength(31);
         for (const message of messages) expect(isClientMessage(message), message.type).toBe(true);
+    });
+
+    it('validates the portable agent subset independently from platform clients', () => {
+        const messages: AgentClientMessage[] = [
+            { type: 'prompt', text: 'hello' },
+            { type: 'abort' },
+            { type: 'getState' },
+            { type: 'createTab' },
+            { type: 'setCacheMode', mode: 'auto' },
+        ];
+
+        for (const message of messages) expect(isAgentClientMessage(message), message.type).toBe(true);
+        expect(isAgentClientMessage({ type: 'openFile', filePath: '/workspace/file.ts' })).toBe(false);
+        expect(isAgentClientMessage({ type: 'openSettings' })).toBe(false);
+
+        const request = createAgentRequestEnvelope(
+            { requestId: 'request-agent', clientId: 'desktop-client' },
+            { type: 'getState' },
+        );
+        expect(isAgentClientRequestEnvelope(request)).toBe(true);
+        expect(isAgentClientRequestEnvelope(createAgentRequestEnvelope(
+            { requestId: 'request-platform', clientId: 'desktop-client' },
+            { type: 'openFile', filePath: '/workspace/file.ts' },
+        ))).toBe(false);
     });
 
     it('rejects malformed and unknown client messages', () => {

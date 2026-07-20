@@ -1,0 +1,38 @@
+:root {
+  color-scheme: dark;
+  font-family: Consolas, "Courier New", monospace;
+  background: #050a06;
+  color: #7dff9a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  background: #050a06;
+}
+
+main {
+  width: min(42rem, calc(100vw - 3rem));
+  padding: 2rem;
+  border: 1px solid currentColor;
+}
+
+.eyebrow {
+  margin: 0 0 1rem;
+  opacity: 0.7;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+}
+
+#details {
+  min-height: 1.5em;
+  margin: 1rem 0 0;
+  color: #b4ffc4;
+}

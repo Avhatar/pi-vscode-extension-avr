@@ -1,6 +1,14 @@
 import { Type } from 'typebox';
 import { Check } from 'typebox/value';
-import type { ClientMessage, ServerMessage } from './protocol';
+import type {
+    AgentClientMessage,
+    AgentServerMessage,
+    ClientMessage,
+    PlatformClientMessage,
+    ServerMessage,
+    VsCodeClientMessage,
+    VsCodeServerMessage,
+} from './protocol';
 import {
     AGENT_PROTOCOL_VERSION,
     type AgentEventEnvelope,
@@ -39,7 +47,7 @@ const TextCommandFields = {
     files: Type.Optional(Type.Array(FileAttachmentSchema)),
 };
 
-export const ClientMessageSchema = Type.Union([
+export const AgentClientMessageSchema = Type.Union([
     Type.Object({ type: Type.Literal('prompt'), ...TextCommandFields }, StrictObject),
     Type.Object({ type: Type.Literal('steer'), ...TextCommandFields }, StrictObject),
     Type.Object({ type: Type.Literal('followUp'), ...TextCommandFields }, StrictObject),
@@ -60,12 +68,6 @@ export const ClientMessageSchema = Type.Union([
     Type.Object({ type: Type.Literal('loadSession'), sessionPath: Type.String() }, StrictObject),
     Type.Object({ type: Type.Literal('getSessions') }, StrictObject),
     Type.Object({ type: Type.Literal('getState') }, StrictObject),
-    Type.Object({ type: Type.Literal('openFile'), filePath: Type.String() }, StrictObject),
-    Type.Object({
-        type: Type.Literal('openDiff'),
-        filePath: Type.String(),
-        toolCallId: Type.String(),
-    }, StrictObject),
     Type.Object({
         type: Type.Literal('undoFileChange'),
         filePath: Type.String(),
@@ -73,18 +75,9 @@ export const ClientMessageSchema = Type.Union([
     }, StrictObject),
     Type.Object({ type: Type.Literal('restoreCheckpoint'), messageIndex: Type.Number() }, StrictObject),
     Type.Object({ type: Type.Literal('redoCheckpoint') }, StrictObject),
-    Type.Object({
-        type: Type.Literal('confirmAction'),
-        action: Type.String(),
-        message: Type.String(),
-        payload: Type.Optional(Type.Unknown()),
-    }, StrictObject),
     Type.Object({ type: Type.Literal('createTab') }, StrictObject),
     Type.Object({ type: Type.Literal('closeTab'), tabId: Type.String() }, StrictObject),
     Type.Object({ type: Type.Literal('switchTab'), tabId: Type.String() }, StrictObject),
-    Type.Object({ type: Type.Literal('openSettings') }, StrictObject),
-    Type.Object({ type: Type.Literal('openKeybindings') }, StrictObject),
-    Type.Object({ type: Type.Literal('openChangelog') }, StrictObject),
     Type.Object({ type: Type.Literal('getSkills') }, StrictObject),
     Type.Object({
         type: Type.Literal('searchWorkspaceFiles'),
@@ -103,6 +96,33 @@ export const ClientMessageSchema = Type.Union([
     }, StrictObject),
     Type.Object({ type: Type.Literal('cancelQueue') }, StrictObject),
     Type.Object({ type: Type.Literal('setCacheMode'), mode: CacheModeSchema }, StrictObject),
+]);
+
+export const PlatformClientMessageSchema = Type.Union([
+    Type.Object({ type: Type.Literal('openFile'), filePath: Type.String() }, StrictObject),
+    Type.Object({
+        type: Type.Literal('confirmAction'),
+        action: Type.String(),
+        message: Type.String(),
+        payload: Type.Optional(Type.Unknown()),
+    }, StrictObject),
+]);
+
+export const VsCodeClientMessageSchema = Type.Union([
+    Type.Object({
+        type: Type.Literal('openDiff'),
+        filePath: Type.String(),
+        toolCallId: Type.String(),
+    }, StrictObject),
+    Type.Object({ type: Type.Literal('openSettings') }, StrictObject),
+    Type.Object({ type: Type.Literal('openKeybindings') }, StrictObject),
+    Type.Object({ type: Type.Literal('openChangelog') }, StrictObject),
+]);
+
+export const ClientMessageSchema = Type.Union([
+    AgentClientMessageSchema,
+    PlatformClientMessageSchema,
+    VsCodeClientMessageSchema,
 ]);
 
 export const AgentRequestEnvelopeSchema = Type.Object({
@@ -260,8 +280,7 @@ const ErrorSeveritySchema = Type.Union([
     Type.Literal('info'),
 ]);
 
-export const ServerMessageSchema = Type.Union([
-    Type.Object({ type: Type.Literal('ready') }, StrictObject),
+export const AgentServerMessageSchema = Type.Union([
     Type.Object({ type: Type.Literal('stateSync'), state: SerializedAgentStateSchema }, StrictObject),
     Type.Object({ type: Type.Literal('agentEvent'), event: Type.Unknown() }, StrictObject),
     Type.Object({
@@ -303,8 +322,16 @@ export const ServerMessageSchema = Type.Union([
     }, StrictObject),
 ]);
 
-const ServerMessageTypeSchema = Type.Union([
-    Type.Literal('ready'),
+export const VsCodeServerMessageSchema = Type.Object({
+    type: Type.Literal('ready'),
+}, StrictObject);
+
+export const ServerMessageSchema = Type.Union([
+    AgentServerMessageSchema,
+    VsCodeServerMessageSchema,
+]);
+
+const AgentServerMessageTypeSchema = Type.Union([
     Type.Literal('stateSync'),
     Type.Literal('agentEvent'),
     Type.Literal('models'),
@@ -319,6 +346,21 @@ const ServerMessageTypeSchema = Type.Union([
     Type.Literal('error'),
 ]);
 
+const ServerMessageTypeSchema = Type.Union([
+    AgentServerMessageTypeSchema,
+    Type.Literal('ready'),
+]);
+
+export const AgentServerEventEnvelopeSchema = Type.Object({
+    protocolVersion: Type.Literal(AGENT_PROTOCOL_VERSION),
+    clientId: NonEmptyString,
+    epoch: NonEmptyString,
+    sequence: Type.Integer({ minimum: 1 }),
+    tabId: Type.Optional(NonEmptyString),
+    type: AgentServerMessageTypeSchema,
+    payload: Type.Record(Type.String(), Type.Unknown()),
+}, StrictObject);
+
 /** Validates event metadata before correlating the discriminator with its payload. */
 export const AgentEventEnvelopeSchema = Type.Object({
     protocolVersion: Type.Literal(AGENT_PROTOCOL_VERSION),
@@ -330,8 +372,28 @@ export const AgentEventEnvelopeSchema = Type.Object({
     payload: Type.Record(Type.String(), Type.Unknown()),
 }, StrictObject);
 
+export function isAgentClientMessage(value: unknown): value is AgentClientMessage {
+    return Check(AgentClientMessageSchema, value);
+}
+
+export function isPlatformClientMessage(value: unknown): value is PlatformClientMessage {
+    return Check(PlatformClientMessageSchema, value);
+}
+
+export function isVsCodeClientMessage(value: unknown): value is VsCodeClientMessage {
+    return Check(VsCodeClientMessageSchema, value);
+}
+
 export function isClientMessage(value: unknown): value is ClientMessage {
     return Check(ClientMessageSchema, value);
+}
+
+export function isAgentClientRequestEnvelope(
+    value: unknown,
+): value is AgentRequestEnvelope<AgentClientMessage> {
+    if (!Check(AgentRequestEnvelopeSchema, value)) return false;
+    if (Object.prototype.hasOwnProperty.call(value.payload, 'type')) return false;
+    return isAgentClientMessage({ ...value.payload, type: value.type });
 }
 
 export function isAgentRequestEnvelope(value: unknown): value is AgentRequestEnvelope {
@@ -344,12 +406,31 @@ export function isAgentResponseEnvelope(value: unknown): value is AgentResponseE
     return Check(AgentResponseEnvelopeSchema, value);
 }
 
-export function isServerMessage(value: unknown): value is ServerMessage {
-    if (!Check(ServerMessageSchema, value)) return false;
+function hasValidInterruptedTurnState(value: AgentServerMessage | ServerMessage): boolean {
     if (value.type === 'stateSync' && value.state.interruptedTurn) {
         return !value.state.isStreaming && !value.state.isCompacting;
     }
     return true;
+}
+
+export function isAgentServerMessage(value: unknown): value is AgentServerMessage {
+    return Check(AgentServerMessageSchema, value) && hasValidInterruptedTurnState(value as AgentServerMessage);
+}
+
+export function isVsCodeServerMessage(value: unknown): value is VsCodeServerMessage {
+    return Check(VsCodeServerMessageSchema, value);
+}
+
+export function isServerMessage(value: unknown): value is ServerMessage {
+    return Check(ServerMessageSchema, value) && hasValidInterruptedTurnState(value as ServerMessage);
+}
+
+export function isAgentServerEventEnvelope(
+    value: unknown,
+): value is AgentEventEnvelope<AgentServerMessage> {
+    if (!Check(AgentServerEventEnvelopeSchema, value)) return false;
+    if (Object.prototype.hasOwnProperty.call(value.payload, 'type')) return false;
+    return isAgentServerMessage({ ...value.payload, type: value.type });
 }
 
 export function isAgentEventEnvelope(value: unknown): value is AgentEventEnvelope {

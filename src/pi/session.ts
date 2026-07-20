@@ -32,8 +32,6 @@ import { indexPackageAgents } from './subagents/package-agents';
 import { createTodoExtension } from './todo/extension';
 import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
-import { createLspExtension } from './lsp/extension';
-import { syncClaudeCodeMcpImport } from './mcp/claude-code-import';
 import { installEditToolPreflight } from './tools/preflight-edit';
 import { createToolSelectionGuard } from './tool-selection-guard';
 import { isContextUsageEstimated } from './context-usage';
@@ -383,17 +381,20 @@ export class PiSessionManager {
         );
         const lspEnabled = this._ports.settings.get('lsp.enabled', false);
         const importClaudeCodeMcp = this._ports.settings.get('mcp.importClaudeCode', false);
-        try {
-            const result = syncClaudeCodeMcpImport(importClaudeCodeMcp);
-            if (result.changed) {
+        const syncClaudeCodeMcpImport = this._ports.extensions?.syncClaudeCodeMcpImport;
+        if (syncClaudeCodeMcpImport) {
+            try {
+                const result = syncClaudeCodeMcpImport(importClaudeCodeMcp);
+                if (result.changed) {
+                    this._outputChannel.appendLine(
+                        `Claude Code MCP import ${importClaudeCodeMcp ? 'enabled' : 'disabled'} in ${result.path}.`,
+                    );
+                }
+            } catch (error) {
                 this._outputChannel.appendLine(
-                    `Claude Code MCP import ${importClaudeCodeMcp ? 'enabled' : 'disabled'} in ${result.path}.`,
+                    `Claude Code MCP import sync failed: ${error instanceof Error ? error.message : String(error)}`,
                 );
             }
-        } catch (error) {
-            this._outputChannel.appendLine(
-                `Claude Code MCP import sync failed: ${error instanceof Error ? error.message : String(error)}`,
-            );
         }
         const bundledPackagePaths = [...this._ports.resources.bundledPiPackagePaths];
         const standardSkillPaths = getStandardSkillPaths(cwd);
@@ -440,6 +441,7 @@ export class PiSessionManager {
                 `path=${diagnostic.filePath ?? '(none)'} message=${diagnostic.message}`,
             );
         }
+        const lspExtension = this._ports.extensions?.createLspExtension(lspEnabled);
         const factories = [
             createCodexMonitorExtension({
                 onResponse: ({ headers }) => {
@@ -447,7 +449,7 @@ export class PiSessionManager {
                 },
             }),
             createTodoExtension(this.todoStore, todoGuidelines),
-            createLspExtension({ enabled: lspEnabled }),
+            ...(lspExtension ? [lspExtension] : []),
             createToolSelectionGuard((gateway, target) => {
                 this._outputChannel.appendLine(
                     `[tool selection] blocked gateway=${gateway} target=${target} reason=disabled`,

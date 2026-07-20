@@ -12,6 +12,8 @@ import {
     type SessionSettingsPort,
     type SessionWorkspacePort,
 } from '../../core/ports/session-platform';
+import { createLspExtension } from '../../pi/lsp/extension';
+import { syncClaudeCodeMcpImport } from '../../pi/mcp/claude-code-import';
 import { NodeSessionLock } from '../node/session-lock';
 
 type WorkspaceSource = Pick<
@@ -110,6 +112,10 @@ export function createVsCodeSessionRuntimePorts(
         settings: new VsCodeSessionSettings(),
         dialogs: new VsCodeSessionDialogs(),
         resources: resources ?? { bundledPiPackagePaths: [] },
+        extensions: {
+            createLspExtension: (enabled) => createLspExtension({ enabled }),
+            syncClaudeCodeMcpImport,
+        },
         codexUsage,
         sessionLocks: new NodeSessionLock({ applicationId: 'pi-code-vscode' }),
     };

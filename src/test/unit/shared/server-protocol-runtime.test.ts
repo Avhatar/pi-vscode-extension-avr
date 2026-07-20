@@ -4,7 +4,11 @@ import {
     AGENT_PROTOCOL_VERSION,
     AgentEventSequencer,
 } from '../../../shared/connection-protocol';
-import { isAgentEventEnvelope } from '../../../shared/protocol-runtime';
+import {
+    isAgentEventEnvelope,
+    isAgentServerEventEnvelope,
+    isAgentServerMessage,
+} from '../../../shared/protocol-runtime';
 
 const serverMessages: ServerMessage[] = [
     { type: 'ready' },
@@ -152,6 +156,18 @@ describe('server protocol runtime validation', () => {
         for (const message of serverMessages) {
             expect(isAgentEventEnvelope(sequencer.create(message, 'tab-1')), message.type).toBe(true);
         }
+    });
+
+    it('validates the portable agent event subset independently from VS Code lifecycle events', () => {
+        const sequencer = new AgentEventSequencer('client-1', 'epoch-agent');
+        const state = serverMessages.find((message) => message.type === 'stateSync')!;
+        const stateEvent = sequencer.create(state, 'tab-1');
+        const readyEvent = sequencer.create({ type: 'ready' }, 'tab-1');
+
+        expect(isAgentServerMessage(state)).toBe(true);
+        expect(isAgentServerMessage({ type: 'ready' })).toBe(false);
+        expect(isAgentServerEventEnvelope(stateEvent)).toBe(true);
+        expect(isAgentServerEventEnvelope(readyEvent)).toBe(false);
     });
 
     it('rejects malformed and extra server event payload fields', () => {

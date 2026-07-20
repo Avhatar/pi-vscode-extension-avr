@@ -8,6 +8,7 @@ import type { FileChangePlatformPorts } from '../core/ports/file-state';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
 import { ChatService, countUserTurns } from '../core/chat/chat-service';
+import { parseNameCommand } from '../core/chat/chat-command-service';
 import {
     ChatHost,
     type ChatHostTabRequest,
@@ -1651,12 +1652,4 @@ function renderTranscriptContent(content: unknown): string {
         if (part?.type === 'text') return String(part.text ?? '');
         return `\`\`\`json\n${JSON.stringify(part, null, 2)}\n\`\`\``;
     }).join('\n\n');
-}
-
-function parseNameCommand(text: string): string | undefined | null {
-    const trimmed = text.trim();
-    if (trimmed === '/name') return undefined;
-    const match = /^\/name\s+([\s\S]+)$/.exec(trimmed);
-    if (!match) return null;
-    return match[1].replace(/\s+/g, ' ').trim().slice(0, 60) || undefined;
 }
