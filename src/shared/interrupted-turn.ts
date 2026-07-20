@@ -4,7 +4,7 @@ const CONVERSATION_ROLES = new Set(['user', 'assistant', 'toolResult', 'tool']);
 const TOOL_CALL_TYPES = new Set(['toolCall', 'tool_call', 'tool_use']);
 const TERMINAL_TOOL_CALL_STOP_REASONS = new Set(['aborted', 'error']);
 
-export type TurnLifecycleStatus = 'started' | 'completed';
+export type TurnLifecycleStatus = 'started' | 'completed' | 'interrupted';
 
 /**
  * Detects a persisted conversation tail that cannot be complete without
@@ -54,13 +54,16 @@ export function getLatestTurnLifecycleStatus(
         const data = candidate.data;
         if (!data || typeof data !== 'object') return undefined;
         const status = (data as Record<string, unknown>).status;
-        return status === 'started' || status === 'completed' ? status : undefined;
+        return status === 'started' || status === 'completed' || status === 'interrupted'
+            ? status
+            : undefined;
     }
     return undefined;
 }
 
 export function hasInterruptedTurnLifecycle(entries: readonly unknown[]): boolean {
-    return getLatestTurnLifecycleStatus(entries) === 'started';
+    const status = getLatestTurnLifecycleStatus(entries);
+    return status === 'started' || status === 'interrupted';
 }
 
 function getRole(message: unknown): string | undefined {

@@ -81,7 +81,10 @@ export class PiSessionManager {
     private _subagentParentTabId = 'unbound';
     private _lifecycleTransition?: Promise<unknown>;
     private _disposePromise?: Promise<void>;
+    private _shutdownPromise?: Promise<void>;
     private _disposeRequested = false;
+    private _shutdownRequested = false;
+    private _turnLifecycleOpen = false;
 
     constructor(
         outputChannel: Logger,
@@ -558,7 +561,13 @@ export class PiSessionManager {
     async prompt(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
         const augmentedText = this._augmentTextWithFiles(text, files);
-        await this._session.prompt(augmentedText, images?.length ? { images } : undefined);
+        this.markTurnStarted();
+        try {
+            await this._session.prompt(augmentedText, images?.length ? { images } : undefined);
+        } catch (error) {
+            if (!this._session.isStreaming) this.markTurnCompleted();
+            throw error;
+        }
     }
 
     async steer(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void> {
@@ -590,7 +599,14 @@ export class PiSessionManager {
 
     async compact(customInstructions?: string): Promise<void> {
         if (!this._session) { throw new Error('Session not initialized'); }
-        await this._session.compact(customInstructions);
+        this.markTurnStarted();
+        try {
+            await this._session.compact(customInstructions);
+            this.markTurnCompleted();
+        } catch (error) {
+            if (!this._session.isCompacting) this.markTurnCompleted();
+            throw error;
+        }
     }
 
     async abort(): Promise<void> {
@@ -775,11 +791,15 @@ export class PiSessionManager {
     }
 
     markTurnStarted(): void {
+        if (this._shutdownRequested || this._turnLifecycleOpen) return;
         this._sessionManager?.appendCustomEntry(TURN_LIFECYCLE_CUSTOM_TYPE, { status: 'started' });
+        this._turnLifecycleOpen = true;
     }
 
     markTurnCompleted(): void {
+        if (this._shutdownRequested || !this._turnLifecycleOpen) return;
         this._sessionManager?.appendCustomEntry(TURN_LIFECYCLE_CUSTOM_TYPE, { status: 'completed' });
+        this._turnLifecycleOpen = false;
     }
 
     serializeState(): SerializedAgentState {
@@ -798,6 +818,7 @@ export class PiSessionManager {
                 this._sessionManager?.getBranch() ?? [],
             );
             hasInterruptedTurn = lifecycleStatus === 'started'
+                || lifecycleStatus === 'interrupted'
                 || (lifecycleStatus === undefined && hasIncompleteTurnTail(s.messages));
         }
         return {
@@ -1185,6 +1206,27 @@ export class PiSessionManager {
         return transition.finally(() => {
             if (this._lifecycleTransition === transition) this._lifecycleTransition = undefined;
         });
+    }
+
+    shutdown(): Promise<void> {
+        if (this._shutdownPromise) return this._shutdownPromise;
+        this._shutdownRequested = true;
+        if (this._turnLifecycleOpen || this._session?.isStreaming || this._session?.isCompacting) {
+            this._sessionManager?.appendCustomEntry(
+                TURN_LIFECYCLE_CUSTOM_TYPE,
+                { status: 'interrupted' },
+            );
+            this._turnLifecycleOpen = false;
+        }
+        const abort = this.abort();
+        const dispose = this.dispose();
+        this._shutdownPromise = Promise.allSettled([abort, dispose]).then((results) => {
+            const failure = results.find(
+                (result): result is PromiseRejectedResult => result.status === 'rejected',
+            );
+            if (failure) throw failure.reason;
+        });
+        return this._shutdownPromise;
     }
 
     dispose(): Promise<void> {

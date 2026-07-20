@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FileStatePort } from '../../../src/core/ports/file-state';
 import type { StateStore } from '../../../src/core/ports/chat-platform';
 import { EventRouter } from '../../../src/pi/events';
+import { createAgentRequestEnvelope } from '../../../src/shared/connection-protocol';
 import {
     createDesktopChatRuntime,
     type DesktopChatRuntimeDependencies,
 } from '../src/host';
+import { DesktopIpcHost } from '../src/ipc-host';
 
 class MemoryStateStore implements StateStore {
     readonly values = new Map<string, unknown>();
@@ -40,6 +42,7 @@ function createSession(path: string) {
         initialize: vi.fn(async () => undefined),
         initializeFromPath: vi.fn(async () => undefined),
         dispose: vi.fn(async () => undefined),
+        shutdown: vi.fn(async () => undefined),
         sessionPath: path,
         session: { sessionId: path, sessionName: undefined },
         isStreaming: false,
@@ -139,6 +142,54 @@ describe('desktop ChatHost composition', () => {
             message.type === 'agentEvent' && message.event.type === 'agent_start'
         ))).toBe(true);
         expect(runtime.getState()?.isStreaming).toBe(true);
+        await runtime.dispose();
+    });
+
+    it('starts shutdown for every tab, rejects new commands, and disposes resources', async () => {
+        const { dependencies, sessions } = createDependencies();
+        const runtime = createDesktopChatRuntime(dependencies);
+        await runtime.initialize();
+        await runtime.host.createTab();
+
+        const pending = runtime.shutdown();
+        await expect(runtime.dispatch({ type: 'abort' })).resolves.toMatchObject({
+            ok: false,
+            code: 'host_shutting_down',
+        });
+        await pending;
+
+        expect(sessions).toHaveLength(2);
+        expect(sessions.every((session) => session.shutdown.mock.calls.length === 1)).toBe(true);
+        expect(sessions.every((session) => session.dispose.mock.calls.length === 1)).toBe(true);
+    });
+
+    it('keeps the same runtime alive across renderer document rebinding', async () => {
+        const { dependencies, sessions } = createDependencies();
+        const runtime = createDesktopChatRuntime(dependencies);
+        await runtime.initialize();
+        const ipc = new DesktopIpcHost(runtime, { createEpoch: (() => {
+            let value = 0;
+            return () => `epoch-${++value}`;
+        })() });
+        const sender = {
+            id: 1,
+            isDestroyed: () => false,
+            send: vi.fn(),
+        };
+
+        await ipc.handle(sender, createAgentRequestEnvelope(
+            { requestId: 'state-1', clientId: 'renderer-1' },
+            { type: 'getState' },
+        ));
+        const sessionId = runtime.getState()?.sessionId;
+        await ipc.handle(sender, createAgentRequestEnvelope(
+            { requestId: 'state-2', clientId: 'renderer-2' },
+            { type: 'getState' },
+        ));
+
+        expect(runtime.getState()?.sessionId).toBe(sessionId);
+        expect(sessions[0].dispose).not.toHaveBeenCalled();
+        expect(sender.send).toHaveBeenCalledTimes(2);
         await runtime.dispose();
     });
 

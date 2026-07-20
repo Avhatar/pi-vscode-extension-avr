@@ -22,13 +22,14 @@ export interface JsonStateStoreOptions {
 
 let temporaryFileCounter = 0;
 
+type StateMutation = (values: ReadonlyMap<string, unknown>) => Map<string, unknown>;
+
 /** Versioned JSON-backed state with synchronous reads and serialized atomic writes. */
 export class JsonStateStore implements StateStore {
     private _writeQueue: Promise<void> = Promise.resolve();
     private readonly _pendingMutations: Array<{
         readonly id: number;
-        readonly key: string;
-        readonly value: unknown;
+        readonly apply: StateMutation;
     }> = [];
     private _mutationCounter = 0;
     private _values: Map<string, unknown>;
@@ -59,18 +60,39 @@ export class JsonStateStore implements StateStore {
         return (this._values.has(key) ? this._values.get(key) : fallback) as T | undefined;
     }
 
+    entries(): ReadonlyArray<readonly [string, unknown]> {
+        return [...this._values.entries()];
+    }
+
     update(key: string, value: unknown): Promise<void> {
-        const nextValues = applyMutation(this._values, key, value);
+        return this._enqueueMutation((values) => applyMutation(values, key, value));
+    }
+
+    /** Applies a pure key mutation to the latest on-disk value while holding the state lock. */
+    mutate<T>(key: string, update: (value: T | undefined) => T | undefined): Promise<void> {
+        return this._enqueueMutation((values) => applyMutation(
+            values,
+            key,
+            update(values.get(key) as T | undefined),
+        ));
+    }
+
+    flush(): Promise<void> {
+        return this._writeQueue;
+    }
+
+    private _enqueueMutation(apply: StateMutation): Promise<void> {
+        const nextValues = apply(this._values);
         serializeState(nextValues);
-        const mutation = { id: ++this._mutationCounter, key, value };
+        const mutation = { id: ++this._mutationCounter, apply };
         this._pendingMutations.push(mutation);
         this._values = nextValues;
 
         const write = async (): Promise<void> => {
             try {
                 this._committedValues = this._options.lock
-                    ? await this._writeMergedWithLock(key, value)
-                    : await this._writeMutationWithoutLock(key, value);
+                    ? await this._writeMergedWithLock(apply)
+                    : await this._writeMutationWithoutLock(apply);
             } finally {
                 const index = this._pendingMutations.findIndex(({ id }) => id === mutation.id);
                 if (index >= 0) this._pendingMutations.splice(index, 1);
@@ -82,22 +104,16 @@ export class JsonStateStore implements StateStore {
         return pending;
     }
 
-    flush(): Promise<void> {
-        return this._writeQueue;
-    }
-
     private async _writeMutationWithoutLock(
-        key: string,
-        value: unknown,
+        apply: StateMutation,
     ): Promise<Map<string, unknown>> {
-        const committed = applyMutation(this._committedValues, key, value);
+        const committed = apply(this._committedValues);
         await this._writeAtomically(serializeState(committed));
         return committed;
     }
 
     private async _writeMergedWithLock(
-        key: string,
-        value: unknown,
+        apply: StateMutation,
     ): Promise<Map<string, unknown>> {
         const lock = this._options.lock;
         if (!lock) throw new Error('State lock is unavailable.');
@@ -105,7 +121,7 @@ export class JsonStateStore implements StateStore {
         const handle = await acquireStateLock(this.filePath, lock, this._options);
         try {
             const diskValues = await readStateValues(this.filePath);
-            const committed = applyMutation(diskValues, key, value);
+            const committed = apply(diskValues);
             await this._writeAtomically(serializeState(committed));
             return committed;
         } finally {
@@ -116,7 +132,7 @@ export class JsonStateStore implements StateStore {
     private _rebuildVisibleValues(): void {
         let visible = new Map(this._committedValues);
         for (const mutation of this._pendingMutations) {
-            visible = applyMutation(visible, mutation.key, mutation.value);
+            visible = mutation.apply(visible);
         }
         this._values = visible;
     }

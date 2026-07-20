@@ -63,6 +63,28 @@ function Start-WorkspaceProcess([string]$workspace) {
     }
 }
 
+function Start-TrustedWorkspaceProcess([string]$workspace) {
+    $existingIds = @(Get-DesktopProcesses | ForEach-Object Id)
+    $portable = Start-Process -FilePath $Executable -ArgumentList @('--cwd', $workspace) -PassThru
+    $launchedPortableProcessIds.Add($portable.Id)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $newProcesses = @(Get-DesktopProcesses | Where-Object { $existingIds -notcontains $_.Id })
+        if ($newProcesses | Where-Object MainWindowTitle -eq 'Trust this workspace?') {
+            throw 'Previously trusted canonical workspace prompted for trust again.'
+        }
+        $renderer = $newProcesses | Where-Object MainWindowTitle -eq 'Pi Code Desktop' | Select-Object -First 1
+        if ($renderer) {
+            return [pscustomobject]@{
+                PortableProcessId = $portable.Id
+                RendererProcessId = $renderer.Id
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    throw 'Timed out waiting for a previously trusted workspace to open.'
+}
+
 function Get-ProcessTreeIds([int]$rootProcessId) {
     $all = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)
     $pending = [System.Collections.Generic.Queue[int]]::new()
@@ -78,6 +100,21 @@ function Get-ProcessTreeIds([int]$rootProcessId) {
     return @($result)
 }
 
+function Close-WorkspaceProcess($workspaceProcess) {
+    $renderer = Get-Process -Id $workspaceProcess.RendererProcessId -ErrorAction SilentlyContinue
+    if (-not $renderer -or -not $renderer.CloseMainWindow()) {
+        throw 'Could not request graceful desktop window closure.'
+    }
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        if (-not (Get-Process -Id $workspaceProcess.PortableProcessId -ErrorAction SilentlyContinue)) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    throw 'Desktop process did not exit within the graceful shutdown deadline.'
+}
+
 function Stop-WorkspaceProcess([int]$portableProcessId) {
     $ids = Get-ProcessTreeIds $portableProcessId
     foreach ($id in ($ids | Sort-Object -Descending)) {
@@ -87,6 +124,7 @@ function Stop-WorkspaceProcess([int]$portableProcessId) {
 
 $first = $null
 $second = $null
+$reopened = $null
 try {
     $first = Start-WorkspaceProcess $workspaceA
     $second = Start-WorkspaceProcess $workspaceB
@@ -94,14 +132,15 @@ try {
     if ($first.PortableProcessId -eq $second.PortableProcessId) {
         throw 'Independent launches reused the same portable process.'
     }
-    Stop-WorkspaceProcess $first.PortableProcessId
+    Close-WorkspaceProcess $first
     Start-Sleep -Seconds 2
     $secondRenderer = Get-Process -Id $second.RendererProcessId -ErrorAction SilentlyContinue
     if (-not $secondRenderer -or $secondRenderer.MainWindowTitle -ne 'Pi Code Desktop') {
-        throw 'Stopping the first workspace process terminated the second workspace window.'
+        throw 'Gracefully closing the first workspace process terminated the second workspace window.'
     }
 
-    Write-Output 'Portable desktop smoke passed: two independent workspace processes opened, and the second remained alive after the first stopped.'
+    $reopened = Start-TrustedWorkspaceProcess $workspaceA
+    Write-Output 'Portable desktop smoke passed: two independent workspaces opened, graceful closure preserved the other process, and canonical trust persisted across relaunch.'
 } finally {
     foreach ($portableProcessId in ($launchedPortableProcessIds | Select-Object -Unique)) {
         Stop-WorkspaceProcess $portableProcessId

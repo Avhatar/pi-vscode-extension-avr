@@ -9,7 +9,7 @@ The current renderer is a transport shell for Phase 4 validation. It opens on an
 - Windows x64
 - Node.js 22.19 or newer when building from source
 - A trusted workspace directory
-- Provider credentials available through the environment until the secure desktop credential UI is implemented
+- Provider credentials available through the environment until the encrypted credential settings UI is implemented
 
 ## Run from source
 
@@ -26,7 +26,7 @@ npm run desktop -- --cwd "X:\Projects\example"
 
 Add `--devtools` to open detached Chromium developer tools.
 
-Every launch creates an independent OS process with one workspace window. Launch the executable again, or use **New Window**, to work on another project without sharing a failure boundary. Each workspace window will contain multiple isolated chat tabs when the functional renderer is enabled.
+Every launch creates an independent OS process with one workspace window. Launch the executable again, or use **New Window**, to work on another project without sharing a failure boundary. Canonical workspace trust is remembered in shared app data after explicit approval. Each workspace window will contain multiple isolated chat tabs when the functional renderer is enabled.
 
 `npm run desktop` always rebuilds the desktop bundles before launch.
 
@@ -50,5 +50,8 @@ The executable is portable and does not install the application. It is not code-
 - The renderer has Node integration disabled, context isolation enabled, and sandbox mode enabled.
 - Preload exposes only the fixed validated agent request and event channels.
 - Renderer reload requests a new state snapshot and does not replay prompts or tools.
-- Each desktop process has process-local Electron session/cache data; shared app state uses cross-process-serialized writes.
+- Credentials use Electron `safeStorage` and persist only encrypted bytes. When protected storage is unavailable, the welcome surface reports it and plaintext fallback remains disabled.
+- Canonical workspace trust, recent workspaces, and desktop session settings persist under shared app data with cross-process-serialized writes.
+- Each desktop process has process-local Electron session/cache data.
+- Final-window shutdown records active turns as interrupted, aborts parent and child work, and applies a bounded process-only disposal deadline.
 - Project `standalone/**` sources and dependencies are excluded from the Pi Code VSIX.

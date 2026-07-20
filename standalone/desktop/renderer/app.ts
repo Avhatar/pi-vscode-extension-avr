@@ -72,7 +72,12 @@ if (!api) {
     const applyShellState = (state: DesktopShellState): void => {
         switch (state.phase) {
             case 'welcome':
-                setStatus('SELECT A WORKSPACE', 'Open a trusted project to start Pi Code Desktop.');
+                setStatus(
+                    'SELECT A WORKSPACE',
+                    state.secureStorageAvailable === false
+                        ? 'Open a trusted project to start Pi Code Desktop. Secure credential storage is unavailable; plaintext storage is disabled.'
+                        : 'Open a trusted project to start Pi Code Desktop.',
+                );
                 setActionsVisible(true);
                 setWorkspaceActionVisible(true);
                 setActionsDisabled(false);

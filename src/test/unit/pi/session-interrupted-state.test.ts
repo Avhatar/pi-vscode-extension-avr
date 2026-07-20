@@ -13,7 +13,8 @@ function createSession(messages: any[], isStreaming: boolean, isCompacting = fal
         getActiveToolNames: () => [],
         getContextUsage: () => undefined,
         subscribe: () => () => undefined,
-        dispose: () => undefined,
+        abort: vi.fn(async () => undefined),
+        dispose: vi.fn(async () => undefined),
     };
 }
 
@@ -39,6 +40,43 @@ describe('PiSessionManager interrupted turn state', () => {
             ['pi-code.turn-lifecycle', { status: 'completed' }],
         ]);
         await manager.dispose();
+    });
+
+    it('records shutdown interruption before abort and suppresses a late completion marker', async () => {
+        const manager = new PiSessionManager({ appendLine(): void {} } as any) as any;
+        const entries: any[] = [];
+        const session = createSession([{ role: 'user', content: 'Work' }], false);
+        let resolvePrompt!: () => void;
+        session.prompt = vi.fn(() => new Promise<void>((resolve) => { resolvePrompt = resolve; }));
+        const sessionManager = {
+            appendCustomEntry: vi.fn((customType: string, data: unknown) => {
+                entries.push({ type: 'custom', customType, data });
+            }),
+            getBranch: () => entries,
+        };
+        await startRuntime(manager, session, sessionManager);
+
+        const prompt = manager.prompt('Work');
+        const pending = manager.shutdown();
+        manager.markTurnCompleted();
+        resolvePrompt();
+        await Promise.all([prompt, pending]);
+
+        expect(sessionManager.appendCustomEntry.mock.calls).toEqual([
+            ['pi-code.turn-lifecycle', { status: 'started' }],
+            ['pi-code.turn-lifecycle', { status: 'interrupted' }],
+        ]);
+        expect(session.abort).toHaveBeenCalledOnce();
+        expect(session.dispose).toHaveBeenCalledOnce();
+
+        const restored = new PiSessionManager({ appendLine(): void {} } as any) as any;
+        await startRuntime(restored, createSession([{ role: 'user', content: 'Work' }], false), {
+            getBranch: () => entries,
+        });
+        expect(restored.serializeState()).toMatchObject({
+            interruptedTurn: { reason: 'incomplete_session_tail' },
+        });
+        await restored.dispose();
     });
 
     it('marks an idle restored session whose persisted tail still requires continuation', async () => {

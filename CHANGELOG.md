@@ -12,12 +12,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Added a sandboxed Electron desktop shell that composes the shared chat host through validated, correlated IPC with renderer reload recovery.
 - Added a portable Windows build for testing the production standalone desktop shell without an installer.
 - Added an in-application standalone workspace welcome flow that initializes the Agent Host only after workspace trust approval.
+- Added encrypted standalone credential storage through Electron safeStorage, persistent canonical-workspace trust, shared desktop session settings, and recent workspace state without plaintext fallback.
 - Added active project wiki skills `wiki-read` and `wiki-maintain` under `.agents/skills/` alongside a `wiki/` scaffold at repo root, so any agent runtime that discovers `.agents/` skills can orient on and maintain repo documentation without depending on a Claude-specific `.claude/skills/` layout.
 
 ### Changed
 - Routed chat lifecycle, commands, queue settlement, preferences, and state projection through a shared headless host so VS Code and desktop clients can use the same backend behavior.
 - Reused one browser-safe request correlation and event recovery implementation across VS Code and desktop transports.
 - Changed standalone launches and New Window actions to use independent workspace processes, so one project failure does not terminate another.
+- Changed standalone shutdown to record interrupted turns, abort parent and child work, dispose resources within a process-scoped deadline, and reconnect renderer reloads without replaying work.
 - Documented the wiki-first repo orientation soft rule in `AGENTS.md` and updated the project skill catalog with the new wiki workflows.
 
 ### Fixed

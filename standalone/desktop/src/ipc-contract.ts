@@ -8,7 +8,7 @@ export interface DesktopIpcRequest {
     readonly request: unknown;
 }
 
-export type DesktopShellState = {
+export type DesktopShellState = ({
     readonly phase: 'welcome';
     readonly suggestedWorkspace?: string;
 } | {
@@ -21,6 +21,8 @@ export type DesktopShellState = {
     readonly phase: 'error';
     readonly workspacePath?: string;
     readonly message: string;
+}) & {
+    readonly secureStorageAvailable?: boolean;
 };
 
 export type DesktopShellRequest =

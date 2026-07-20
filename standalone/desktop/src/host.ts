@@ -6,7 +6,6 @@ import { NodeLogger, type NodeLogSink } from '../../../src/adapters/node/logger'
 import { NodeSessionLock } from '../../../src/adapters/node/session-lock';
 import {
     NodeSessionWorkspace,
-    ObjectSessionSettings,
     createNodeSessionRuntimePorts,
 } from '../../../src/adapters/node/session-platform';
 import { NodeWorkspaceFileState } from '../../../src/adapters/node/workspace-file-state';
@@ -35,7 +34,10 @@ import { DiffManager } from '../../../src/core/files/diff-manager';
 import type { FileMentionsPort, StateStore } from '../../../src/core/ports/chat-platform';
 import type { FileStatePort } from '../../../src/core/ports/file-state';
 import type { Logger } from '../../../src/core/ports/logger';
-import type { SessionSettingValues } from '../../../src/core/ports/session-platform';
+import type {
+    SecretStore,
+    SessionSettingValues,
+} from '../../../src/core/ports/session-platform';
 import { getBundledPiPackagePaths } from '../../../src/pi/bundled-packages';
 import { PiSessionManager } from '../../../src/pi/session';
 import { ChildToolFactoryRegistry } from '../../../src/pi/subagents/child-tools';
@@ -57,6 +59,7 @@ import {
     parseProjectToolSelectionDefault,
     type ProjectToolSelectionDefault,
 } from '../../../src/shared/project-tool-default';
+import { DesktopSessionSettings } from './desktop-state';
 import type { DesktopAgentBackend } from './ipc-host';
 
 const TABS_STATE_KEY = 'pi-code.tabs';
@@ -92,6 +95,8 @@ export interface ProductionDesktopHostOptions {
     readonly emit: (message: AgentServerMessage, tabId?: string) => void;
     readonly log?: NodeLogSink;
     readonly sessionSettings?: Partial<SessionSettingValues>;
+    readonly globalState?: StateStore;
+    readonly secrets?: SecretStore;
     readonly defaults?: DesktopChatRuntimeDefaults;
     readonly subagentMaxConcurrency?: number;
 }
@@ -106,7 +111,9 @@ export class DesktopChatRuntime implements DesktopAgentBackend {
     private cacheMode: CacheMode = 'auto';
     private favorites = new Set<string>();
     private initialized = false;
+    private shuttingDown = false;
     private disposePromise?: Promise<void>;
+    private shutdownPromise?: Promise<void>;
 
     constructor(private readonly dependencies: DesktopChatRuntimeDependencies) {
         this.subagentGate = new SubagentCapabilityGate(
@@ -247,11 +254,37 @@ export class DesktopChatRuntime implements DesktopAgentBackend {
     }
 
     dispatch(message: AgentClientMessage, sourceTabId?: string) {
+        if (this.shuttingDown) {
+            return Promise.resolve({
+                ok: false as const,
+                code: 'host_shutting_down',
+                message: 'The desktop host is shutting down.',
+            });
+        }
         return this.host.dispatch(message, sourceTabId);
     }
 
     getState(tabId?: string): SerializedAgentState | undefined {
         return this.host.getState(tabId);
+    }
+
+    shutdown(): Promise<void> {
+        if (this.shutdownPromise) return this.shutdownPromise;
+        this.shuttingDown = true;
+        const tabs = [...this.tabs.values()];
+        const sessionShutdowns = tabs.map((tab) => tab.session.shutdown());
+        this.shutdownPromise = Promise.allSettled(sessionShutdowns).then(async (results) => {
+            let firstError = results.find(
+                (result): result is PromiseRejectedResult => result.status === 'rejected',
+            )?.reason;
+            try {
+                await this.dispose();
+            } catch (error) {
+                firstError ??= error;
+            }
+            if (firstError !== undefined) throw firstError;
+        });
+        return this.shutdownPromise;
     }
 
     dispose(): Promise<void> {
@@ -632,13 +665,14 @@ export async function createProductionDesktopHost(
         staleAfterMs: 0,
     });
     const stateStoreOptions = { lock: stateLocks } as const;
-    const [workspaceState, globalState] = await Promise.all([
-        JsonStateStore.open(
-            path.join(stateRoot, 'workspaces', `${workspaceKey}.json`),
-            stateStoreOptions,
-        ),
-        JsonStateStore.open(path.join(stateRoot, 'global.json'), stateStoreOptions),
-    ]);
+    const workspaceState = await JsonStateStore.open(
+        path.join(stateRoot, 'workspaces', `${workspaceKey}.json`),
+        stateStoreOptions,
+    );
+    const globalState = options.globalState ?? await JsonStateStore.open(
+        path.join(stateRoot, 'global.json'),
+        stateStoreOptions,
+    );
     const fileMentions = new NodeFileMentions({ workspaceRoot, logger });
     const fileState = new NodeWorkspaceFileState({
         workspaceRoot: () => workspaceRoot,
@@ -658,7 +692,7 @@ export async function createProductionDesktopHost(
     );
     const sessionPorts = createNodeSessionRuntimePorts({
         workspace,
-        settings: new ObjectSessionSettings({
+        settings: new DesktopSessionSettings(globalState, {
             ...options.sessionSettings,
             'lsp.enabled': false,
             'mcp.importClaudeCode': false,
@@ -676,7 +710,7 @@ export async function createProductionDesktopHost(
         emit: options.emit,
         createSession: () => new PiSessionManager(
             logger,
-            undefined,
+            options.secrets,
             subagentCoordinator,
             subagentStore,
             writeIsolation,
@@ -686,11 +720,19 @@ export async function createProductionDesktopHost(
         disposeDependencies: async () => {
             fileMentions.dispose();
             subagentCoordinator.dispose();
-            await Promise.all([workspaceState.flush(), globalState.flush()]);
+            await Promise.all([
+                workspaceState.flush(),
+                flushStateStore(globalState),
+            ]);
         },
     });
     await runtime.initialize();
     return runtime;
+}
+
+async function flushStateStore(state: StateStore): Promise<void> {
+    const candidate = state as StateStore & { flush?: () => Promise<void> };
+    await candidate.flush?.();
 }
 
 function parsePersistedTabs(value: unknown): PersistedChatHostTabs | undefined {
