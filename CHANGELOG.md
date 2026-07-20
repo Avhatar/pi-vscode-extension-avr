@@ -18,6 +18,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Moved direct prompt and compaction lifecycle into the portable chat service while preserving Plan Mode, attachments, and immediate acknowledgement.
 - Moved steering, follow-up, and stop dispatch into the portable chat service without changing attachment, acknowledgement, or active-turn behavior.
 - Moved chat-tab membership and active-tab selection into a portable registry without changing panel, session-restoration, or close behavior.
+- Completed the portable chat-application extraction by moving lifecycle decisions, preferences and tool gates, launcher projection, terminal-event policy, and agent command routing behind shared host-neutral services.
+- Authentication links now use a host-neutral external-URL boundary so desktop and VS Code hosts can apply the same URL safety policy.
 - Removed VS Code coupling from session auth events, Codex response monitoring, and per-tab completion state so alternative hosts can compose those capabilities.
 
 ### Fixed

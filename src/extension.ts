@@ -5,6 +5,8 @@ import {
     createVsCodeSessionRuntimePorts,
 } from './adapters/vscode/session-platform';
 import { createVsCodeChatPlatformPorts } from './adapters/vscode/chat-platform';
+import { VsCodeExternalUrlPort } from './adapters/vscode/external-url';
+import { ExternalUrlService } from './core/ports/external-url';
 import { VsCodeWorkspaceFileState } from './adapters/vscode/workspace-file-state';
 import { DiffContentProvider, VsCodeDiffPresenter } from './adapters/vscode/diff-presenter';
 import { PiSessionManager } from './pi/session';
@@ -54,6 +56,7 @@ export async function activate(context: vscode.ExtensionContext) {
             (message) => outputChannel.appendLine(message),
         );
         const childToolFactories = new ChildToolFactoryRegistry();
+        const externalUrls = new ExternalUrlService(new VsCodeExternalUrlPort());
         const sessionLogger = new VsCodeOutputChannelLogger(outputChannel);
         const sessionSecrets = new VsCodeSecretStore(context.secrets);
         const bundledPackagePaths = getBundledPiPackagePaths(
@@ -166,7 +169,7 @@ export async function activate(context: vscode.ExtensionContext) {
             }),
 
             vscode.commands.registerCommand('pi-code.openSettings', () => {
-                SettingsPanel.show(context.extensionUri, context.secrets);
+                SettingsPanel.show(context.extensionUri, context.secrets, externalUrls);
             }),
 
             vscode.commands.registerCommand('pi-code.createTab', async () => {

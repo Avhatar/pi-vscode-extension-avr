@@ -7,22 +7,52 @@ import type { ChatPlatformPorts, FileMentionsPort, StateStore } from '../core/po
 import type { FileChangePlatformPorts } from '../core/ports/file-state';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
-import { ChatService } from '../core/chat/chat-service';
+import { ChatService, countUserTurns } from '../core/chat/chat-service';
+import { ChatApplication } from '../core/chat/chat-application';
+import {
+    ChatCommandService,
+    type ChatCommandIntent,
+} from '../core/chat/chat-command-service';
+import {
+    classifyAssistantTurnIssue,
+    collectOrphanedTools,
+    findLastAssistantMessage,
+    shouldDispatchQueueAfterTerminal,
+    shouldSyncStateForEvent,
+    turnCompletionOutcome,
+} from '../core/chat/chat-event-policy';
+import {
+    projectLauncherState,
+    type ActiveLauncherProjection,
+    type LauncherProjectionSession,
+} from '../core/chat/launcher-projection';
 import { TabRegistry } from '../core/chat/tab-registry';
 import { TabRuntime } from '../core/chat/tab-runtime';
 import type {
     ClientMessage, ServerMessage, TabInfo,
-    LauncherState, LauncherTabInfo, LauncherSessionInfo,
-    CacheMode, CacheEffective, TodoSnapshot, LauncherSubagentSnapshot,
-    TurnNotificationSettings, ImageAttachment, FileAttachment,
+    LauncherState,
+    CacheMode, CacheEffective, LauncherSubagentSnapshot,
+    TurnNotificationSettings,
 } from '../shared/protocol';
-import { getCacheCapability } from '../shared/cache-info';
 import {
     createProjectToolSelectionDefault,
-    disabledToolsFromProjectDefault,
     parseProjectToolSelectionDefault,
     type ProjectToolSelectionDefault,
 } from '../shared/project-tool-default';
+import {
+    FILE_UNDO_VIEW_KEY_PREFIX,
+    PLAN_MODE_KEY_PREFIX,
+    PROJECT_TOOL_DEFAULT_KEY,
+    TODO_ENABLED_KEY_PREFIX,
+    composeEffectiveDisabledTools,
+    computeEffectiveCache,
+    decorateDirectPrompt,
+    prepareCacheForRequest,
+    readDisabledTools,
+    readSessionBoolean,
+    writeDisabledTools,
+    writeSessionBoolean,
+} from '../core/chat/chat-preferences';
 import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { computeCodexTurnUsage, isCodexUsageStale } from '../shared/codex-usage';
@@ -34,7 +64,6 @@ import type { WriteIsolationManager } from '../pi/subagents/write-isolation';
 import type { ChildToolFactoryRegistry } from '../pi/subagents/child-tools';
 import { routeSubagentMutation } from '../pi/subagents/mutations';
 import { TurnNotifier } from '../notifications/turn-notifier';
-import type { TurnCompletionOutcome } from '../shared/turn-notification';
 import { safeSerialize } from '../shared/safe-serialize';
 
 type TabState = TabRuntime<PiSessionManager, DiffManager, CheckpointManager>;
@@ -66,20 +95,6 @@ let tabIdCounter = 0;
 function nextTabId(): string {
     return `tab-${++tabIdCounter}`;
 }
-
-// Auto-mode heuristic thresholds for prompt cache retention.
-//
-// The Anthropic 5-min ephemeral cache (default, "short") survives back-to-back
-// turns indefinitely as long as each next request lands within ~5 min of the
-// previous one. The 1-hour "long" cache costs ~2× the input price on writes
-// (vs ~1.25× for short) but lets the prefix survive idle gaps up to an hour.
-//
-// We pick "long" speculatively when we expect the next idle gap to exceed
-// short's TTL — either because we've already seen a long pause in this
-// session, or because the cached prefix is large enough that losing it would
-// be expensive even on a single re-write.
-const AUTO_IDLE_GAP_THRESHOLD_MS = 2 * 60 * 1000;
-const AUTO_LARGE_CONTEXT_TOKENS = 20_000;
 
 const PROVIDER_ERROR_MAX = 1200;
 
@@ -122,54 +137,6 @@ function trimErrorForStatus(raw: string | undefined): string {
 }
 
 /**
- * True when an assistant message ended without producing any visible content —
- * no text, no tool calls, no thinking. Some providers (notably DashScope/Qwen)
- * answer HTTP 200 with no choices when the request is rejected for non-network
- * reasons (invalid key, exhausted quota, region mismatch), which leaves
- * `stopReason === 'stop'` and an empty `content` array. Treat that as an
- * error rather than letting it disappear silently.
- */
-function isEmptyAssistantResponse(message: any): boolean {
-    if (!message || message.role !== 'assistant') return false;
-    const content = message.content;
-    if (!Array.isArray(content) || content.length === 0) return true;
-    for (const block of content) {
-        if (!block || typeof block !== 'object') continue;
-        if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) return false;
-        if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.length > 0) return false;
-        if (block.type === 'toolCall') return false;
-    }
-    return true;
-}
-
-function buildEmptyResponseMessage(message: any): string {
-    const provider = message?.provider ? String(message.provider) : 'the provider';
-    const model = message?.model ? `/${message.model}` : '';
-    return (
-        `${provider}${model} returned an empty response (HTTP succeeded but no content was streamed). ` +
-        `This usually means an invalid API key, exhausted quota/balance, or a region/endpoint mismatch ` +
-        `(e.g. a China DashScope key on the international endpoint, or vice versa). ` +
-        `Check the "Pi Code" output channel and your provider dashboard.`
-    );
-}
-
-function findLastAssistantMessage(messages: any[]): any | undefined {
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i];
-        if (m?.role === 'assistant') return m;
-    }
-    return undefined;
-}
-
-function turnCompletionOutcome(message: any): TurnCompletionOutcome {
-    if (!message) return 'completed';
-    if (message.stopReason === 'aborted') return 'stopped';
-    if (message.stopReason === 'error' || isEmptyAssistantResponse(message)) return 'failed';
-    if (message.stopReason === 'length') return 'truncated';
-    return 'completed';
-}
-
-/**
  * Owns all chat tab state and routes messages from views to the appropriate
  * tab. View layers (sidebar, editor panels) attach themselves as a
  * {@link ChatViewSink} via {@link addSink} and forward webview messages via
@@ -184,6 +151,7 @@ export class ChatController implements vscode.Disposable {
     private readonly _globalState: StateStore;
     private readonly _fileChangePorts: FileChangePlatformPorts;
     private readonly _chatService: ChatService;
+    private _commandService?: ChatCommandService;
     private _context: vscode.ExtensionContext;
 
     private _cacheMode: CacheMode = 'auto';
@@ -193,6 +161,19 @@ export class ChatController implements vscode.Disposable {
     private static readonly NOTIFICATION_PLAY_SOUND_KEY = 'pi-code.notifications.playSound';
 
     private readonly _tabs = new TabRegistry<TabState>();
+    private _application?: ChatApplication<TabState>;
+
+    private get _app(): ChatApplication<TabState> {
+        if (!this._application || this._application.tabs !== this._tabs) {
+            this._application = new ChatApplication(this._tabs);
+        }
+        return this._application;
+    }
+
+    private get _commands(): ChatCommandService {
+        this._commandService ??= new ChatCommandService(this._chatService);
+        return this._commandService;
+    }
 
     private get _activeTabId(): string {
         return this._tabs.activeId;
@@ -214,52 +195,6 @@ export class ChatController implements vscode.Disposable {
 
     /** Tracks which `tabId`s currently have a visible editor panel. */
     private _openPanels = new Map<string, { reveal(viewColumn?: vscode.ViewColumn): void }>();
-
-    /** Persistence for the per-tab ToDo toggle. Keyed by the session-file
-     *  path so the toggle survives reload and follows the restored session.
-     *  Missing entries fall back to the project selection, then configuration. */
-    private static readonly TODO_ENABLED_KEY_PREFIX = 'pi-code.todoEnabled.';
-
-    /** Persistence for per-tab Plan Mode toggle. Same shape as ToDo. */
-    private static readonly PLAN_MODE_KEY_PREFIX = 'pi-code.planModeEnabled.';
-
-    /** Fixed instruction block injected in front of every user prompt when
-     *  the Plan Mode toggle is on. No tool restriction, no phase state —
-     *  the agent decides per-prompt whether the request warrants a plan.
-     *  The wrapper tags must stay in sync with PLAN_MODE_BLOCK_RE in
-     *  webview/user-message-content.ts so the block is hidden in the rendered bubble. */
-    private static readonly PLAN_MODE_INSTRUCTIONS =
-        '<plan-mode-instructions>\n' +
-        'Plan Mode is on. Not every prompt needs a plan — use judgment:\n' +
-        '\n' +
-        '- If the user is asking a question, requesting information, or\n' +
-        '  discussing an approach: answer directly, no planning required.\n' +
-        '- If the user is asking for changes to code or a multi-step task:\n' +
-        '  first study the relevant files, then sketch a plan (use the todo\n' +
-        '  tool for multi-step work), then execute. Confirm the approach is\n' +
-        '  sound before doing anything invasive.\n' +
-        '\n' +
-        'When editing a file, oldText must match the current file\n' +
-        'byte-for-byte (exact whitespace, indentation, line endings).\n' +
-        'Re-read the target region if you are unsure — do not reconstruct\n' +
-        'oldText from memory or from an earlier plan.\n' +
-        '\n' +
-        'You can execute the plan in the same turn once it is clear. Only\n' +
-        'stop and wait for the user if you have a genuinely open question\n' +
-        'they need to answer before you can proceed.\n' +
-        '</plan-mode-instructions>';
-
-    /** Persistence for per-tab File Undo View toggle (the changed-files
-     *  bar above the input). Default for missing entries: `false`. */
-    private static readonly FILE_UNDO_VIEW_KEY_PREFIX = 'pi-code.fileUndoViewEnabled.';
-
-    /** Persistence for the per-tab Tools panel denylist. Value is `string[]`
-     *  of tool names to hide from the LLM. `todo` is handled separately
-     *  (see `TODO_ENABLED_KEY_PREFIX`) for backward compat. */
-    private static readonly TOOLS_DISABLED_KEY_PREFIX = 'pi-code.disabledTools.';
-
-    /** Exact enabled-tool allowlist applied to newly created agents in this workspace. */
-    private static readonly PROJECT_TOOL_DEFAULT_KEY = 'pi-code.projectToolSelectionDefault';
 
     /** Wired by the host (extension.ts) to construct a `ChatPanel` for a tab. */
     private _panelOpener?: (tabId: string) => void;
@@ -316,8 +251,7 @@ export class ChatController implements vscode.Disposable {
             projectToolDefault: this._getProjectToolSelectionDefault(),
             initialTurnCounter: countUserTurns(initialSession.getMessages()),
         });
-        this._tabs.register(tab);
-        this._tabs.activate(id);
+        this._app.register(tab, { activate: true });
         this._subscribeTab(tab);
 
         this._authChangedSubscription = onAuthChanged((providerId) => {
@@ -388,7 +322,7 @@ export class ChatController implements vscode.Disposable {
             throw new Error(`Cannot register a panel for unknown tab: ${tabId}`);
         }
         this._openPanels.set(tabId, panel);
-        this._tabs.activate(tabId);
+        this._app.activate(tabId);
         this._persistTabs();
         this._onLauncherStateChanged.fire();
     }
@@ -401,7 +335,7 @@ export class ChatController implements vscode.Disposable {
      * once panels have been created.
      */
     markActiveTab(tabId: string): void {
-        if (!this._tabs.activate(tabId)) return;
+        if (!this._app.activate(tabId)) return;
         this._onLauncherStateChanged.fire();
     }
 
@@ -445,8 +379,7 @@ export class ChatController implements vscode.Disposable {
             return;
         }
 
-        await tab.disposeResources();
-        this._tabs.remove(tabId);
+        await this._app.remove(tabId);
 
         this._persistTabs();
         this._onLauncherStateChanged.fire();
@@ -454,84 +387,59 @@ export class ChatController implements vscode.Disposable {
 
     /** Build a snapshot of launcher state (panel tabs + recent sessions). */
     async computeLauncherState(): Promise<Omit<LauncherState, 'historyCollapsed' | 'notificationsCollapsed' | 'todoCollapsed' | 'subagentsCollapsed' | 'toolsCollapsed'>> {
-        // Track only tabs with a visible editor panel. A bare TabState without
-        // a panel is an internal placeholder (e.g. the initial empty tab), not
-        // something the user thinks of as open.
-        const tabs: LauncherTabInfo[] = [...this._tabs.values()]
-            .filter(tab => this._openPanels.has(tab.id))
-            .map(tab => ({
-                id: tab.id,
-                name: tab.name,
-                isStreaming: tab.isStreamingLocal || tab.isCompacting,
-                hasNotification: tab.hasNotification,
-                isOpen: true,
-                modelLabel: tab.session.getCurrentModel()?.id,
-            }));
-
-        // Mark sessions whose path matches a panel-attached tab so the
-        // History section doesn't duplicate them.
-        const openPaths = new Set(
-            [...this._tabs.values()]
-                .filter(t => this._openPanels.has(t.id))
-                .map(t => t.session.sessionPath)
-                .filter((p): p is string => !!p),
-        );
-        let recentSessions: LauncherSessionInfo[] = [];
+        let recentSessions: LauncherProjectionSession[] = [];
         const anySession = this._tabs.values().next().value?.session;
         if (anySession) {
             try {
-                const sessions = await anySession.getSessions();
-                recentSessions = sessions.map((s: any) => ({
-                    path: s.path,
-                    name: s.name,
-                    firstMessage: s.firstMessage,
-                    lastModified: s.lastModified,
-                    isOpen: openPaths.has(s.path),
-                }));
+                recentSessions = await anySession.getSessions();
             } catch {
                 recentSessions = [];
             }
         }
 
-        // Surface the active tab's todo state to the launcher only when
-        // its panel is visible — bare tabs without an editor panel are
-        // launcher placeholders, not user-perceived chats.
-        let todos: TodoSnapshot | undefined;
-        let todoEnabled: boolean | undefined;
-        let todoToggleDisabled: boolean | undefined;
-        let planModeEnabled: boolean | undefined;
-        let planModeToggleDisabled: boolean | undefined;
-        let fileUndoViewEnabled: boolean | undefined;
-        let subagents: LauncherSubagentSnapshot | undefined;
-        let toolSelection: LauncherState['toolSelection'];
         const activeTab = this._tabs.get(this._activeTabId);
+        let active: ActiveLauncherProjection | undefined;
         if (activeTab && this._openPanels.has(activeTab.id)) {
-            const state = activeTab.session.todoStore.getState();
-            todos = { tasks: state.tasks, nextId: state.nextId };
-            todoEnabled = this._isTodoEnabledFor(activeTab);
-            todoToggleDisabled = this._isTabBusy(activeTab);
-            planModeEnabled = this._isPlanModeEnabledFor(activeTab);
-            planModeToggleDisabled = this._isTabBusy(activeTab);
-            fileUndoViewEnabled = this._isFileUndoViewEnabledFor(activeTab);
-            subagents = projectSubagentLauncherSnapshot(activeTab.session.getSubagentSnapshot(), {
-                enabled: this._isSubagentsEnabledFor(activeTab),
-                toggleDisabled: this._isTabBusy(activeTab),
-            });
-            toolSelection = {
-                registered: activeTab.session.getRegisteredToolsInfo(),
-                disabled: this._effectiveDisabledTools(activeTab),
-                toggleDisabled: this._isTabBusy(activeTab),
+            const todoState = activeTab.session.todoStore.getState();
+            const subagents = projectSubagentLauncherSnapshot(
+                activeTab.session.getSubagentSnapshot(),
+                {
+                    enabled: this._isSubagentsEnabledFor(activeTab),
+                    toggleDisabled: false,
+                },
+            );
+            active = {
+                todos: { tasks: todoState.tasks, nextId: todoState.nextId },
+                todoEnabled: this._isTodoEnabledFor(activeTab),
+                planModeEnabled: this._isPlanModeEnabledFor(activeTab),
+                fileUndoViewEnabled: this._isFileUndoViewEnabledFor(activeTab),
+                subagents,
+                toolSelection: {
+                    registered: activeTab.session.getRegisteredToolsInfo(),
+                    disabled: this._effectiveDisabledTools(activeTab),
+                },
             };
         }
 
-        return {
-            tabs, recentSessions,
+        const projected = projectLauncherState({
+            tabs: [...this._tabs.values()].map((tab) => ({
+                id: tab.id,
+                name: tab.name,
+                isStreamingLocal: tab.isStreamingLocal,
+                isCompacting: tab.isCompacting,
+                hasNotification: tab.hasNotification,
+                sessionPath: tab.session.sessionPath,
+                modelLabel: tab.session.getCurrentModel()?.id,
+            })),
+            visibleTabIds: new Set(this._openPanels.keys()),
+            recentSessions,
+            activeTabId: this._activeTabId,
             notificationSettings: this.getTurnNotificationSettings(),
-            todos, todoEnabled, todoToggleDisabled,
-            planModeEnabled, planModeToggleDisabled, fileUndoViewEnabled,
-            subagents: this._subagentSmokeSnapshot ?? subagents,
-            toolSelection,
-        };
+            active,
+        });
+        return this._subagentSmokeSnapshot
+            ? { ...projected, subagents: this._subagentSmokeSnapshot }
+            : projected;
     }
 
     /** Expose the active tab's session for global commands (palette, keybindings). */
@@ -578,11 +486,7 @@ export class ChatController implements vscode.Disposable {
 
         const loadedTabId = this.findTabIdBySessionPath(sessionPath);
         if (loadedTabId) {
-            const tab = this._tabs.get(loadedTabId);
-            if (tab) {
-                await tab.disposeResources();
-                this._tabs.remove(loadedTabId);
-            }
+            await this._app.remove(loadedTabId);
         }
 
         await this._subagentStore.deleteByParentSessionPath(sessionPath);
@@ -634,7 +538,7 @@ export class ChatController implements vscode.Disposable {
         });
         this._updateTabName(tab);
 
-        this._tabs.register(tab);
+        this._app.register(tab);
         this._subscribeTab(tab);
         this._persistTabs();
         return id;
@@ -707,38 +611,28 @@ export class ChatController implements vscode.Disposable {
      * turn ended (so the chip flips to "long" while the user is still
      * composing the next prompt after a break, not only after they send it).
      */
-    private _computeEffectiveCache(tab: TabState): CacheEffective {
+    private _cachePolicyInput(tab: TabState): Parameters<typeof computeEffectiveCache>[0] {
         const model = tab.session.getCurrentModel();
-        const cap = getCacheCapability(model?.provider, model?.id);
-        if (cap.forcedEffective) {
-            return cap.forcedEffective;
-        }
-        if (this._cacheMode === 'short' || this._cacheMode === 'long') {
-            return this._cacheMode;
-        }
-        if (cap.writeFree) {
-            return 'long';
-        }
-        const pendingIdleGap = tab.lastTurnEndAt > 0 ? Date.now() - tab.lastTurnEndAt : 0;
-        const observedMaxGap = Math.max(tab.maxIdleGapMs, pendingIdleGap);
-        const tokens = tab.session.serializeState().contextUsage?.tokens ?? 0;
-        if (observedMaxGap >= AUTO_IDLE_GAP_THRESHOLD_MS) return 'long';
-        if (tokens >= AUTO_LARGE_CONTEXT_TOKENS) return 'long';
-        return 'short';
+        return {
+            cacheMode: this._cacheMode,
+            provider: model?.provider,
+            modelId: model?.id,
+            lastTurnEndAt: tab.lastTurnEndAt,
+            maxIdleGapMs: tab.maxIdleGapMs,
+            contextTokens: tab.session.serializeState().contextUsage?.tokens ?? 0,
+            now: Date.now(),
+        };
+    }
+
+    private _computeEffectiveCache(tab: TabState): CacheEffective {
+        return computeEffectiveCache(this._cachePolicyInput(tab));
     }
 
     private _prepareCacheForRequest(tab: TabState): void {
-        // Commit the pending idle gap into the persistent max only at the
-        // moment a request actually goes out — that's when the gap stops
-        // being "still idle, might keep growing" and becomes a realized
-        // observation we want to remember for future decisions.
-        if (tab.lastTurnEndAt > 0) {
-            const idleGap = Date.now() - tab.lastTurnEndAt;
-            if (idleGap > tab.maxIdleGapMs) tab.maxIdleGapMs = idleGap;
-        }
-        const effective = this._computeEffectiveCache(tab);
-        tab.cacheEffective = effective;
-        if (effective === 'long') {
+        const prepared = prepareCacheForRequest(this._cachePolicyInput(tab));
+        tab.maxIdleGapMs = prepared.maxIdleGapMs;
+        tab.cacheEffective = prepared.effective;
+        if (prepared.effective === 'long') {
             process.env.PI_CACHE_RETENTION = 'long';
         } else {
             // Pi's resolver only flips to "long" on exact match; anything else
@@ -800,11 +694,6 @@ export class ChatController implements vscode.Disposable {
         for (const unsubscribe of unsubs) tab.addSubscription(unsubscribe);
     }
 
-    private _todoEnabledKey(sessionPath: string | undefined): string | undefined {
-        if (!sessionPath) return undefined;
-        return `${ChatController.TODO_ENABLED_KEY_PREFIX}${sessionPath}`;
-    }
-
     private _todoDefaultEnabled(): boolean {
         // The setting defaults to ON, so a vanilla install of the
         // extension surfaces the ToDo panel for every new chat. Power
@@ -815,15 +704,15 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _isTodoEnabledFor(tab: TabState): boolean {
-        const key = this._todoEnabledKey(tab.session.sessionPath);
         const fallback = tab.projectToolDefault
             ? tab.projectToolDefault.enabled.includes('todo')
             : this._todoDefaultEnabled();
-        if (!key) return fallback;
-        // Explicitly stored values (`true` / `false`) win over the project
-        // tool default and the config default once this chat is customized.
-        const stored = this._workspaceState.get<unknown>(key);
-        return typeof stored === 'boolean' ? stored : fallback;
+        return readSessionBoolean(
+            this._workspaceState,
+            TODO_ENABLED_KEY_PREFIX,
+            tab.session.sessionPath,
+            fallback,
+        );
     }
 
     private _isSubagentsEnabledFor(tab: TabState): boolean {
@@ -963,13 +852,8 @@ export class ChatController implements vscode.Disposable {
 
     private _getProjectToolSelectionDefault(): ProjectToolSelectionDefault | undefined {
         return parseProjectToolSelectionDefault(
-            this._workspaceState.get<unknown>(ChatController.PROJECT_TOOL_DEFAULT_KEY),
+            this._workspaceState.get<unknown>(PROJECT_TOOL_DEFAULT_KEY),
         );
-    }
-
-    private _toolsDisabledKey(sessionPath: string | undefined): string | undefined {
-        if (!sessionPath) return undefined;
-        return `${ChatController.TOOLS_DISABLED_KEY_PREFIX}${sessionPath}`;
     }
 
     /** Read the persisted disabled-tools list for this tab. Names not
@@ -977,37 +861,31 @@ export class ChatController implements vscode.Disposable {
      *  so a disable sticks if the tool comes back later (e.g. an MCP
      *  server re-added). */
     private _getDisabledToolsFor(tab: TabState): string[] {
-        const key = this._toolsDisabledKey(tab.session.sessionPath);
-        const stored = key ? this._workspaceState.get<unknown>(key) : undefined;
-        if (stored !== undefined) {
-            return Array.isArray(stored)
-                ? stored.filter((v): v is string => typeof v === 'string' && v.length > 0)
-                : [];
-        }
-        if (!tab.projectToolDefault) return [];
-        return disabledToolsFromProjectDefault(
+        return readDisabledTools(
+            this._workspaceState,
+            tab.session.sessionPath,
             tab.projectToolDefault,
             tab.session.getRegisteredToolsInfo().map((tool) => tool.name),
-        ).filter((tool) => tool !== 'todo' && tool !== 'subagent');
+        );
     }
 
     private async _setDisabledToolsFor(tab: TabState, disabled: string[]): Promise<void> {
-        const key = this._toolsDisabledKey(tab.session.sessionPath);
-        if (!key) return;
-        const uniq = [...new Set(disabled.filter((t) => typeof t === 'string' && t.length > 0))];
-        await this._workspaceState.update(key, uniq);
+        await writeDisabledTools(
+            this._workspaceState,
+            tab.session.sessionPath,
+            disabled,
+        );
     }
 
     /** The full effective denylist for this tab: everything in the Tools
      *  panel denylist, plus dedicated capability gates such as ToDo and
      *  Subagents. Kept in one place so callers cannot bypass those gates. */
     private _effectiveDisabledTools(tab: TabState): string[] {
-        const base = new Set(this._getDisabledToolsFor(tab));
-        if (this._isTodoEnabledFor(tab)) base.delete('todo');
-        else base.add('todo');
-        if (this._isSubagentsEnabledFor(tab)) base.delete('subagent');
-        else base.add('subagent');
-        return [...base];
+        return composeEffectiveDisabledTools(
+            this._getDisabledToolsFor(tab),
+            this._isTodoEnabledFor(tab),
+            this._isSubagentsEnabledFor(tab),
+        );
     }
 
     /** Read persisted state (ToDo toggle + Tools panel denylist) and
@@ -1044,10 +922,12 @@ export class ChatController implements vscode.Disposable {
     }
 
     private async _setTodoEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
-        const key = this._todoEnabledKey(tab.session.sessionPath);
-        if (key) {
-            await this._workspaceState.update(key, enabled);
-        }
+        await writeSessionBoolean(
+            this._workspaceState,
+            TODO_ENABLED_KEY_PREFIX,
+            tab.session.sessionPath,
+            enabled,
+        );
         this._applyPersistedToolSelection(tab);
         this._onLauncherStateChanged.fire();
     }
@@ -1101,10 +981,12 @@ export class ChatController implements vscode.Disposable {
         const wantsSubagentDisabled = filtered.includes('subagent');
         const others = filtered.filter((t) => t !== 'todo' && t !== 'subagent');
 
-        const todoKey = this._todoEnabledKey(tab.session.sessionPath);
-        if (todoKey) {
-            await this._workspaceState.update(todoKey, !wantsTodoDisabled);
-        }
+        await writeSessionBoolean(
+            this._workspaceState,
+            TODO_ENABLED_KEY_PREFIX,
+            tab.session.sessionPath,
+            !wantsTodoDisabled,
+        );
         await this._subagentGate.setEnabled(tab.session.sessionPath, !wantsSubagentDisabled, false);
         await this._setDisabledToolsFor(tab, others);
         this._applyPersistedToolSelection(tab);
@@ -1145,7 +1027,7 @@ export class ChatController implements vscode.Disposable {
             registered,
             this._effectiveDisabledTools(tab),
         );
-        await this._workspaceState.update(ChatController.PROJECT_TOOL_DEFAULT_KEY, selection);
+        await this._workspaceState.update(PROJECT_TOOL_DEFAULT_KEY, selection);
         vscode.window.setStatusBarMessage(
             'Pi Code: tool selection saved as the project default for new agents.',
             3000,
@@ -1173,10 +1055,12 @@ export class ChatController implements vscode.Disposable {
         }
         const others = cfg.disabled.filter((t: unknown): t is string =>
             typeof t === 'string' && t.length > 0 && t !== 'todo' && t !== 'subagent');
-        const todoKey = this._todoEnabledKey(tab.session.sessionPath);
-        if (todoKey) {
-            await this._workspaceState.update(todoKey, cfg.todoEnabled);
-        }
+        await writeSessionBoolean(
+            this._workspaceState,
+            TODO_ENABLED_KEY_PREFIX,
+            tab.session.sessionPath,
+            cfg.todoEnabled,
+        );
         const subagentsEnabled = typeof cfg.subagentsEnabled === 'boolean'
             ? cfg.subagentsEnabled
             : !cfg.disabled.includes('subagent');
@@ -1188,13 +1072,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _isTabBusy(tab: TabState): boolean {
-        return tab.isStreamingLocal || tab.isCompacting;
-    }
-
-    private _assertFileHistoryIdle(tab: TabState): void {
-        if (this._isTabBusy(tab)) {
-            throw new Error('Wait for the agent to finish before undoing or redoing file changes.');
-        }
+        return this._app.isBusy(tab);
     }
 
     // ── Turn-completion notifications ──
@@ -1254,11 +1132,6 @@ export class ChatController implements vscode.Disposable {
 
     // ── Plan Mode ──
 
-    private _planModeKey(sessionPath: string | undefined): string | undefined {
-        if (!sessionPath) return undefined;
-        return `${ChatController.PLAN_MODE_KEY_PREFIX}${sessionPath}`;
-    }
-
     private _planModeDefaultEnabled(): boolean {
         return vscode.workspace
             .getConfiguration('pi-code')
@@ -1266,17 +1139,21 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _isPlanModeEnabledFor(tab: TabState): boolean {
-        const key = this._planModeKey(tab.session.sessionPath);
-        const fallback = this._planModeDefaultEnabled();
-        if (!key) return fallback;
-        return this._workspaceState.get<boolean>(key, fallback);
+        return readSessionBoolean(
+            this._workspaceState,
+            PLAN_MODE_KEY_PREFIX,
+            tab.session.sessionPath,
+            this._planModeDefaultEnabled(),
+        );
     }
 
     private async _setPlanModeEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
-        const key = this._planModeKey(tab.session.sessionPath);
-        if (key) {
-            await this._workspaceState.update(key, enabled);
-        }
+        await writeSessionBoolean(
+            this._workspaceState,
+            PLAN_MODE_KEY_PREFIX,
+            tab.session.sessionPath,
+            enabled,
+        );
         this._onLauncherStateChanged.fire();
     }
 
@@ -1290,11 +1167,6 @@ export class ChatController implements vscode.Disposable {
 
     // ── File Undo View ──
 
-    private _fileUndoViewKey(sessionPath: string | undefined): string | undefined {
-        if (!sessionPath) return undefined;
-        return `${ChatController.FILE_UNDO_VIEW_KEY_PREFIX}${sessionPath}`;
-    }
-
     private _fileUndoViewDefaultEnabled(): boolean {
         return vscode.workspace
             .getConfiguration('pi-code')
@@ -1302,17 +1174,21 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _isFileUndoViewEnabledFor(tab: TabState): boolean {
-        const key = this._fileUndoViewKey(tab.session.sessionPath);
-        const fallback = this._fileUndoViewDefaultEnabled();
-        if (!key) return fallback;
-        return this._workspaceState.get<boolean>(key, fallback);
+        return readSessionBoolean(
+            this._workspaceState,
+            FILE_UNDO_VIEW_KEY_PREFIX,
+            tab.session.sessionPath,
+            this._fileUndoViewDefaultEnabled(),
+        );
     }
 
     private async _setFileUndoViewEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
-        const key = this._fileUndoViewKey(tab.session.sessionPath);
-        if (key) {
-            await this._workspaceState.update(key, enabled);
-        }
+        await writeSessionBoolean(
+            this._workspaceState,
+            FILE_UNDO_VIEW_KEY_PREFIX,
+            tab.session.sessionPath,
+            enabled,
+        );
         // Push fresh state to the chat panel so the bar appears/hides
         // immediately, and to the launcher so the toggle reflects the
         // new value.
@@ -1379,41 +1255,11 @@ export class ChatController implements vscode.Disposable {
             tab.session.markTurnCompleted?.();
             const lastAssistant = findLastAssistantMessage(tab.session.getMessages());
             if (!tab.errorReportedThisRun && lastAssistant) {
-                const stopReason = lastAssistant.stopReason;
-                if (stopReason === 'error') {
-                    this._postAgentError(tab, lastAssistant.errorMessage, lastAssistant);
-                } else if (stopReason !== 'aborted' && isEmptyAssistantResponse(lastAssistant)) {
-                    this._postAgentError(
-                        tab,
-                        buildEmptyResponseMessage(lastAssistant),
-                        lastAssistant,
-                    );
-                } else if (stopReason === 'length') {
-                    // Provider truncated the response because the model hit
-                    // its per-turn output token cap. The message content is
-                    // valid but incomplete — surface this so the user does
-                    // not think the agent silently died mid-sentence.
-                    this._postAgentNotice(
-                        tab,
-                        'Response was cut off — the model hit its output token limit for this turn. Ask it to continue where it left off.',
-                        'warning',
-                        lastAssistant,
-                    );
-                } else if (
-                    stopReason !== 'stop'
-                    && stopReason !== 'aborted'
-                    && stopReason !== undefined
-                ) {
-                    // Any stop reason we do not explicitly recognise
-                    // (e.g. 'toolUse' bubbling up to the outer loop, or a
-                    // provider-specific value the SDK does not map).
-                    // Surface it so nothing gets hidden.
-                    this._postAgentNotice(
-                        tab,
-                        `Turn ended with unexpected stop reason "${String(stopReason)}". The response above may be incomplete.`,
-                        'info',
-                        lastAssistant,
-                    );
+                const issue = classifyAssistantTurnIssue(lastAssistant);
+                if (issue?.kind === 'provider-error') {
+                    this._postAgentError(tab, issue.message, lastAssistant);
+                } else if (issue?.kind === 'notice' && issue.message && issue.severity) {
+                    this._postAgentNotice(tab, issue.message, issue.severity, lastAssistant);
                 }
             }
             this._logTurnEnd(tab, lastAssistant);
@@ -1442,7 +1288,10 @@ export class ChatController implements vscode.Disposable {
             // agent_settled while Codex accounting above was still pending,
             // this agent_end reducer is responsible for dispatching after it
             // finishes publishing the old run's terminal state.
-            dispatchQueuedAfterEvent = !tab.session.serializeState().isStreaming;
+            dispatchQueuedAfterEvent = shouldDispatchQueueAfterTerminal(event.type, {
+                isStreamingLocal: tab.isStreamingLocal,
+                isSessionStreaming: tab.session.serializeState().isStreaming,
+            });
         }
 
         if (event.type === 'agent_settled') {
@@ -1460,7 +1309,10 @@ export class ChatController implements vscode.Disposable {
             // both the SDK is settled and the async agent_end reducer has
             // published the old run's terminal state before starting a normal
             // prompt. If that reducer is still active, it dispatches instead.
-            dispatchQueuedAfterEvent = !tab.isStreamingLocal;
+            dispatchQueuedAfterEvent = shouldDispatchQueueAfterTerminal(event.type, {
+                isStreamingLocal: tab.isStreamingLocal,
+                isSessionStreaming: tab.session.isStreaming,
+            });
         }
 
         this._updateTabName(tab);
@@ -1480,8 +1332,7 @@ export class ChatController implements vscode.Disposable {
         // Stream raw events to whoever is watching this tab (the sidebar if active, panels for this tab).
         this._postForTab(tab.id, { type: 'agentEvent', event: safeSerialize(event) });
 
-        const stateSyncEvents = ['agent_start', 'agent_end', 'message_end', 'turn_end', 'compaction_start', 'compaction_end'];
-        if (stateSyncEvents.includes(event.type)) {
+        if (shouldSyncStateForEvent(event.type)) {
             this.sendStateSync(tab.id);
             // When activity happens on a non-active tab, also refresh the sidebar
             // so its tab indicators (streaming spinner / unread dot) update.
@@ -1530,13 +1381,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _getTabInfos(): TabInfo[] {
-        return [...this._tabs.entries()].map(([id, tab]) => ({
-            id,
-            name: tab.name,
-            isActive: id === this._activeTabId,
-            isStreaming: tab.isStreamingLocal || tab.isCompacting,
-            hasNotification: tab.hasNotification,
-        }));
+        return this._app.getTabInfos();
     }
 
     /** Handle Pi's built-in session naming command without starting a model turn. */
@@ -1574,170 +1419,6 @@ export class ChatController implements vscode.Disposable {
 
             let commandResult: unknown;
             switch (msg.type) {
-                case 'prompt': {
-                    if (this._handleNameCommand(
-                        tab,
-                        msg.text,
-                        Boolean(msg.images?.length || msg.files?.length),
-                    )) break;
-
-                    await this._chatService.dispatchDirectPrompt(tab, msg, {
-                        // Plan Mode remains a host preference. The service calls
-                        // this only for ordinary prompts, never `/compact`.
-                        decoratePrompt: (text) => this._isPlanModeEnabledFor(tab)
-                            ? ChatController.PLAN_MODE_INSTRUCTIONS + '\n\n' + text
-                            : text,
-                        augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
-                        compact: (instructions) => tab.session.compact(instructions),
-                        prompt: (text, images, files) => tab.session.prompt(text, images, files),
-                        prepareRequest: () => this._prepareCacheForRequest(tab),
-                        logPrompt: () => this._logPromptToolState(tab, 'prompt'),
-                        publishState: () => this.sendStateSync(tab.id),
-                        reportDetachedFailure: (error) => {
-                            this._reportCommandFailure(msg.type, tab.id, error);
-                        },
-                    });
-                    break;
-                }
-                case 'steer':
-                case 'followUp':
-                case 'abort':
-                    if (msg.type !== 'abort' && this._handleNameCommand(
-                        tab,
-                        msg.text,
-                        Boolean(msg.images?.length || msg.files?.length),
-                    )) break;
-                    await this._chatService.dispatchStreamingCommand(msg, {
-                        augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
-                        prepareRequest: () => this._prepareCacheForRequest(tab),
-                        logPrompt: (kind) => this._logPromptToolState(tab, kind),
-                        steer: (text, images, files) => tab.session.steer(text, images, files),
-                        followUp: (text, images, files) => tab.session.followUp(text, images, files),
-                        abort: () => tab.session.abort(),
-                    });
-                    break;
-                case 'queueMessage':
-                    if (this._handleNameCommand(tab, msg.text)) break;
-                    this._chatService.applyQueueControl(tab, msg);
-                    this.sendStateSync(tab.id);
-                    break;
-                case 'editQueuedMessage':
-                case 'removeQueuedMessage':
-                case 'cancelQueue':
-                    this._chatService.applyQueueControl(tab, msg);
-                    this.sendStateSync(tab.id);
-                    break;
-                case 'setCacheMode': {
-                    const next = msg.mode;
-                    if (next !== 'short' && next !== 'long' && next !== 'auto') break;
-                    this._cacheMode = next;
-                    await this._globalState.update('pi-code.cacheMode', next);
-                    // Re-evaluate effective for every tab so the UI reflects the
-                    // change immediately, not only after the next prompt.
-                    for (const t of this._tabs.values()) {
-                        t.cacheEffective = this._computeEffectiveCache(t);
-                    }
-                    for (const id of this._tabs.keys()) {
-                        this.sendStateSync(id);
-                    }
-                    break;
-                }
-                case 'getModels': {
-                    const models = tab.session.getModels();
-                    const current = tab.session.getCurrentModel();
-                    const thinkingLevel = tab.session.getThinkingLevel();
-                    this._postForTab(tab.id, {
-                        type: 'models',
-                        models,
-                        current,
-                        thinkingLevel,
-                        favorites: [...this._favoriteModels],
-                    });
-                    break;
-                }
-                case 'setModel':
-                    await tab.session.setModel(msg.provider, msg.modelId);
-                    this.sendStateSync(tab.id);
-                    break;
-                case 'toggleFavorite': {
-                    const key = `${msg.provider}:${msg.modelId}`;
-                    if (this._favoriteModels.has(key)) {
-                        this._favoriteModels.delete(key);
-                    } else {
-                        this._favoriteModels.add(key);
-                    }
-                    await this._globalState.update(
-                        ChatController.FAVORITES_KEY,
-                        [...this._favoriteModels],
-                    );
-                    this._broadcastModels();
-                    break;
-                }
-                case 'setThinkingLevel':
-                    tab.session.setThinkingLevel(msg.level);
-                    this.sendStateSync(tab.id);
-                    break;
-                case 'newSession': {
-                    await tab.session.newSession();
-                    const projectToolDefault = this._getProjectToolSelectionDefault();
-                    tab.projectToolDefault = projectToolDefault;
-                    this._applyPersistedToolSelection(tab);
-                    tab.diffManager.clearAll();
-                    tab.checkpointManager.clearAll();
-                    tab.resetSessionProjection(projectToolDefault);
-                    this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
-                    this.sendStateSync(tab.id);
-                    break;
-                }
-                case 'loadSession':
-                    await tab.session.loadSession(msg.sessionPath);
-                    tab.projectToolDefault = undefined;
-                    this._applyPersistedToolSelection(tab);
-                    tab.diffManager.clearAll();
-                    tab.checkpointManager.clearAll();
-                    tab.resetSessionProjection(
-                        undefined,
-                        countUserTurns(tab.session.getMessages()),
-                    );
-                    this._updateTabName(tab);
-                    this._persistTabs();
-                    this.sendStateSync(tab.id);
-                    break;
-                case 'getSessions': {
-                    const sessions = await tab.session.getSessions();
-                    const currentId = tab.session.session?.sessionId;
-                    this._postForTab(tab.id, { type: 'sessions', sessions, currentSessionId: currentId });
-                    break;
-                }
-                case 'getState':
-                    this.sendStateSync(tab.id);
-                    break;
-                case 'getSkills': {
-                    const skills = tab.session.getSkills();
-                    this._postForTab(tab.id, { type: 'skills', skills });
-                    break;
-                }
-                case 'searchWorkspaceFiles': {
-                    if (!this._fileMentions.isReady) {
-                        const indexing = this._fileMentions.ensureIndexed();
-                        this._postForTab(tab.id, {
-                            type: 'workspaceFileSuggestions',
-                            requestId: msg.requestId,
-                            query: msg.query,
-                            isIndexing: true,
-                            items: [],
-                        });
-                        await indexing;
-                    }
-                    const items = await this._fileMentions.search(msg.query);
-                    this._postForTab(tab.id, {
-                        type: 'workspaceFileSuggestions',
-                        requestId: msg.requestId,
-                        query: msg.query,
-                        items,
-                    });
-                    break;
-                }
                 case 'openFile': {
                     const fileUri = vscode.Uri.file(msg.filePath);
                     try {
@@ -1751,53 +1432,9 @@ export class ChatController implements vscode.Disposable {
                         tab.diffManager.getReview(msg.filePath, msg.toolCallId),
                     );
                     break;
-                case 'undoFileChange':
-                    this._assertFileHistoryIdle(tab);
-                    await tab.diffManager.undoFileChange(msg.filePath, msg.toolCallId);
-                    this.sendStateSync(tab.id);
-                    break;
-                case 'restoreCheckpoint': {
-                    this._assertFileHistoryIdle(tab);
-                    const restored = await tab.checkpointManager.restoreCheckpoint(msg.messageIndex);
-                    tab.diffManager.suspendChangesAfter(msg.messageIndex);
-
-                    const allMsgs = tab.session.getMessages();
-                    const cutoff = this._findCutoffIndex(allMsgs, msg.messageIndex);
-                    if (cutoff >= 0 && cutoff < allMsgs.length) {
-                        tab.suspendedMessages = allMsgs.slice(cutoff);
-                        tab.session.setMessages(allMsgs.slice(0, cutoff));
-                    }
-
-                    if (restored.length > 0) {
-                        vscode.window.showInformationMessage(
-                            `Restored ${restored.length} file(s) to checkpoint.`
-                        );
-                    }
-                    this.sendStateSync(tab.id);
-                    break;
-                }
-                case 'redoCheckpoint': {
-                    this._assertFileHistoryIdle(tab);
-                    const redone = await tab.checkpointManager.redoCheckpoint();
-                    tab.diffManager.redoChanges();
-
-                    if (tab.suspendedMessages.length > 0) {
-                        const current = tab.session.getMessages();
-                        tab.session.setMessages([...current, ...tab.suspendedMessages]);
-                        tab.suspendedMessages = [];
-                    }
-
-                    if (redone.length > 0) {
-                        vscode.window.showInformationMessage(
-                            `Re-applied ${redone.length} file(s).`
-                        );
-                    }
-                    this.sendStateSync(tab.id);
-                    break;
-                }
                 case 'confirmAction': {
                     if (msg.action === 'restoreCheckpoint' || msg.action === 'redoCheckpoint') {
-                        this._assertFileHistoryIdle(tab);
+                        this._chatService.assertFileHistoryIdle(tab);
                     }
                     const answer = await vscode.window.showWarningMessage(
                         msg.message,
@@ -1807,15 +1444,6 @@ export class ChatController implements vscode.Disposable {
                     commandResult = { confirmed: answer === 'Yes' };
                     break;
                 }
-                case 'createTab':
-                    await this._createTab();
-                    break;
-                case 'closeTab':
-                    await this._closeTab(msg.tabId);
-                    break;
-                case 'switchTab':
-                    this._switchTab(msg.tabId);
-                    break;
                 case 'openSettings':
                     await vscode.commands.executeCommand('pi-code.openSettings');
                     break;
@@ -1831,6 +1459,53 @@ export class ChatController implements vscode.Disposable {
                         vscode.Uri.joinPath(this._context.extensionUri, 'CHANGELOG.md'),
                     );
                     break;
+                default: {
+                    const outcome = await this._commands.dispatch(tab, msg, {
+                        directPrompt: {
+                            decoratePrompt: (text) => decorateDirectPrompt(
+                                text,
+                                this._isPlanModeEnabledFor(tab),
+                            ),
+                            augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
+                            compact: (instructions) => tab.session.compact(instructions),
+                            prompt: (text, images, files) => tab.session.prompt(text, images, files),
+                            prepareRequest: () => this._prepareCacheForRequest(tab),
+                            logPrompt: () => this._logPromptToolState(tab, 'prompt'),
+                            publishState: () => this.sendStateSync(tab.id),
+                            reportDetachedFailure: (error) => {
+                                this._reportCommandFailure(msg.type, tab.id, error);
+                            },
+                        },
+                        streaming: {
+                            augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
+                            prepareRequest: () => this._prepareCacheForRequest(tab),
+                            logPrompt: (kind) => this._logPromptToolState(tab, kind),
+                            steer: (text, images, files) => tab.session.steer(text, images, files),
+                            followUp: (text, images, files) => tab.session.followUp(text, images, files),
+                            abort: () => tab.session.abort(),
+                        },
+                        fileMentions: this._fileMentions,
+                        getFavorites: () => [...this._favoriteModels],
+                        handleName: (text, hasAttachments, publishState) => this._handleNameCommand(
+                            tab,
+                            text,
+                            hasAttachments,
+                            publishState,
+                        ),
+                        publishState: () => this.sendStateSync(tab.id),
+                        emit: (message) => this._postForTab(tab.id, message),
+                        notifyFileHistory: (kind, fileCount) => {
+                            const text = kind === 'restore'
+                                ? `Restored ${fileCount} file(s) to checkpoint.`
+                                : `Re-applied ${fileCount} file(s).`;
+                            vscode.window.showInformationMessage(text);
+                        },
+                    });
+                    if (outcome.intent) {
+                        await this._executeCommandIntent(tab, outcome.intent);
+                    }
+                    break;
+                }
             }
             return commandResult === undefined
                 ? { ok: true }
@@ -1843,6 +1518,66 @@ export class ChatController implements vscode.Disposable {
                 sourceTabId ?? this._activeTabId,
                 err,
             );
+        }
+    }
+
+    private async _executeCommandIntent(tab: TabState, intent: ChatCommandIntent): Promise<void> {
+        switch (intent.type) {
+            case 'setCacheMode':
+                this._cacheMode = intent.mode;
+                await this._globalState.update('pi-code.cacheMode', intent.mode);
+                for (const candidate of this._tabs.values()) {
+                    candidate.cacheEffective = this._computeEffectiveCache(candidate);
+                }
+                for (const id of this._tabs.keys()) this.sendStateSync(id);
+                return;
+            case 'toggleFavorite': {
+                const key = `${intent.provider}:${intent.modelId}`;
+                if (this._favoriteModels.has(key)) this._favoriteModels.delete(key);
+                else this._favoriteModels.add(key);
+                await this._globalState.update(
+                    ChatController.FAVORITES_KEY,
+                    [...this._favoriteModels],
+                );
+                this._broadcastModels();
+                return;
+            }
+            case 'newSession': {
+                await tab.session.newSession();
+                const projectToolDefault = this._getProjectToolSelectionDefault();
+                tab.projectToolDefault = projectToolDefault;
+                this._applyPersistedToolSelection(tab);
+                this._chatService.resetSessionProjection(
+                    tab,
+                    projectToolDefault,
+                    tab.session.getMessages(),
+                );
+                this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
+                this.sendStateSync(tab.id);
+                return;
+            }
+            case 'loadSession':
+                await tab.session.loadSession(intent.sessionPath);
+                tab.projectToolDefault = undefined;
+                this._applyPersistedToolSelection(tab);
+                this._chatService.resetSessionProjection(
+                    tab,
+                    undefined,
+                    tab.session.getMessages(),
+                );
+                this._updateTabName(tab);
+                this._persistTabs();
+                this.sendStateSync(tab.id);
+                return;
+            case 'createTab':
+                await this._createTab();
+                return;
+            case 'closeTab':
+                await this._closeTab(intent.tabId);
+                return;
+            case 'switchTab':
+                this._switchTab(intent.tabId);
+                return;
         }
     }
 
@@ -1960,12 +1695,7 @@ export class ChatController implements vscode.Disposable {
     private _sweepPendingTools(tab: TabState, assistantMessage: any | undefined): void {
         if (tab.pendingTools.size === 0) return;
         const tabLabel = tab.name || tab.id;
-        const now = Date.now();
-        const entries = Array.from(tab.pendingTools.entries()).map(([id, meta]) => ({
-            id,
-            name: meta.name,
-            elapsedMs: Math.max(0, now - meta.startTime),
-        }));
+        const entries = collectOrphanedTools(tab.pendingTools, Date.now());
         for (const e of entries) {
             this._outputChannel.appendLine(
                 `[tool orphan] tab="${tabLabel}" tool=${e.name} callId=${e.id} elapsedMs=${e.elapsedMs} — tool_execution_start had no matching tool_execution_end at agent_end`,
@@ -2020,10 +1750,9 @@ export class ChatController implements vscode.Disposable {
             projectToolDefault: this._getProjectToolSelectionDefault(),
             initialTurnCounter: countUserTurns(newSession.getMessages()),
         });
-        this._tabs.register(tab);
+        this._app.register(tab, { activate: true });
         this._subscribeTab(tab);
 
-        this._tabs.activate(id);
         this._persistTabs();
         this._onLauncherStateChanged.fire();
         // Auto-open an editor panel for the new tab. After Phase 3 the
@@ -2040,8 +1769,7 @@ export class ChatController implements vscode.Disposable {
         const tab = this._tabs.get(tabId);
         if (!tab) return;
 
-        await tab.disposeResources();
-        this._tabs.remove(tabId);
+        await this._app.remove(tabId);
 
         this._persistTabs();
         this._onLauncherStateChanged.fire();
@@ -2049,11 +1777,10 @@ export class ChatController implements vscode.Disposable {
     }
 
     private _switchTab(tabId: string): void {
-        if (!this._tabs.activate(tabId)) return;
+        if (!this._app.activate(tabId, { clearNotification: true })) return;
 
         const tab = this._activeTab;
         if (!tab) return;
-        tab.hasNotification = false;
         if (tab.isStreamingLocal) {
             vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
         } else {
@@ -2111,7 +1838,7 @@ export class ChatController implements vscode.Disposable {
                 tab.name = name;
                 this._updateTabName(tab); // re-derive name from first message if needed
 
-                this._tabs.register(tab);
+                this._app.register(tab);
                 this._subscribeTab(tab);
                 restoredIds.push(id);
             } catch (err: any) {
@@ -2123,29 +1850,15 @@ export class ChatController implements vscode.Disposable {
 
         // Dispose the initial empty tab
         if (initialTab) {
-            await initialTab.disposeResources();
-            this._tabs.remove(initialTabId);
+            await this._app.remove(initialTabId);
         }
 
         // Restore active tab
         const activeIdx = Math.min(persisted.activeIndex ?? 0, restoredIds.length - 1);
-        this._tabs.activate(restoredIds[activeIdx]);
+        this._app.activate(restoredIds[activeIdx]);
 
         this._outputChannel.appendLine(`Restored ${restoredIds.length} tab(s).`);
         this.sendStateSync(this._activeTabId);
-    }
-
-    private _findCutoffIndex(messages: any[], rollbackPoint: number): number {
-        let userMsgCount = 0;
-        for (let i = 0; i < messages.length; i++) {
-            if (messages[i].role === 'user') {
-                userMsgCount++;
-                if (userMsgCount > rollbackPoint) {
-                    return i;
-                }
-            }
-        }
-        return -1;
     }
 
     dispose(): void {
@@ -2191,16 +1904,6 @@ function renderTranscriptContent(content: unknown): string {
         if (part?.type === 'text') return String(part.text ?? '');
         return `\`\`\`json\n${JSON.stringify(part, null, 2)}\n\`\`\``;
     }).join('\n\n');
-}
-
-function countUserTurns(messages: readonly unknown[]): number {
-    let count = 0;
-    for (const message of messages) {
-        if (message && typeof message === 'object' && (message as { role?: unknown }).role === 'user') {
-            count++;
-        }
-    }
-    return count;
 }
 
 function parseNameCommand(text: string): string | undefined | null {

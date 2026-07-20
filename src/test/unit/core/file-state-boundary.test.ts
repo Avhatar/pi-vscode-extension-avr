@@ -18,6 +18,9 @@ describe('portable core boundaries', () => {
                 /(?:require\s*\(|import\s*\(\s*)['"](?:vscode|electron|(?:node:)?(?:fs|fs\/promises|path|os|child_process))['"]/,
             );
             expect(source, relativePath).not.toMatch(/\b(?:vscode|electron)\./);
+            expect(source, relativePath).not.toMatch(
+                /\b(?:window|document|navigator|HTMLElement|WebSocket)\b/,
+            );
         }
     });
 });

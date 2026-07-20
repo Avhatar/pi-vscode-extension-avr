@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
+import { ChatService } from '../../../core/chat/chat-service';
 import { TabRegistry } from '../../../core/chat/tab-registry';
 import type { StateStore } from '../../../core/ports/chat-platform';
 
@@ -160,6 +161,7 @@ describe('ChatController platform ports', () => {
         const controller = Object.create(ChatController.prototype) as any;
         controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._outputChannel = { appendLine: vi.fn() };
+        controller._chatService = new ChatService({ now: () => 0 });
         controller.sendStateSync = vi.fn(() => order.push('state-sync'));
 
         await controller.handleMessage({ type: 'restoreCheckpoint', messageIndex: 0 }, 'tab-1');
@@ -207,6 +209,7 @@ describe('ChatController platform ports', () => {
         const controller = Object.create(ChatController.prototype) as any;
         controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._outputChannel = { appendLine: vi.fn() };
+        controller._chatService = new ChatService({ now: () => 0 });
         controller._postForTab = vi.fn();
         controller.sendStateSync = vi.fn();
 
@@ -256,6 +259,7 @@ describe('ChatController platform ports', () => {
         controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._outputChannel = { appendLine: vi.fn() };
         controller._applyPersistedToolSelection = vi.fn();
+        controller._chatService = new ChatService({ now: () => 0 });
         controller._updateTabName = vi.fn();
         controller._persistTabs = vi.fn();
         controller.sendStateSync = vi.fn();

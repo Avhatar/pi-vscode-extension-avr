@@ -6,6 +6,7 @@ import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { OAuthLoginFlow } from '../pi/oauth-login-flow';
 import { refreshModelRegistry } from '../pi/models';
 import { syncClaudeCodeMcpImport } from '../pi/mcp/claude-code-import';
+import type { ExternalUrlService } from '../core/ports/external-url';
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
 
@@ -21,6 +22,7 @@ export class SettingsPanel {
         panel: vscode.WebviewPanel,
         extensionUri: vscode.Uri,
         secrets: vscode.SecretStorage,
+        private readonly _externalUrls: ExternalUrlService,
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
@@ -44,7 +46,11 @@ export class SettingsPanel {
         this._disposables.push(configListener);
     }
 
-    static show(extensionUri: vscode.Uri, secrets: vscode.SecretStorage): void {
+    static show(
+        extensionUri: vscode.Uri,
+        secrets: vscode.SecretStorage,
+        externalUrls: ExternalUrlService,
+    ): void {
         if (SettingsPanel._instance) {
             SettingsPanel._instance._panel.reveal(vscode.ViewColumn.One);
             return;
@@ -61,7 +67,7 @@ export class SettingsPanel {
             },
         );
 
-        SettingsPanel._instance = new SettingsPanel(panel, extensionUri, secrets);
+        SettingsPanel._instance = new SettingsPanel(panel, extensionUri, secrets, externalUrls);
     }
 
     private async _handleMessage(msg: SettingsClientMessage): Promise<void> {
@@ -248,12 +254,7 @@ export class SettingsPanel {
     }
 
     private async _openOAuthUrl(url: string): Promise<void> {
-        const parsed = vscode.Uri.parse(url);
-        if (parsed.scheme !== 'https' && parsed.scheme !== 'http') {
-            throw new Error('Authentication links must use HTTP or HTTPS.');
-        }
-        const opened = await vscode.env.openExternal(parsed);
-        if (!opened) throw new Error('VS Code could not open the authentication link.');
+        await this._externalUrls.openHttpUrl(url);
     }
 
     private async _sendSkills(): Promise<void> {

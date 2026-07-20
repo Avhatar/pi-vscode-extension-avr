@@ -291,6 +291,86 @@ function createDirectPromptCallbacks(overrides: Record<string, unknown> = {}): a
     };
 }
 
+describe('portable ChatService session and file-history transactions', () => {
+    it('resets session projection after clearing file state and seeds persisted user turns', () => {
+        const order: string[] = [];
+        const service = new ChatService({ now: () => 0 });
+        const tab: any = {
+            diffManager: { clearAll: vi.fn(() => order.push('clear-diffs')) },
+            checkpointManager: { clearAll: vi.fn(() => order.push('clear-checkpoints')) },
+            resetSessionProjection: vi.fn(() => order.push('reset-projection')),
+        };
+        const messages = [
+            { role: 'user' },
+            { role: 'assistant' },
+            { role: 'custom' },
+            { role: 'user' },
+        ];
+
+        service.resetSessionProjection(tab, undefined, messages);
+
+        expect(order).toEqual(['clear-diffs', 'clear-checkpoints', 'reset-projection']);
+        expect(tab.resetSessionProjection).toHaveBeenCalledWith(undefined, 2);
+    });
+
+    it('restores and redoes checkpoint state in file, diff, then message order', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const order: string[] = [];
+        const messages = [{ role: 'user' }, { role: 'assistant' }];
+        const tab: any = {
+            isStreamingLocal: false,
+            isCompacting: false,
+            suspendedMessages: [],
+            checkpointManager: {
+                restoreCheckpoint: vi.fn(async () => { order.push('restore-files'); return ['a']; }),
+                redoCheckpoint: vi.fn(async () => { order.push('redo-files'); return ['a']; }),
+            },
+            diffManager: {
+                suspendChangesAfter: vi.fn(() => order.push('suspend-diffs')),
+                redoChanges: vi.fn(() => order.push('redo-diffs')),
+            },
+            session: {
+                getMessages: vi.fn(() => { order.push('get-messages'); return messages; }),
+                setMessages: vi.fn(() => order.push('set-messages')),
+            },
+        };
+
+        await expect(service.restoreCheckpoint(tab, 0)).resolves.toEqual(['a']);
+        expect(order).toEqual(['restore-files', 'suspend-diffs', 'get-messages', 'set-messages']);
+        expect(tab.suspendedMessages).toEqual(messages);
+
+        order.length = 0;
+        await expect(service.redoCheckpoint(tab)).resolves.toEqual(['a']);
+        expect(order).toEqual(['redo-files', 'redo-diffs', 'get-messages', 'set-messages']);
+        expect(tab.suspendedMessages).toEqual([]);
+    });
+
+    it('rejects file-history transactions while the tab is busy', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab: any = {
+            isStreamingLocal: true,
+            isCompacting: false,
+            checkpointManager: {
+                restoreCheckpoint: vi.fn(),
+                redoCheckpoint: vi.fn(),
+            },
+            diffManager: {
+                suspendChangesAfter: vi.fn(),
+                redoChanges: vi.fn(),
+            },
+            session: { getMessages: vi.fn(), setMessages: vi.fn() },
+            suspendedMessages: [],
+        };
+
+        await expect(service.restoreCheckpoint(tab, 0))
+            .rejects.toThrow('Wait for the agent to finish before undoing or redoing file changes.');
+        await expect(service.redoCheckpoint(tab))
+            .rejects.toThrow('Wait for the agent to finish before undoing or redoing file changes.');
+        expect(tab.checkpointManager.restoreCheckpoint).not.toHaveBeenCalled();
+        expect(tab.checkpointManager.redoCheckpoint).not.toHaveBeenCalled();
+    });
+});
+
 describe('portable ChatService direct prompt lifecycle', () => {
     it('starts a direct prompt in order and returns without awaiting the model turn', async () => {
         const service = new ChatService({ now: () => 0 });

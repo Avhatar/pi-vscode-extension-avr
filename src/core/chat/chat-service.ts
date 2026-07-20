@@ -9,6 +9,7 @@ import type {
     SerializedAgentState,
     TabInfo,
 } from '../../shared/agent-protocol';
+import type { ProjectToolSelectionDefault } from '../../shared/project-tool-default';
 import type { TurnCompletionInfo, TurnCompletionOutcome } from '../../shared/turn-notification';
 import { safeSerialize } from '../../shared/safe-serialize';
 import {
@@ -107,6 +108,34 @@ export interface StreamingCommandCallbacks {
     steer(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void>;
     followUp(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void>;
     abort(): Promise<void>;
+}
+
+export interface SessionProjectionResetTarget {
+    readonly diffManager: { clearAll(): void };
+    readonly checkpointManager: { clearAll(): void };
+    resetSessionProjection(
+        projectToolDefault?: ProjectToolSelectionDefault,
+        initialTurnCounter?: number,
+    ): void;
+}
+
+export interface FileHistoryTarget {
+    readonly isStreamingLocal: boolean;
+    readonly isCompacting: boolean;
+    suspendedMessages: any[];
+    readonly session: {
+        getMessages(): any[];
+        setMessages(messages: any[]): void;
+    };
+    readonly diffManager: {
+        undoFileChange(filePath: string, toolCallId: string): Promise<void>;
+        suspendChangesAfter(messageIndex: number): void;
+        redoChanges(): void;
+    };
+    readonly checkpointManager: {
+        restoreCheckpoint(messageIndex: number): Promise<string[]>;
+        redoCheckpoint(): Promise<string[]>;
+    };
 }
 
 export interface QueuedDispatchCallbacks {
@@ -256,6 +285,59 @@ export class ChatService {
 
     settleAgent(tab: ChatServiceTab): TurnCompletionInfo | undefined {
         return tab.turnNotificationGate.onAgentSettled();
+    }
+
+    resetSessionProjection(
+        tab: SessionProjectionResetTarget,
+        projectToolDefault: ProjectToolSelectionDefault | undefined,
+        messages: readonly unknown[] = [],
+    ): void {
+        tab.diffManager.clearAll();
+        tab.checkpointManager.clearAll();
+        tab.resetSessionProjection(projectToolDefault, countUserTurns(messages));
+    }
+
+    async undoFileChange(
+        tab: FileHistoryTarget,
+        filePath: string,
+        toolCallId: string,
+    ): Promise<void> {
+        this.assertFileHistoryIdle(tab);
+        await tab.diffManager.undoFileChange(filePath, toolCallId);
+    }
+
+    async restoreCheckpoint(
+        tab: FileHistoryTarget,
+        messageIndex: number,
+    ): Promise<string[]> {
+        this.assertFileHistoryIdle(tab);
+        const restored = await tab.checkpointManager.restoreCheckpoint(messageIndex);
+        tab.diffManager.suspendChangesAfter(messageIndex);
+        const messages = tab.session.getMessages();
+        const cutoff = findMessageCutoff(messages, messageIndex);
+        if (cutoff >= 0 && cutoff < messages.length) {
+            tab.suspendedMessages = messages.slice(cutoff);
+            tab.session.setMessages(messages.slice(0, cutoff));
+        }
+        return restored;
+    }
+
+    async redoCheckpoint(tab: FileHistoryTarget): Promise<string[]> {
+        this.assertFileHistoryIdle(tab);
+        const redone = await tab.checkpointManager.redoCheckpoint();
+        tab.diffManager.redoChanges();
+        if (tab.suspendedMessages.length > 0) {
+            const messages = tab.session.getMessages();
+            tab.session.setMessages([...messages, ...tab.suspendedMessages]);
+            tab.suspendedMessages = [];
+        }
+        return redone;
+    }
+
+    assertFileHistoryIdle(tab: Pick<FileHistoryTarget, 'isStreamingLocal' | 'isCompacting'>): void {
+        if (tab.isStreamingLocal || tab.isCompacting) {
+            throw new Error('Wait for the agent to finish before undoing or redoing file changes.');
+        }
     }
 
     async dispatchDirectPrompt(
@@ -582,6 +664,27 @@ export function parseCompactCommand(text: string): string | undefined | null {
         return instructions || undefined;
     }
     return null;
+}
+
+export function countUserTurns(messages: readonly unknown[]): number {
+    let count = 0;
+    for (const message of messages) {
+        if (message && typeof message === 'object'
+            && (message as { role?: unknown }).role === 'user') {
+            count++;
+        }
+    }
+    return count;
+}
+
+function findMessageCutoff(messages: readonly any[], rollbackPoint: number): number {
+    let userMessageCount = 0;
+    for (let index = 0; index < messages.length; index++) {
+        if (messages[index]?.role !== 'user') continue;
+        userMessageCount++;
+        if (userMessageCount > rollbackPoint) return index;
+    }
+    return -1;
 }
 
 function lastAssistantOrdinal(messages: any[]): number {

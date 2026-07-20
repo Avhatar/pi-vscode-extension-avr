@@ -297,6 +297,7 @@ describe('ChatController command dispatch results', () => {
         const tab = createPromptTab({});
         const controller = Object.create(ChatController.prototype) as any;
         controller._tabs = createTabRegistry([tab], 'tab-1');
+        controller._chatService = new ChatService({ now: () => 0 });
         controller._postForTab = vi.fn();
         controller._outputChannel = { appendLine: vi.fn() };
 
