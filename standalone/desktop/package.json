@@ -13,12 +13,16 @@
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
-    "desktop": "npm run build && node scripts/launch-electron.mjs"
+    "desktop": "npm run build && npm run verify:bundle && node scripts/launch-electron.mjs",
+    "verify:bundle": "node scripts/verify-desktop-bundle.mjs",
+    "package:portable": "npm test && npm run typecheck && npm run build && npm run verify:bundle && electron-builder --win portable --x64",
+    "smoke:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-portable.ps1"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.80.6",
-    "@earendil-works/pi-ai": "^0.80.6",
-    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-agent-core": "0.80.6",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-tui": "0.80.6",
     "minimatch": "^10.2.5",
     "pi-mcp-adapter": "^2.11.0",
     "pi-web-access": "^0.13.0",
@@ -28,8 +32,33 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0"
+  },
+  "build": {
+    "appId": "works.earendil.pi.code.desktop",
+    "productName": "Pi Code Desktop",
+    "asar": true,
+    "compression": "normal",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Pi-Code-Desktop-Portable-${version}.${ext}"
+    }
   }
 }

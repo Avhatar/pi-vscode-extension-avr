@@ -17,6 +17,7 @@ await Promise.all([
     format: 'esm',
     platform: 'node',
     target: 'node22',
+    packages: 'external',
     external: [
       'electron',
       '@earendil-works/pi-agent-core',
