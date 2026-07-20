@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     DESKTOP_AGENT_EVENT_CHANNEL,
     DESKTOP_AGENT_REQUEST_CHANNEL,
+    DESKTOP_SHELL_EVENT_CHANNEL,
+    DESKTOP_SHELL_REQUEST_CHANNEL,
 } from '../src/ipc-contract';
 import { createDesktopPreloadApi } from '../src/preload-api';
 
@@ -17,7 +19,9 @@ describe('desktop preload API', () => {
         };
         const api = createDesktopPreloadApi(ipc, 'document-1');
         const eventListener = vi.fn();
+        const shellListener = vi.fn();
         const unsubscribe = api.subscribe(eventListener);
+        const unsubscribeShell = api.subscribeShell(shellListener);
 
         await expect(api.request({ requestId: 'request-1' })).resolves.toEqual({ ok: true });
         expect(ipc.invoke).toHaveBeenCalledWith(
@@ -27,12 +31,40 @@ describe('desktop preload API', () => {
                 request: { requestId: 'request-1' },
             },
         );
+        await api.getLaunchState();
+        await api.selectWorkspace();
+        await api.openWorkspace('C:/workspace');
+        await api.newWindow();
+        expect(ipc.invoke).toHaveBeenCalledWith(DESKTOP_SHELL_REQUEST_CHANNEL, {
+            documentId: 'document-1',
+            request: { type: 'getLaunchState' },
+        });
+        expect(ipc.invoke).toHaveBeenCalledWith(DESKTOP_SHELL_REQUEST_CHANNEL, {
+            documentId: 'document-1',
+            request: { type: 'selectWorkspace' },
+        });
+        expect(ipc.invoke).toHaveBeenCalledWith(DESKTOP_SHELL_REQUEST_CHANNEL, {
+            documentId: 'document-1',
+            request: { type: 'openWorkspace', workspacePath: 'C:/workspace' },
+        });
+        expect(ipc.invoke).toHaveBeenCalledWith(DESKTOP_SHELL_REQUEST_CHANNEL, {
+            documentId: 'document-1',
+            request: { type: 'newWindow' },
+        });
+
         listeners.get(DESKTOP_AGENT_EVENT_CHANNEL)?.({}, { type: 'event' });
+        listeners.get(DESKTOP_SHELL_EVENT_CHANNEL)?.({}, { phase: 'welcome' });
         expect(eventListener).toHaveBeenCalledWith({ type: 'event' });
+        expect(shellListener).toHaveBeenCalledWith({ phase: 'welcome' });
 
         unsubscribe();
+        unsubscribeShell();
         expect(ipc.removeListener).toHaveBeenCalledWith(
             DESKTOP_AGENT_EVENT_CHANNEL,
+            expect.any(Function),
+        );
+        expect(ipc.removeListener).toHaveBeenCalledWith(
+            DESKTOP_SHELL_EVENT_CHANNEL,
             expect.any(Function),
         );
     });

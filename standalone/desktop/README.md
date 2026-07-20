@@ -2,7 +2,7 @@
 
 Production Electron host for the standalone Pi Code client. It composes the same portable chat backend used by the VS Code extension and communicates with a sandboxed browser renderer through validated Electron IPC.
 
-The current renderer is a transport shell for Phase 4 validation. It confirms that the shared agent host starts and reconnects, but it does not yet expose the functional chat interface planned for Phase 5.
+The current renderer is a transport shell for Phase 4 validation. It opens on an in-application workspace welcome screen, starts the shared Agent Host only after trust approval, and confirms that the host connects and recovers. It does not yet expose the functional chat interface planned for Phase 5.
 
 ## Requirements
 
@@ -18,13 +18,15 @@ npm install
 npm run desktop
 ```
 
-Select a workspace in the native dialog, or pass it explicitly:
+Use **Open Workspace** in the application welcome screen, or pass a suggested workspace explicitly:
 
 ```powershell
 npm run desktop -- --cwd "X:\Projects\example"
 ```
 
 Add `--devtools` to open detached Chromium developer tools.
+
+Every launch creates an independent OS process with one workspace window. Launch the executable again, or use **New Window**, to work on another project without sharing a failure boundary. Each workspace window will contain multiple isolated chat tabs when the functional renderer is enabled.
 
 `npm run desktop` always rebuilds the desktop bundles before launch.
 
@@ -48,4 +50,5 @@ The executable is portable and does not install the application. It is not code-
 - The renderer has Node integration disabled, context isolation enabled, and sandbox mode enabled.
 - Preload exposes only the fixed validated agent request and event channels.
 - Renderer reload requests a new state snapshot and does not replay prompts or tools.
+- Each desktop process has process-local Electron session/cache data; shared app state uses cross-process-serialized writes.
 - Project `standalone/**` sources and dependencies are excluded from the Pi Code VSIX.

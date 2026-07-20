@@ -1,7 +1,12 @@
 import {
     DESKTOP_AGENT_EVENT_CHANNEL,
     DESKTOP_AGENT_REQUEST_CHANNEL,
+    DESKTOP_SHELL_EVENT_CHANNEL,
+    DESKTOP_SHELL_REQUEST_CHANNEL,
     type DesktopPreloadApi,
+    type DesktopShellRequest,
+    type DesktopShellResponse,
+    type DesktopShellState,
 } from './ipc-contract';
 
 export interface IpcRendererPort {
@@ -14,6 +19,12 @@ export function createDesktopPreloadApi(
     ipc: IpcRendererPort,
     documentId = createDocumentId(),
 ): DesktopPreloadApi {
+    const invokeShell = (request: DesktopShellRequest): Promise<DesktopShellResponse> => {
+        return ipc.invoke(
+            DESKTOP_SHELL_REQUEST_CHANNEL,
+            { documentId, request },
+        ) as Promise<DesktopShellResponse>;
+    };
     return Object.freeze({
         request: (value: unknown) => ipc.invoke(DESKTOP_AGENT_REQUEST_CHANNEL, {
             documentId,
@@ -23,6 +34,20 @@ export function createDesktopPreloadApi(
             const onEvent = (_event: unknown, value: unknown): void => listener(value);
             ipc.on(DESKTOP_AGENT_EVENT_CHANNEL, onEvent);
             return () => ipc.removeListener(DESKTOP_AGENT_EVENT_CHANNEL, onEvent);
+        },
+        getLaunchState: () => invokeShell({ type: 'getLaunchState' }),
+        selectWorkspace: () => invokeShell({ type: 'selectWorkspace' }),
+        openWorkspace: (workspacePath: string) => invokeShell({
+            type: 'openWorkspace',
+            workspacePath,
+        }),
+        newWindow: () => invokeShell({ type: 'newWindow' }),
+        subscribeShell: (listener: (state: DesktopShellState) => void) => {
+            const onEvent = (_event: unknown, value: unknown): void => {
+                listener(value as DesktopShellState);
+            };
+            ipc.on(DESKTOP_SHELL_EVENT_CHANNEL, onEvent);
+            return () => ipc.removeListener(DESKTOP_SHELL_EVENT_CHANNEL, onEvent);
         },
     });
 }

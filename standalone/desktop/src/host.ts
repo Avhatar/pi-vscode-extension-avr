@@ -627,9 +627,17 @@ export async function createProductionDesktopHost(
     const logger = new NodeLogger(options.log);
     const stateRoot = path.join(options.appDataRoot, 'state');
     const workspaceKey = createHash('sha256').update(workspaceRoot).digest('hex');
+    const stateLocks = new NodeSessionLock({
+        applicationId: 'pi-code-desktop-state',
+        staleAfterMs: 0,
+    });
+    const stateStoreOptions = { lock: stateLocks } as const;
     const [workspaceState, globalState] = await Promise.all([
-        JsonStateStore.open(path.join(stateRoot, 'workspaces', `${workspaceKey}.json`)),
-        JsonStateStore.open(path.join(stateRoot, 'global.json')),
+        JsonStateStore.open(
+            path.join(stateRoot, 'workspaces', `${workspaceKey}.json`),
+            stateStoreOptions,
+        ),
+        JsonStateStore.open(path.join(stateRoot, 'global.json'), stateStoreOptions),
     ]);
     const fileMentions = new NodeFileMentions({ workspaceRoot, logger });
     const fileState = new NodeWorkspaceFileState({

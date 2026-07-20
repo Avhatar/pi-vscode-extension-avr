@@ -4,6 +4,8 @@ import {
 } from '../../../src/shared/agent-connection-client';
 import type { DesktopPreloadApi } from './ipc-contract';
 
+type DesktopAgentBridge = Pick<DesktopPreloadApi, 'request' | 'subscribe'>;
+
 export type DesktopAgentConnectionOptions = Pick<
     AgentConnectionClientOptions,
     'clientId' | 'tabId' | 'requestTimeoutMs'
@@ -11,7 +13,7 @@ export type DesktopAgentConnectionOptions = Pick<
 
 /** Renderer-side connection over the narrow preload bridge. */
 export class DesktopAgentConnection extends AgentConnectionClient {
-    constructor(api: DesktopPreloadApi, options: DesktopAgentConnectionOptions = {}) {
+    constructor(api: DesktopAgentBridge, options: DesktopAgentConnectionOptions = {}) {
         super({
             send: (value) => api.request(value),
             subscribe: (listener) => api.subscribe(listener),

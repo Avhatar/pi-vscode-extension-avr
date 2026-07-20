@@ -14,6 +14,9 @@ if (main.includes('Dynamic require of "')) {
 if (/\/\/ .*node_modules\//.test(main)) {
     failures.push('main.js bundles CommonJS dependencies instead of loading packaged production dependencies');
 }
+if (main.includes('requestSingleInstanceLock')) {
+    failures.push('main.js still redirects independent launches through Electron single-instance locking');
+}
 
 const coordinatedPiPackages = [
     '@earendil-works/pi-agent-core',
