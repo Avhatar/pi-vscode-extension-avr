@@ -177,12 +177,57 @@ describe('ChatController command dispatch results', () => {
             { type: 'queueMessage', text: '/name Streaming rename' },
             'tab-1',
         )).resolves.toEqual({ ok: true });
+        await expect(controller.handleMessage(
+            { type: 'steer', text: '/name Steered rename' },
+            'tab-1',
+        )).resolves.toEqual({ ok: true });
+        await expect(controller.handleMessage(
+            { type: 'followUp', text: '/name\t Spaced\n rename' },
+            'tab-1',
+        )).resolves.toEqual({ ok: true });
+        await expect(controller.handleMessage(
+            { type: 'prompt', text: `/name ${'x'.repeat(70)}` },
+            'tab-1',
+        )).resolves.toEqual({ ok: true });
 
         expect(setSessionName).toHaveBeenNthCalledWith(1, 'Authentication cleanup');
         expect(setSessionName).toHaveBeenNthCalledWith(2, 'Streaming rename');
+        expect(setSessionName).toHaveBeenNthCalledWith(3, 'Steered rename');
+        expect(setSessionName).toHaveBeenNthCalledWith(4, 'Spaced rename');
+        expect(setSessionName).toHaveBeenNthCalledWith(5, 'x'.repeat(60));
         expect(prompt).not.toHaveBeenCalled();
         expect(tab.queuedMessages).toEqual([]);
         expect(tab.turnCounter).toBe(0);
+    });
+
+    it('rejects attachments on the local /name command instead of discarding them', async () => {
+        const setSessionName = vi.fn();
+        const prompt = vi.fn(async () => undefined);
+        const postForTab = vi.fn();
+        const tab = createPromptTab({ setSessionName, prompt });
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = createTabRegistry([tab], 'tab-1');
+        controller._updateTabName = vi.fn();
+        controller.sendStateSync = vi.fn();
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._postForTab = postForTab;
+
+        await expect(controller.handleMessage({
+            type: 'prompt',
+            text: '/name Attached rename',
+            files: [{ type: 'file', data: 'x', mimeType: 'text/plain', name: 'x.txt', size: 1 }],
+        }, 'tab-1')).resolves.toEqual({
+            ok: false,
+            code: 'command_failed',
+            message: 'The /name command cannot include attachments. Remove attachments and try again.',
+        });
+
+        expect(setSessionName).not.toHaveBeenCalled();
+        expect(prompt).not.toHaveBeenCalled();
+        expect(postForTab).toHaveBeenCalledWith('tab-1', {
+            type: 'error',
+            message: 'The /name command cannot include attachments. Remove attachments and try again.',
+        });
     });
 
     it('applies queue controls through the service and publishes every command', async () => {
@@ -246,6 +291,19 @@ describe('ChatController command dispatch results', () => {
             'tab-1',
         )).resolves.toEqual({ ok: true });
         expect(prompt).toHaveBeenCalledOnce();
+    });
+
+    it('returns confirmation through the correlated command result without a one-shot event', async () => {
+        const tab = createPromptTab({});
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = createTabRegistry([tab], 'tab-1');
+        controller._postForTab = vi.fn();
+        controller._outputChannel = { appendLine: vi.fn() };
+
+        await expect(controller.handleMessage({
+            type: 'confirmAction', action: 'restoreCheckpoint', message: 'Confirm?', payload: { messageIndex: 1 },
+        }, 'tab-1')).resolves.toEqual({ ok: true, result: { confirmed: false } });
+        expect(controller._postForTab).not.toHaveBeenCalled();
     });
 
     it('unsubscribes tabs without disposing tab or host-owned resources on controller shutdown', () => {

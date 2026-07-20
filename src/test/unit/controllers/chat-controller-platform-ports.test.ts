@@ -184,6 +184,90 @@ describe('ChatController platform ports', () => {
         expect(tab.suspendedMessages).toEqual([]);
     });
 
+    it('rejects file rollback and redo while the owning agent is still running', async () => {
+        const tab: any = {
+            id: 'tab-1',
+            isStreamingLocal: true,
+            isCompacting: false,
+            checkpointManager: {
+                restoreCheckpoint: vi.fn(async () => []),
+                redoCheckpoint: vi.fn(async () => []),
+            },
+            diffManager: {
+                undoFileChange: vi.fn(async () => undefined),
+                suspendChangesAfter: vi.fn(),
+                redoChanges: vi.fn(),
+            },
+            session: {
+                getMessages: vi.fn(() => []),
+                setMessages: vi.fn(),
+            },
+            suspendedMessages: [],
+        };
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = createTabRegistry([tab], 'tab-1');
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._postForTab = vi.fn();
+        controller.sendStateSync = vi.fn();
+
+        const requests = [
+            { type: 'undoFileChange', filePath: 'src/main.ts', toolCallId: 'tool-1' },
+            { type: 'restoreCheckpoint', messageIndex: 0 },
+            { type: 'redoCheckpoint' },
+            {
+                type: 'confirmAction',
+                action: 'restoreCheckpoint',
+                message: 'Undo changes from the last turn?',
+                payload: { messageIndex: 0 },
+            },
+        ] as const;
+        for (const request of requests) {
+            await expect(controller.handleMessage(request, 'tab-1')).resolves.toMatchObject({
+                ok: false,
+                code: 'command_failed',
+                message: 'Wait for the agent to finish before undoing or redoing file changes.',
+            });
+        }
+
+        expect(tab.diffManager.undoFileChange).not.toHaveBeenCalled();
+        expect(tab.checkpointManager.restoreCheckpoint).not.toHaveBeenCalled();
+        expect(tab.checkpointManager.redoCheckpoint).not.toHaveBeenCalled();
+        expect(controller.sendStateSync).not.toHaveBeenCalled();
+    });
+
+    it('aligns a loaded session checkpoint counter with its persisted user-turn count', async () => {
+        const resetSessionProjection = vi.fn();
+        const tab: any = {
+            id: 'tab-1',
+            session: {
+                loadSession: vi.fn(async () => undefined),
+                getMessages: vi.fn(() => [
+                    { role: 'user', content: 'first' },
+                    { role: 'assistant', content: 'reply' },
+                    { role: 'custom', customType: 'metadata' },
+                    { role: 'user', content: 'second' },
+                ]),
+            },
+            diffManager: { clearAll: vi.fn() },
+            checkpointManager: { clearAll: vi.fn() },
+            resetSessionProjection,
+        };
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = createTabRegistry([tab], 'tab-1');
+        controller._outputChannel = { appendLine: vi.fn() };
+        controller._applyPersistedToolSelection = vi.fn();
+        controller._updateTabName = vi.fn();
+        controller._persistTabs = vi.fn();
+        controller.sendStateSync = vi.fn();
+
+        await expect(controller.handleMessage({
+            type: 'loadSession',
+            sessionPath: '/sessions/restored.jsonl',
+        }, 'tab-1')).resolves.toEqual({ ok: true });
+
+        expect(resetSessionProjection).toHaveBeenCalledWith(undefined, 2);
+    });
+
     it('routes cold workspace-file searches through the injected file-mentions port', async () => {
         let finishIndexing!: () => void;
         const indexing = new Promise<void>((resolve) => { finishIndexing = resolve; });

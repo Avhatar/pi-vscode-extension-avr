@@ -19,6 +19,7 @@ export type {
     FileChangeInfo,
     ImageAttachment,
     ModelInfo,
+    PendingToolInfo,
     SerializedAgentState,
     SessionInfo,
     SkillInfo,

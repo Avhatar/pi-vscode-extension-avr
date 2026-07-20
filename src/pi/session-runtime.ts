@@ -107,8 +107,17 @@ export class PiSessionRuntime {
     private _install<State extends PiSessionRuntimeState>(state: State): State {
         this._state = state;
         this._sessionDisposed = false;
-        this._unbind = this._bindSession(state.session);
-        return state;
+        try {
+            this._unbind = this._bindSession(state.session);
+            return state;
+        } catch (error) {
+            try {
+                this._invalidateCurrent();
+            } catch {
+                // Preserve the binding failure while still attempting complete cleanup.
+            }
+            throw error;
+        }
     }
 
     private _invalidateCurrent(): void {
@@ -119,6 +128,7 @@ export class PiSessionRuntime {
 
         const unbind = this._unbind;
         this._unbind = undefined;
+        this._state = undefined;
         let firstError: unknown;
         try {
             unbind?.();

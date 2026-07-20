@@ -96,6 +96,62 @@ describe('PiSessionManager session replacement', () => {
         expect(creationOptions).not.toHaveProperty('tools');
         expectReplacementLifecycle(harness, false);
     });
+
+    it('waits for activation and defaults before disposing a replacement', async () => {
+        const harness = await createReplacementHarness();
+        activeManager = harness.manager;
+        let releaseActivation!: () => void;
+        let markActivationStarted!: () => void;
+        const activationGate = new Promise<void>((resolve) => { releaseActivation = resolve; });
+        const activationStarted = new Promise<void>((resolve) => { markActivationStarted = resolve; });
+        (harness.manager as any)._activateSessionRuntime = vi.fn(async () => {
+            harness.order.push('replacement-activation:start');
+            markActivationStarted();
+            await activationGate;
+            harness.order.push('replacement-activation:end');
+        });
+
+        const switching = harness.manager.newSession();
+        await activationStarted;
+        const disposing = harness.manager.dispose();
+        activeManager = undefined;
+        releaseActivation();
+        await switching;
+        await disposing;
+
+        expectLifecycleOrder(harness.order, [
+            'replacement-activation:start',
+            'replacement-activation:end',
+            'replacement-defaults:apply',
+            'replacement:dispose',
+        ]);
+        expect(harness.manager.isReady).toBe(false);
+    });
+
+    it('cleans local emitters and routing even when runtime teardown rejects', async () => {
+        const manager = new PiSessionManager({ appendLine: vi.fn() } as any) as any;
+        const stateChangedDispose = vi.spyOn(manager._onSubagentStateChanged, 'dispose');
+        const mutationDispose = vi.spyOn(manager._onSubagentMutation, 'dispose');
+        const notificationDispose = vi.spyOn(manager._onSubagentNotification, 'dispose');
+        const clearEvents = vi.spyOn(manager.events, 'clear');
+        const dispose = vi.fn(() => { throw new Error('session dispose failed'); });
+        await manager._runtime.start(async () => ({
+            session: {
+                sessionId: 'failing-session',
+                subscribe: () => () => undefined,
+                dispose,
+            },
+            sessionManager: { getSessionFile: () => undefined },
+        }));
+
+        await expect(manager.dispose()).rejects.toThrow('session dispose failed');
+
+        expect(stateChangedDispose).toHaveBeenCalledOnce();
+        expect(mutationDispose).toHaveBeenCalledOnce();
+        expect(notificationDispose).toHaveBeenCalledOnce();
+        expect(clearEvents).toHaveBeenCalledOnce();
+        expect(dispose).toHaveBeenCalledOnce();
+    });
 });
 
 interface ReplacementHarness {

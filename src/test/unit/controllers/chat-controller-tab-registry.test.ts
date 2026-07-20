@@ -25,6 +25,20 @@ describe('ChatController tab registry integration', () => {
         expect(controller._onLauncherStateChanged.fire).toHaveBeenCalledOnce();
     });
 
+    it('rejects panel registration for an unknown tab without emitting host effects', () => {
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = createRegistry([]);
+        controller._openPanels = new Map();
+        controller._persistTabs = vi.fn();
+        controller._onLauncherStateChanged = { fire: vi.fn() };
+
+        expect(() => controller.registerPanel('missing', { reveal: vi.fn() }))
+            .toThrow('Cannot register a panel for unknown tab: missing');
+        expect(controller._openPanels.size).toBe(0);
+        expect(controller._persistTabs).not.toHaveBeenCalled();
+        expect(controller._onLauncherStateChanged.fire).not.toHaveBeenCalled();
+    });
+
     it('disposes a panel and runtime before removing an active launcher tab', async () => {
         const order: string[] = [];
         const first = { id: 'tab-a', disposeResources: vi.fn(async () => undefined) };
@@ -77,6 +91,11 @@ describe('ChatController tab registry integration', () => {
         const existing = { id: 'tab-existing' };
         const session = {
             initializeFromPath: vi.fn(async (path: string) => order.push(`initialize:${path}`)),
+            getMessages: vi.fn(() => [
+                { role: 'user', content: 'first' },
+                { role: 'assistant', content: 'reply' },
+                { role: 'user', content: 'second' },
+            ]),
         };
         const controller = Object.create(ChatController.prototype) as any;
         controller._tabs = createRegistry([existing], existing.id);
@@ -98,6 +117,7 @@ describe('ChatController tab registry integration', () => {
             'persist',
         ]);
         expect(controller._tabs.get(restoredId)?.session).toBe(session);
+        expect(controller._tabs.get(restoredId)?.turnCounter).toBe(2);
         expect(controller.activeTabId).toBe(existing.id);
     });
 });

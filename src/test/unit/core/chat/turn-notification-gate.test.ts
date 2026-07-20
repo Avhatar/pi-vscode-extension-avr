@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { TurnNotificationGate } from '../../../notifications/turn-notification-gate';
-import type { TurnCompletionInfo } from '../../../shared/turn-notification';
+import { TurnNotificationGate } from '../../../../core/chat/turn-notification-gate';
+import type { TurnCompletionInfo } from '../../../../shared/turn-notification';
 
 function completion(outcome: TurnCompletionInfo['outcome'] = 'completed'): TurnCompletionInfo {
     return { tabName: 'Task', outcome, durationMs: 1_000 };

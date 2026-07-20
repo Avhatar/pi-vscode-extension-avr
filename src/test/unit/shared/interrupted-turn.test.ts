@@ -63,4 +63,12 @@ describe('hasIncompleteTurnTail', () => {
             { role: 'assistant', content: [{ type: 'text', text: 'Provider failed' }], stopReason: 'error' },
         ])).toBe(false);
     });
+
+    it.each(['aborted', 'error'])('treats a %s assistant tool-call tail as terminal', (stopReason) => {
+        expect(hasIncompleteTurnTail([{
+            role: 'assistant',
+            content: [{ type: 'toolCall', id: 'tool-1', name: 'edit' }],
+            stopReason,
+        }])).toBe(false);
+    });
 });

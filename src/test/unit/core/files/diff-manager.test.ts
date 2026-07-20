@@ -78,6 +78,20 @@ describe('portable DiffManager', () => {
         expect(diffs.fileChanges).toEqual([]);
     });
 
+    it('does not delete an existing file when its pre-edit baseline is unreadable', async () => {
+        files.files.set('/workspace/locked.txt', 'protected');
+        files.failedReads.add('/workspace/locked.txt');
+        checkpoints.startTurn(1);
+        diffs.setCurrentTurn(1);
+
+        emitStart('locked-edit', 'edit', { file_path: 'locked.txt' });
+        await checkpoints.restoreCheckpoint(0);
+
+        expect(files.files.get('/workspace/locked.txt')).toBe('protected');
+        expect(files.deleteCalls).not.toContain('/workspace/locked.txt');
+        expect(diffs.fileChanges).toEqual([]);
+    });
+
     it('preserves the legacy tilde-resolution difference between diff and checkpoint state', () => {
         files.files.set('/home', 'home baseline');
         checkpoints.startTurn(1);

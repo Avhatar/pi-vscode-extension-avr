@@ -79,6 +79,8 @@ describe('chat protocol runtime validation', () => {
             },
             { type: 'setModel', provider: 'provider' },
             { type: 'restoreCheckpoint', messageIndex: '3' },
+            { type: 'editQueuedMessage', index: 0.5, text: 'fractional' },
+            { type: 'removeQueuedMessage', index: -1 },
             { type: 'setCacheMode', mode: 'forever' },
             { type: 'abort', unexpected: true },
         ];
@@ -138,20 +140,23 @@ describe('chat protocol runtime validation', () => {
     });
 
     it('assigns monotonically increasing event sequence numbers per connection', () => {
-        const sequencer = new AgentEventSequencer('client-1');
+        const sequencer = new AgentEventSequencer('client-1', 'epoch-1');
         const first = sequencer.create({ type: 'error', message: 'first' }, 'tab-1');
         const second = sequencer.create({ type: 'error', message: 'second' }, 'tab-1');
-        const otherConnection = new AgentEventSequencer('client-2');
+        const otherConnection = new AgentEventSequencer('client-2', 'epoch-2');
         const otherFirst = otherConnection.create({ type: 'error', message: 'other' });
 
         expect([first.sequence, second.sequence]).toEqual([1, 2]);
         expect(otherFirst.sequence).toBe(1);
         expect(isAgentEventEnvelope(first)).toBe(true);
+        const { epoch: _epoch, ...withoutEpoch } = first;
+        expect(isAgentEventEnvelope(withoutEpoch)).toBe(false);
         expect(isAgentEventEnvelope({ ...first, sequence: 0 })).toBe(false);
         expect(isAgentEventEnvelope({ ...first, type: 'unknown' })).toBe(false);
         expect(first).toMatchObject({
             protocolVersion: AGENT_PROTOCOL_VERSION,
             clientId: 'client-1',
+            epoch: 'epoch-1',
             tabId: 'tab-1',
             type: 'error',
             payload: { message: 'first' },

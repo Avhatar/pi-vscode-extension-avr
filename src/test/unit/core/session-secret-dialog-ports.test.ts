@@ -70,6 +70,6 @@ describe('portable session secret and dialog ports', () => {
         expect(showWarning).toHaveBeenCalledWith(
             'No models available. Check your Pi configuration.',
         );
-        manager.dispose();
+        await manager.dispose();
     });
 });

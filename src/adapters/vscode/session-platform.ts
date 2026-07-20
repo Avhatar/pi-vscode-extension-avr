@@ -1,14 +1,16 @@
 import * as vscode from 'vscode';
-import type {
-    ModelSelection,
-    ModelSelectionOption,
-    SecretStore,
-    SessionDialogPort,
-    SessionResourcePaths,
-    SessionRuntimePorts,
-    SessionSettingValues,
-    SessionSettingsPort,
-    SessionWorkspacePort,
+import {
+    DEFAULT_SESSION_RUNTIME_PORTS,
+    type ModelSelection,
+    type ModelSelectionOption,
+    type SecretStore,
+    type SessionCodexUsagePort,
+    type SessionDialogPort,
+    type SessionResourcePaths,
+    type SessionRuntimePorts,
+    type SessionSettingValues,
+    type SessionSettingsPort,
+    type SessionWorkspacePort,
 } from '../../core/ports/session-platform';
 
 type WorkspaceSource = Pick<
@@ -100,11 +102,13 @@ export class VsCodeSessionDialogs implements SessionDialogPort {
 
 export function createVsCodeSessionRuntimePorts(
     resources?: SessionResourcePaths,
+    codexUsage: SessionCodexUsagePort = DEFAULT_SESSION_RUNTIME_PORTS.codexUsage,
 ): SessionRuntimePorts {
     return {
         workspace: new VsCodeWorkspacePort(),
         settings: new VsCodeSessionSettings(),
         dialogs: new VsCodeSessionDialogs(),
         resources: resources ?? { bundledPiPackagePaths: [] },
+        codexUsage,
     };
 }

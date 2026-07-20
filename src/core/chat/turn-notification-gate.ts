@@ -1,4 +1,4 @@
-import type { TurnCompletionInfo } from '../shared/turn-notification';
+import type { TurnCompletionInfo } from '../../shared/turn-notification';
 
 /**
  * Tracks whether a parent session run was started by an explicit user task.

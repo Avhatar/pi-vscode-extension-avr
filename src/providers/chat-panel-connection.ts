@@ -96,7 +96,7 @@ export class ChatPanelConnection {
         if (this.closed || this.clientId !== requestClientId) return;
 
         if (result.ok) {
-            this.postMessage(createSuccessResponse(value));
+            this.postMessage(createSuccessResponse(value, result.result));
         } else {
             this.postMessage(createErrorResponse(value, result.code, result.message));
         }

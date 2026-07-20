@@ -1,5 +1,6 @@
 import type {
     FileStatePort,
+    FileTextSnapshot,
     FileWriteOptions,
     WorkspacePathResolution,
 } from '../../core/ports/file-state';
@@ -26,6 +27,14 @@ export class InMemoryFileState implements FileStatePort {
         }
         if (filePath.startsWith('/')) return filePath;
         return `/workspace/${filePath}`;
+    }
+
+    captureText(absolutePath: string): FileTextSnapshot {
+        if (this.failedReads.has(absolutePath)) {
+            return { kind: 'unreadable', error: new Error(`Cannot read ${absolutePath}`) };
+        }
+        if (!this.files.has(absolutePath)) return { kind: 'missing' };
+        return { kind: 'present', content: this.files.get(absolutePath)! };
     }
 
     readText(absolutePath: string): string {

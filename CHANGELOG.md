@@ -18,8 +18,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Moved direct prompt and compaction lifecycle into the portable chat service while preserving Plan Mode, attachments, and immediate acknowledgement.
 - Moved steering, follow-up, and stop dispatch into the portable chat service without changing attachment, acknowledgement, or active-turn behavior.
 - Moved chat-tab membership and active-tab selection into a portable registry without changing panel, session-restoration, or close behavior.
+- Removed VS Code coupling from session auth events, Codex response monitoring, and per-tab completion state so alternative hosts can compose those capabilities.
 
 ### Fixed
+- Reopening an actively running chat from History now reconstructs in-flight tool cards, including their original start time and arguments, instead of showing only a generic preparing indicator while the tool continues in the background.
+- Undo and Redo now restore changes in reopened sessions by aligning checkpoint numbering with persisted user turns; after Undo removes the final active file change, the File Undo View remains visible with Redo available; and both controls are visibly disabled and rejected while an agent is streaming or compacting to prevent active writes from racing restoration.
+- Confirmation actions now return through correlated transport responses, so event-gap recovery cannot lose Undo or Redo decisions.
+- Queued prompts rejected before starting now retry once without looping, empty queues avoid redundant state refreshes, edited local rename commands stay local, and fractional queue indices are rejected.
+- The `/name` command now behaves consistently for direct, queued, steer, and follow-up input, normalizes explicit names, caps them at 60 characters, and rejects attachments before clearing the draft.
+- Session replacement and shutdown now serialize activation and cleanup, never report a disposed failed replacement as ready, and finish local teardown even when one disposer fails.
+- File rollback and redo no longer risk deleting an existing unreadable file by mistaking a baseline read failure for a missing file, and file tracking normalizes resolved path segments before using them as identities.
+- Chat panels now accept restarted host event streams, isolate failing event consumers, and retry transient initial-state handshake failures before leaving models or skills uninitialized.
+- Native confirmation dialogs now wait for the user, while session history and workspace searches use a longer bounded request timeout instead of failing after 30 seconds.
+- Restored chats no longer show a false interrupted-turn warning after completed error or aborted turns, and live state updates remain valid while streaming or compacting.
 - Plan Mode instructions no longer appear in user chat bubbles when a file is attached.
 - Queued messages now start after the active agent fully settles instead of being dropped while the SDK still considers the previous run busy.
 

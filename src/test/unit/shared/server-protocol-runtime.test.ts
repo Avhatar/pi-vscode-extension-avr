@@ -19,6 +19,12 @@ const serverMessages: ServerMessage[] = [
             streamingMessage: { role: 'assistant', content: [] },
             errorMessage: 'recoverable',
             tools: ['read'],
+            pendingTools: [{
+                toolCallId: 'tool-running',
+                toolName: 'bash',
+                startTime: 123,
+                args: { command: 'sleep 80' },
+            }],
             sessionId: 'session-1',
             sessionName: 'Session',
             sessionPath: '/sessions/session-1.jsonl',
@@ -87,7 +93,6 @@ const serverMessages: ServerMessage[] = [
             turnIndex: 1,
         },
     },
-    { type: 'confirmResult', action: 'restoreCheckpoint', confirmed: true, payload: 3 },
     {
         type: 'skills',
         skills: [{
@@ -131,6 +136,7 @@ function eventEnvelope(type: string, payload: Record<string, unknown>) {
     return {
         protocolVersion: AGENT_PROTOCOL_VERSION,
         clientId: 'client-1',
+        epoch: 'epoch-1',
         sequence: 1,
         tabId: 'tab-1',
         type,
@@ -142,7 +148,7 @@ describe('server protocol runtime validation', () => {
     it('accepts every current server message payload through an event envelope', () => {
         const sequencer = new AgentEventSequencer('client-1');
 
-        expect(serverMessages).toHaveLength(14);
+        expect(serverMessages).toHaveLength(13);
         for (const message of serverMessages) {
             expect(isAgentEventEnvelope(sequencer.create(message, 'tab-1')), message.type).toBe(true);
         }

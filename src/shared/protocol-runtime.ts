@@ -94,10 +94,13 @@ export const ClientMessageSchema = Type.Union([
     Type.Object({ type: Type.Literal('queueMessage'), text: Type.String() }, StrictObject),
     Type.Object({
         type: Type.Literal('editQueuedMessage'),
-        index: Type.Number(),
+        index: Type.Integer({ minimum: 0 }),
         text: Type.String(),
     }, StrictObject),
-    Type.Object({ type: Type.Literal('removeQueuedMessage'), index: Type.Number() }, StrictObject),
+    Type.Object({
+        type: Type.Literal('removeQueuedMessage'),
+        index: Type.Integer({ minimum: 0 }),
+    }, StrictObject),
     Type.Object({ type: Type.Literal('cancelQueue') }, StrictObject),
     Type.Object({ type: Type.Literal('setCacheMode'), mode: CacheModeSchema }, StrictObject),
 ]);
@@ -163,6 +166,12 @@ const TabInfoSchema = Type.Object({
     isStreaming: Type.Boolean(),
     hasNotification: Type.Boolean(),
 }, StrictObject);
+const PendingToolInfoSchema = Type.Object({
+    toolCallId: Type.String(),
+    toolName: Type.String(),
+    startTime: Type.Number(),
+    args: Type.Optional(Type.Unknown()),
+}, StrictObject);
 const SerializedAgentStateSchema = Type.Object({
     messages: Type.Array(Type.Unknown()),
     model: Type.Optional(ModelInfoSchema),
@@ -172,6 +181,7 @@ const SerializedAgentStateSchema = Type.Object({
     streamingMessage: Type.Optional(Type.Unknown()),
     errorMessage: Type.Optional(Type.String()),
     tools: Type.Array(Type.String()),
+    pendingTools: Type.Optional(Type.Array(PendingToolInfoSchema)),
     sessionId: Type.Optional(Type.String()),
     sessionName: Type.Optional(Type.String()),
     sessionPath: Type.Optional(Type.String()),
@@ -273,12 +283,6 @@ export const ServerMessageSchema = Type.Union([
     }, StrictObject),
     Type.Object({ type: Type.Literal('sessionChanged'), sessionId: Type.String() }, StrictObject),
     Type.Object({ type: Type.Literal('fileChange'), change: FileChangeInfoSchema }, StrictObject),
-    Type.Object({
-        type: Type.Literal('confirmResult'),
-        action: Type.String(),
-        confirmed: Type.Boolean(),
-        payload: Type.Optional(Type.Unknown()),
-    }, StrictObject),
     Type.Object({ type: Type.Literal('skills'), skills: Type.Array(SkillInfoSchema) }, StrictObject),
     Type.Object({
         type: Type.Literal('workspaceFileSuggestions'),
@@ -308,7 +312,6 @@ const ServerMessageTypeSchema = Type.Union([
     Type.Literal('sessions'),
     Type.Literal('sessionChanged'),
     Type.Literal('fileChange'),
-    Type.Literal('confirmResult'),
     Type.Literal('skills'),
     Type.Literal('workspaceFileSuggestions'),
     Type.Literal('codexUsage'),
@@ -320,6 +323,7 @@ const ServerMessageTypeSchema = Type.Union([
 export const AgentEventEnvelopeSchema = Type.Object({
     protocolVersion: Type.Literal(AGENT_PROTOCOL_VERSION),
     clientId: NonEmptyString,
+    epoch: NonEmptyString,
     sequence: Type.Integer({ minimum: 1 }),
     tabId: Type.Optional(NonEmptyString),
     type: ServerMessageTypeSchema,

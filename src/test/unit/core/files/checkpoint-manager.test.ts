@@ -54,6 +54,21 @@ describe('portable CheckpointManager', () => {
         expect(files.writeCalls.at(-1)?.options).toEqual({ createParentDirectories: true });
     });
 
+    it('does not turn an unreadable redo snapshot into a file deletion', async () => {
+        files.files.set('/workspace/locked.txt', 'before');
+        checkpoints.startTurn(1);
+        checkpoints.recordFileState('locked.txt', 'before');
+        files.files.set('/workspace/locked.txt', 'after');
+        files.failedReads.add('/workspace/locked.txt');
+
+        await checkpoints.restoreCheckpoint(0);
+        expect(files.files.get('/workspace/locked.txt')).toBe('before');
+
+        await expect(checkpoints.redoCheckpoint()).resolves.toEqual([]);
+        expect(files.files.get('/workspace/locked.txt')).toBe('before');
+        expect(files.deleteCalls).not.toContain('/workspace/locked.txt');
+    });
+
     it('ignores captures before a turn and keeps best-effort failure results', async () => {
         checkpoints.recordFileState('ignored.txt', 'before');
         expect(checkpoints.getCheckpointTurns()).toEqual([]);

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChatService } from '../../../../core/chat/chat-service';
 import { TabRuntime } from '../../../../core/chat/tab-runtime';
 import type { CodexTurnUsage, SerializedAgentState, TabInfo } from '../../../../shared/agent-protocol';
+import { isServerMessage } from '../../../../shared/protocol-runtime';
 
 class FakeSession {
     readonly markTurnStarted = vi.fn();
@@ -72,6 +73,11 @@ describe('portable ChatService event and state projection', () => {
         tab.thinkingStartTime = 123;
         tab.streamingThinkingDuration = 4;
         tab.queuedMessages = ['next'];
+        tab.pendingTools.set('tool-1', {
+            name: 'bash',
+            startTime: 321,
+            args: { command: 'sleep 80' },
+        });
         tab.messageMeta.set(0, {
             thinkingDurationSec: 4,
             messageEndTime: 456,
@@ -115,6 +121,12 @@ describe('portable ChatService event and state projection', () => {
             cacheMode: 'auto',
             cacheEffective: 'long',
             fileUndoViewEnabled: true,
+            pendingTools: [{
+                toolCallId: 'tool-1',
+                toolName: 'bash',
+                startTime: 321,
+                args: { command: 'sleep 80' },
+            }],
         });
         expect(state.messages).toHaveLength(3);
         expect(state.messages[1]).toMatchObject({
@@ -129,6 +141,40 @@ describe('portable ChatService event and state projection', () => {
             _codexTurnUsage: { capturedAt: 800 },
         });
         expect(tab.cacheEffective).toBe('long');
+    });
+
+    it('removes a stale interrupted marker after projecting live streaming state', () => {
+        const service = new ChatService({ now: () => 1000 });
+        const tab = createTab();
+        vi.spyOn(tab.session, 'serializeState').mockImplementation(() => ({
+            messages: [],
+            isStreaming: false,
+            tools: [],
+            interruptedTurn: { reason: 'incomplete_session_tail' },
+        }));
+        const context = {
+            activeTabId: 'tab-1',
+            getTabs: () => [] as TabInfo[],
+            cacheMode: 'auto' as const,
+            getCacheEffective: () => 'short' as const,
+            getFileUndoViewEnabled: () => false,
+        };
+
+        tab.isStreamingLocal = true;
+        let state = service.buildState(tab, context);
+        expect(state).not.toHaveProperty('interruptedTurn');
+        expect(isServerMessage({ type: 'stateSync', state })).toBe(true);
+
+        tab.isStreamingLocal = false;
+        tab.isCompacting = true;
+        state = service.buildState(tab, context);
+        expect(state).not.toHaveProperty('interruptedTurn');
+        expect(isServerMessage({ type: 'stateSync', state })).toBe(true);
+
+        tab.isCompacting = false;
+        state = service.buildState(tab, context);
+        expect(state).toHaveProperty('interruptedTurn');
+        expect(isServerMessage({ type: 'stateSync', state })).toBe(true);
     });
 
     it('reduces streaming events with a deterministic clock and resets buffers at message end', () => {
@@ -192,6 +238,7 @@ describe('portable ChatService event and state projection', () => {
         tab.streamingText = 'done';
         tab.streamingThinking = 'thought';
         tab.isThinking = true;
+        tab.pendingTools.set('stale-tool', { name: 'bash', startTime: 2000 });
 
         const end = service.beginAgentEnd(tab, 'completed');
         const codexTurn: CodexTurnUsage = {
@@ -207,6 +254,7 @@ describe('portable ChatService event and state projection', () => {
             totalTurnDurationMs: 6000,
         });
         expect(tab.isStreamingLocal).toBe(false);
+        expect(tab.pendingTools.size).toBe(0);
         expect(tab.lastTurnEndAt).toBe(7000);
         expect(service.settleAgent(tab)).toEqual({
             tabName: 'Portable chat',
@@ -510,6 +558,8 @@ function createQueueCallbacks(overrides: Record<string, unknown> = {}): any {
         compact: vi.fn(async () => undefined),
         prompt: vi.fn(async (_text: string, onAgentStart: () => void) => onAgentStart()),
         isSessionStreaming: vi.fn(() => false),
+        handleLocalCommand: vi.fn(() => false),
+        scheduleRetry: vi.fn(),
         prepareRequest: vi.fn(),
         logQueuedPrompt: vi.fn(),
         publishState: vi.fn(),
@@ -547,6 +597,15 @@ describe('portable ChatService queue orchestration', () => {
             type: 'removeQueuedMessage',
             index: 4,
         })).toEqual({ changed: false, queueLength: 1 });
+        expect(service.applyQueueControl(tab, {
+            type: 'editQueuedMessage',
+            index: 0.5,
+            text: 'fractional',
+        })).toEqual({ changed: false, queueLength: 1 });
+        expect(service.applyQueueControl(tab, {
+            type: 'removeQueuedMessage',
+            index: 0.5,
+        })).toEqual({ changed: false, queueLength: 1 });
 
         service.applyQueueControl(tab, { type: 'queueMessage', text: 'second' });
         expect(service.applyQueueControl(tab, {
@@ -578,6 +637,20 @@ describe('portable ChatService queue orchestration', () => {
         expect(service.reserveQueuedDispatch(tab)).toBe(true);
         expect(tab.isStreamingLocal).toBe(true);
         expect(tab.queuedMessages).toEqual(['next']);
+    });
+
+    it('leaves an empty dispatch side-effect free', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        tab.queuedMessages = [];
+        tab.isStreamingLocal = false;
+        const callbacks = createQueueCallbacks();
+
+        await service.dispatchNextQueued(tab, callbacks);
+
+        expect(tab.isStreamingLocal).toBe(false);
+        expect(callbacks.publishState).not.toHaveBeenCalled();
+        expect(callbacks.prompt).not.toHaveBeenCalled();
     });
 
     it('prepares and starts one queued prompt in the existing operation order', async () => {
@@ -660,6 +733,45 @@ describe('portable ChatService queue orchestration', () => {
         await vi.waitFor(() => expect(afterCallbacks.reportError).toHaveBeenCalledWith(afterError));
         expect(afterStart.queuedMessages).toEqual([]);
         expect(afterStart.isStreamingLocal).toBe(true);
+    });
+
+    it('schedules only one automatic retry for a head rejected before agent_start', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        tab.queuedMessages = ['retry once'];
+        let scheduledRetry: (() => Promise<void>) | undefined;
+        const callbacks = createQueueCallbacks({
+            prompt: vi.fn(async () => { throw new Error('preflight rejected'); }),
+            scheduleRetry: vi.fn((retry: () => Promise<void>) => { scheduledRetry = retry; }),
+        });
+
+        service.reserveQueuedDispatch(tab);
+        await service.dispatchNextQueued(tab, callbacks);
+        await vi.waitFor(() => expect(scheduledRetry).toBeDefined());
+        await scheduledRetry!();
+        await vi.waitFor(() => expect(callbacks.prompt).toHaveBeenCalledTimes(2));
+
+        expect(callbacks.scheduleRetry).toHaveBeenCalledOnce();
+        expect(tab.queuedMessages).toEqual(['retry once']);
+        expect(tab.isStreamingLocal).toBe(false);
+    });
+
+    it('consumes an edited queued local command without contacting the model', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        tab.queuedMessages = ['/name Edited queue'];
+        const callbacks = createQueueCallbacks({
+            handleLocalCommand: vi.fn(() => true),
+        });
+
+        service.reserveQueuedDispatch(tab);
+        await service.dispatchNextQueued(tab, callbacks);
+
+        expect(callbacks.handleLocalCommand).toHaveBeenCalledWith('/name Edited queue');
+        expect(callbacks.augmentPrompt).not.toHaveBeenCalled();
+        expect(callbacks.prompt).not.toHaveBeenCalled();
+        expect(tab.queuedMessages).toEqual([]);
+        expect(tab.isStreamingLocal).toBe(false);
     });
 
     it('completes queued compaction before reserving and dispatching the next head', async () => {

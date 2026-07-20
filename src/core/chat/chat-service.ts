@@ -114,6 +114,8 @@ export interface QueuedDispatchCallbacks {
     compact(instructions?: string): Promise<void>;
     prompt(text: string, onAgentStart: () => void): Promise<void>;
     isSessionStreaming(): boolean;
+    handleLocalCommand(text: string): boolean;
+    scheduleRetry(retry: () => Promise<void>): void;
     prepareRequest(): void;
     logQueuedPrompt(): void;
     publishState(): void;
@@ -152,6 +154,7 @@ export class ChatService {
             tab.pendingTools.set(String(event.toolCallId), {
                 name: String(event.toolName ?? '?'),
                 startTime: this._now(),
+                ...(event.args === undefined ? {} : { args: safeSerialize(event.args) }),
             });
         }
 
@@ -247,6 +250,7 @@ export class ChatService {
         tab.streamingThinkingDuration = 0;
         tab.agentStartTime = 0;
         tab.isStreamingLocal = false;
+        tab.pendingTools.clear();
         tab.lastTurnEndAt = projection.turnEndAt;
     }
 
@@ -287,7 +291,7 @@ export class ChatService {
         void this._runUserPrompt(
             tab,
             () => callbacks.prompt(augmentedPrompt, request.images, request.files),
-        ).catch(callbacks.reportDetachedFailure);
+        ).catch((error) => callbacks.reportDetachedFailure(error));
         return { kind: 'prompt_dispatched' };
     }
 
@@ -322,7 +326,8 @@ export class ChatService {
                 break;
             case 'editQueuedMessage': {
                 const trimmed = command.text.trim();
-                if (command.index >= 0
+                if (Number.isInteger(command.index)
+                    && command.index >= 0
                     && command.index < tab.queuedMessages.length
                     && trimmed) {
                     tab.queuedMessages[command.index] = trimmed;
@@ -331,7 +336,9 @@ export class ChatService {
                 break;
             }
             case 'removeQueuedMessage':
-                if (command.index >= 0 && command.index < tab.queuedMessages.length) {
+                if (Number.isInteger(command.index)
+                    && command.index >= 0
+                    && command.index < tab.queuedMessages.length) {
                     tab.queuedMessages.splice(command.index, 1);
                     changed = true;
                 }
@@ -340,6 +347,10 @@ export class ChatService {
                 changed = tab.queuedMessages.length > 0;
                 tab.queuedMessages = [];
                 break;
+        }
+        if (changed && tab.queuedRetryHead !== tab.queuedMessages[0]) {
+            tab.queuedRetryHead = undefined;
+            tab.queuedRetryAttempts = 0;
         }
         return { changed, queueLength: tab.queuedMessages.length };
     }
@@ -355,15 +366,34 @@ export class ChatService {
         callbacks: QueuedDispatchCallbacks,
     ): Promise<void> {
         const text = tab.queuedMessages[0];
-        if (text === undefined) {
+        if (text === undefined) return;
+        if (tab.queuedRetryHead !== text) {
+            tab.queuedRetryHead = text;
+            tab.queuedRetryAttempts = 0;
+        }
+
+        let handledLocally: boolean;
+        try {
+            handledLocally = callbacks.handleLocalCommand(text);
+        } catch (error) {
+            tab.isStreamingLocal = false;
+            callbacks.reportError(error);
+            callbacks.publishState();
+            return;
+        }
+        if (handledLocally) {
+            tab.queuedMessages.shift();
+            this._clearQueuedRetry(tab);
             tab.isStreamingLocal = false;
             callbacks.publishState();
+            await this._dispatchFollowingQueuedHead(tab, callbacks);
             return;
         }
 
         const compactInstructions = parseCompactCommand(text);
         if (compactInstructions !== null) {
             tab.queuedMessages.shift();
+            this._clearQueuedRetry(tab);
             callbacks.prepareRequest();
             try {
                 await callbacks.compact(compactInstructions);
@@ -373,11 +403,7 @@ export class ChatService {
                 tab.isStreamingLocal = false;
                 callbacks.publishState();
             }
-            if (tab.queuedMessages.length > 0 && !callbacks.isSessionStreaming()) {
-                this.reserveQueuedDispatch(tab);
-                callbacks.publishState();
-                await this.dispatchNextQueued(tab, callbacks);
-            }
+            await this._dispatchFollowingQueuedHead(tab, callbacks);
             return;
         }
 
@@ -413,17 +439,45 @@ export class ChatService {
         callbacks.publishState();
 
         let agentStarted = false;
-        void callbacks.prompt(queuedPrompt, () => {
-            agentStarted = true;
-        }).catch((error) => {
+        void this._runUserPrompt(
+            tab,
+            () => callbacks.prompt(queuedPrompt, () => {
+                agentStarted = true;
+                this._clearQueuedRetry(tab);
+            }),
+        ).catch((error) => {
             if (!agentStarted) tab.queuedMessages.unshift(text);
             callbacks.reportError(error);
         }).finally(() => {
             if (!agentStarted && !callbacks.isSessionStreaming()) {
                 tab.isStreamingLocal = false;
                 callbacks.publishState();
+                if (tab.queuedMessages[0] === text && tab.queuedRetryAttempts < 1) {
+                    tab.queuedRetryAttempts++;
+                    callbacks.scheduleRetry(async () => {
+                        if (tab.queuedMessages[0] !== text || callbacks.isSessionStreaming()) return;
+                        if (!this.reserveQueuedDispatch(tab)) return;
+                        callbacks.publishState();
+                        await this.dispatchNextQueued(tab, callbacks);
+                    });
+                }
             }
         });
+    }
+
+    private async _dispatchFollowingQueuedHead(
+        tab: ChatServiceTab,
+        callbacks: QueuedDispatchCallbacks,
+    ): Promise<void> {
+        if (tab.queuedMessages.length === 0 || callbacks.isSessionStreaming()) return;
+        this.reserveQueuedDispatch(tab);
+        callbacks.publishState();
+        await this.dispatchNextQueued(tab, callbacks);
+    }
+
+    private _clearQueuedRetry(tab: ChatServiceTab): void {
+        tab.queuedRetryHead = undefined;
+        tab.queuedRetryAttempts = 0;
     }
 
     private async _runUserPrompt(
@@ -469,6 +523,7 @@ export class ChatService {
         const state = tab.session.serializeState();
         state.isStreaming = tab.isStreamingLocal;
         state.isCompacting = tab.isCompacting;
+        if (state.isStreaming || state.isCompacting) delete state.interruptedTurn;
         if (tab.suspendedMessages.length > 0) {
             state.messages = [
                 ...state.messages,
@@ -491,6 +546,12 @@ export class ChatService {
         state.cacheEffective = cacheEffective;
         tab.cacheEffective = cacheEffective;
         state.fileUndoViewEnabled = context.getFileUndoViewEnabled();
+        state.pendingTools = [...tab.pendingTools.entries()].map(([toolCallId, tool]) => ({
+            toolCallId,
+            toolName: tool.name,
+            startTime: tool.startTime,
+            ...(tool.args === undefined ? {} : { args: safeSerialize(tool.args) }),
+        }));
 
         let assistantOrdinal = 0;
         for (const message of state.messages) {

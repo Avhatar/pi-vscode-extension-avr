@@ -1,13 +1,15 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion, PendingToolInfo } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage';
 import { shouldDisplayChatMessage } from '../shared/message-visibility';
 import {
     VsCodeAgentConnection,
+    requestInitialAgentState,
     type MessageEventSource,
 } from './vscode-agent-connection';
 import { mergeStateMessages } from './interrupted-turn-notice';
+import { shouldShowFileUndoView } from './file-undo-view';
 import { prepareUserMessageContent } from './user-message-content';
 
 declare function acquireVsCodeApi(): {
@@ -39,14 +41,28 @@ const connection = new VsCodeAgentConnection(
 
 function send(message: ClientMessage): void {
     void connection.request(message).then((response) => {
+        if (response.ok) {
+            if (
+                message.type === 'confirmAction'
+                && isConfirmActionResponse(response.result)
+            ) {
+                handleConfirmResult(message.action, response.result.confirmed, message.payload);
+            }
+            return;
+        }
         if (
-            !response.ok
-            && response.error.code !== 'command_failed'
+            response.error.code !== 'command_failed'
             && response.error.code !== 'transport_closed'
         ) {
             handleMessage({ type: 'error', message: response.error.message });
         }
     });
+}
+
+function isConfirmActionResponse(value: unknown): value is { confirmed: boolean } {
+    return Boolean(value)
+        && typeof value === 'object'
+        && typeof (value as { confirmed?: unknown }).confirmed === 'boolean';
 }
 
 const vscode = {
@@ -162,6 +178,7 @@ const state: {
     model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
     thinkingLevel?: string;
     tools: string[];
+    pendingTools: PendingToolInfo[];
     sessionId?: string;
     sessionName?: string;
     streamingText: string;
@@ -190,6 +207,7 @@ const state: {
     isStreaming: false,
     isCompacting: false,
     tools: [],
+    pendingTools: [],
     streamingText: '',
     streamingThinking: '',
     isThinking: false,
@@ -286,9 +304,6 @@ function handleMessage(msg: ServerMessage): void {
             renderChangedFilesBar();
             renderInlineFileChange(msg.change);
             break;
-        case 'confirmResult':
-            handleConfirmResult(msg.action, msg.confirmed, msg.payload);
-            break;
         case 'skills':
             state.skills = msg.skills;
             break;
@@ -358,6 +373,7 @@ function applyStateSync(s: SerializedAgentState): void {
     state.model = s.model;
     state.thinkingLevel = s.thinkingLevel;
     state.tools = s.tools ?? [];
+    state.pendingTools = s.pendingTools ?? [];
     state.sessionId = s.sessionId;
     state.sessionName = s.sessionName;
     state.contextUsage = s.contextUsage;
@@ -452,6 +468,7 @@ function handleAgentEvent(event: any): void {
             state.streamingText = '';
             state.streamingThinking = '';
             state.isThinking = false;
+            state.pendingTools = [];
             updateInputArea();
             updateStreamingUI();
             showPreparingPlaceholder();
@@ -461,6 +478,7 @@ function handleAgentEvent(event: any): void {
             state.streamingText = '';
             state.streamingThinking = '';
             state.isThinking = false;
+            state.pendingTools = [];
             if (userHasScrolled) {
                 const messages = document.getElementById('messages');
                 pendingPinnedScrollTop = messages?.scrollTop ?? null;
@@ -488,12 +506,24 @@ function handleAgentEvent(event: any): void {
             break;
         case 'tool_execution_start':
             removePreparingPlaceholder();
+            state.pendingTools = [
+                ...state.pendingTools.filter((tool) => tool.toolCallId !== String(event.toolCallId)),
+                {
+                    toolCallId: String(event.toolCallId),
+                    toolName: String(event.toolName ?? '?'),
+                    startTime: Date.now(),
+                    ...(event.args === undefined ? {} : { args: event.args }),
+                },
+            ];
             renderToolStart(event);
             break;
         case 'tool_execution_update':
             renderToolUpdate(event);
             break;
         case 'tool_execution_end':
+            state.pendingTools = state.pendingTools.filter(
+                (tool) => tool.toolCallId !== String(event.toolCallId),
+            );
             renderToolEnd(event);
             showPreparingPlaceholder();
             break;
@@ -643,8 +673,14 @@ function render(): void {
     // Populate all dynamic sections
     updateTabs();
     updateMessages();
+    updateStreamingUI();
     updateInputArea();
     updateChangedFiles();
+    if (state.isCompacting) {
+        showPreparingPlaceholder('Compacting...');
+    } else if (state.isStreaming) {
+        ensurePreparingPlaceholder();
+    }
     scrollToBottom();
 }
 
@@ -754,7 +790,11 @@ function updateMessages(): void {
             if (role === 'user' && dimming && !redoPlaced && rollbackUserIdx !== null) {
                 const redoWrap = el('div', 'redo-anchor');
                 const redoBtn = el('button', 'redo-btn');
-                redoBtn.title = 'Redo changes';
+                const fileHistoryBusy = state.isStreaming || state.isCompacting;
+                redoBtn.title = fileHistoryBusy
+                    ? 'Wait for the agent to finish before redoing changes'
+                    : 'Redo changes';
+                redoBtn.disabled = fileHistoryBusy;
                 redoBtn.textContent = 'Redo';
                 redoWrap.appendChild(redoBtn);
                 container.insertBefore(redoWrap, streamingEl);
@@ -1713,15 +1753,20 @@ function buildChangedFilesSection(): HTMLElement {
 
     const summary = document.createElement('summary');
     summary.className = 'changed-files-summary';
+    const fileHistoryBusy = state.isStreaming || state.isCompacting;
+    const countLabel = count === 0 && state.rollbackPoint !== null
+        ? 'Changes undone'
+        : `${count} File${count !== 1 ? 's' : ''}`;
+    const disabledAttribute = fileHistoryBusy ? ' disabled aria-disabled="true"' : '';
     const undoRedoBtn = state.rollbackPoint !== null
-        ? `<button class="changed-files-link" id="btn-redo" title="Redo changes">Redo</button>`
-        : `<button class="changed-files-link" id="btn-undo" title="Undo last change">Undo</button>`;
+        ? `<button class="changed-files-link" id="btn-redo" title="${fileHistoryBusy ? 'Wait for the agent to finish before redoing changes' : 'Redo changes'}"${disabledAttribute}>Redo</button>`
+        : `<button class="changed-files-link" id="btn-undo" title="${fileHistoryBusy ? 'Wait for the agent to finish before undoing changes' : 'Undo last change'}"${disabledAttribute}>Undo</button>`;
     summary.innerHTML = `
         <span class="changed-files-arrow">&#9656;</span>
-        <span class="changed-files-count">${count} File${count !== 1 ? 's' : ''}</span>
+        <span class="changed-files-count">${countLabel}</span>
         <span class="changed-files-spacer"></span>
         ${undoRedoBtn}
-        <button class="changed-files-review-btn" id="btn-review-all" title="Review all changes">Review</button>
+        <button class="changed-files-review-btn" id="btn-review-all" title="${count === 0 ? 'No active changes to review' : 'Review all changes'}"${count === 0 ? ' disabled aria-disabled="true"' : ''}>Review</button>
     `;
     details.appendChild(summary);
 
@@ -1755,15 +1800,14 @@ function updateChangedFiles(): void {
     const existing = document.getElementById('changed-files-bar') as HTMLDetailsElement | null;
     const wasOpen = existing?.open ?? false;
 
-    // The bar is opt-in per chat (toggle lives in the launcher sidebar
-    // under "File Undo View"). Always remove an existing bar when the
-    // feature is off so flipping the toggle hides it immediately.
-    if (!state.fileUndoViewEnabled) {
-        existing?.remove();
-        return;
-    }
-
-    if (state.fileChanges.length === 0) {
+    // Keep the view mounted after Undo even when all active changes moved
+    // into suspended history: its Redo action is then the only file-history
+    // control above the input.
+    if (!shouldShowFileUndoView(
+        state.fileUndoViewEnabled,
+        state.fileChanges.length,
+        state.rollbackPoint,
+    )) {
         existing?.remove();
         return;
     }
@@ -2079,7 +2123,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
         }
 
         const wrapper = el('div', `message message-${role}`);
-        if (turnNumber !== undefined && !state.isStreaming) {
+        if (turnNumber !== undefined && !state.isStreaming && !state.isCompacting) {
             const checkpointBtn = el('button', 'checkpoint-btn');
             checkpointBtn.title = 'Restore to this checkpoint';
             checkpointBtn.dataset.turn = String(turnNumber);
@@ -3264,7 +3308,7 @@ function renderToolStart(event: any): void {
         card.id = `tool-${event.toolCallId}`;
         card.dataset.toolName = event.toolName;
         card.dataset.filepath = editFilePath as string;
-        card.dataset.startedAt = String(Date.now());
+        card.dataset.startedAt = String(event.startedAt ?? Date.now());
         const fileName = (editFilePath as string).split('/').pop() ?? editFilePath;
         const actionLabel = event.toolName === 'write' ? 'Write' : 'Edit';
         card.innerHTML = `
@@ -3302,7 +3346,7 @@ function renderToolStart(event: any): void {
         details.dataset.foldoutKey = toolFoldoutKey(event.toolCallId);
         details.dataset.toolIo = 'true';
         details.dataset.toolInput = input;
-        details.dataset.startedAt = String(Date.now());
+        details.dataset.startedAt = String(event.startedAt ?? Date.now());
         insertIntoStreamingContainer(details);
         bindDetailsFoldoutState(container);
         ensureToolTimerLoop();
@@ -3313,7 +3357,7 @@ function renderToolStart(event: any): void {
     const card = el('div', `tool-card${isRead ? ' tool-clickable' : ''}`);
     card.id = `tool-${event.toolCallId}`;
     card.dataset.toolName = event.toolName;
-    card.dataset.startedAt = String(Date.now());
+    card.dataset.startedAt = String(event.startedAt ?? Date.now());
     if (isRead && filePath) card.dataset.filepath = filePath;
 
     card.innerHTML = `
@@ -3784,6 +3828,19 @@ function looksLikeAuthError(message: string): boolean {
     );
 }
 
+function renderPendingTools(): void {
+    if (!state.isStreaming) return;
+    for (const tool of state.pendingTools) {
+        if (document.getElementById(`tool-${tool.toolCallId}`)) continue;
+        renderToolStart({
+            toolCallId: tool.toolCallId,
+            toolName: tool.toolName,
+            args: tool.args,
+            startedAt: tool.startTime,
+        });
+    }
+}
+
 function updateStreamingUI(): void {
     const container = document.getElementById('streaming-message');
     if (!container) return;
@@ -3799,6 +3856,7 @@ function updateStreamingUI(): void {
         if (child !== draft) container.removeChild(child);
     });
     ensureAnswerDraft();
+    renderPendingTools();
     renderStreamingContent();
 }
 
@@ -4444,6 +4502,10 @@ function sendMessage(): void {
         runSlashAction(slashAction);
         return;
     }
+    if (isNameSlashCommand(typedText) && (images?.length || files?.length)) {
+        showError('The /name command cannot include attachments. Remove attachments and try again.');
+        return;
+    }
     if (isCompactSlashCommand(typedText) && (images?.length || files?.length)) {
         showError('Slash commands cannot include attachments. Remove attachments before running /compact.');
         return;
@@ -4835,6 +4897,11 @@ function escAttr(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+function isNameSlashCommand(text: string): boolean {
+    const trimmed = text.trim();
+    return trimmed === '/name' || /^\/name\s/.test(trimmed);
+}
+
 function isCompactSlashCommand(text: string): boolean {
     const trimmed = text.trim();
     return trimmed === '/compact' || trimmed.startsWith('/compact ');
@@ -5177,7 +5244,7 @@ function bindScrollListener(): void {
 render();
 
 async function initializeAgentConnection(): Promise<void> {
-    const response = await connection.request({ type: 'getState' });
+    const response = await requestInitialAgentState(connection);
     if (!response.ok) {
         if (response.error.code !== 'transport_closed') {
             handleMessage({ type: 'error', message: response.error.message });

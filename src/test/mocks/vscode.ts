@@ -77,6 +77,9 @@ export const window = {
     async showTextDocument(document: unknown): Promise<unknown> {
         return document;
     },
+    async showWarningMessage(): Promise<undefined> {
+        return undefined;
+    },
 };
 
 export class EventEmitter<T> {

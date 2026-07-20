@@ -38,6 +38,24 @@ describe('ChatPanelConnection', () => {
         ]);
     });
 
+    it('returns command results on the correlated response instead of relying on a one-shot event', async () => {
+        const posted: any[] = [];
+        const dispatch = vi.fn(async () => ({ ok: true, result: { confirmed: true } } as any));
+        const connection = new ChatPanelConnection('tab-1', dispatch, (value) => posted.push(value));
+        await connection.receive(request('client-1', 'handshake', { type: 'getState' }));
+        posted.length = 0;
+
+        await connection.receive(request('client-1', 'confirm-1', {
+            type: 'confirmAction', action: 'restoreCheckpoint', message: 'Confirm?',
+        }));
+
+        expect(posted).toEqual([expect.objectContaining({
+            requestId: 'confirm-1',
+            ok: true,
+            result: { confirmed: true },
+        })]);
+    });
+
     it('rejects malformed, mismatched-tab, and mismatched-client requests', async () => {
         const posted: any[] = [];
         const dispatch = vi.fn(async (): Promise<ChatCommandDispatchResult> => ({ ok: true }));

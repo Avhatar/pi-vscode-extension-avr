@@ -35,7 +35,7 @@ describe('Protocol types', () => {
             'stateSync', 'agentEvent', 'models', 'modelChanged', 'sessions', 'sessionChanged',
             'fileChange', 'skills', 'workspaceFileSuggestions', 'codexUsage', 'codexUsageError', 'error',
         ] as const;
-        const platformServerTypes = ['confirmResult'] as const;
+        const platformServerTypes = [] as const;
         const vsCodeServerTypes = ['ready'] as const;
 
         type AgentClientTypes = Expect<Equal<typeof agentClientTypes[number], AgentClientMessage['type']>>;
@@ -66,7 +66,7 @@ describe('Protocol types', () => {
             ...agentServerTypes,
             ...platformServerTypes,
             ...vsCodeServerTypes,
-        ]).toHaveLength(14);
+        ]).toHaveLength(13);
     });
 
     it('client messages serialize correctly', () => {

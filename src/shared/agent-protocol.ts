@@ -90,6 +90,13 @@ export interface TabInfo {
 export type CacheMode = 'short' | 'long' | 'auto';
 export type CacheEffective = 'short' | 'long';
 
+export interface PendingToolInfo {
+    toolCallId: string;
+    toolName: string;
+    startTime: number;
+    args?: unknown;
+}
+
 export interface SerializedAgentState {
     messages: any[];
     model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
@@ -99,6 +106,8 @@ export interface SerializedAgentState {
     streamingMessage?: any;
     errorMessage?: string;
     tools: string[];
+    /** In-flight tool calls needed to reconstruct transient cards after panel reattachment. */
+    pendingTools?: PendingToolInfo[];
     sessionId?: string;
     sessionName?: string;
     /** Absolute path to the persisted session file (used by webview panels for restoration). */

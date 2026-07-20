@@ -72,16 +72,12 @@ export class CheckpointManager {
 
             const filesAfter = new Map<string, string | null>();
             for (const [absolutePath] of entry.filesBefore) {
-                try {
-                    filesAfter.set(
-                        absolutePath,
-                        this._files.exists(absolutePath)
-                            ? this._files.readText(absolutePath)
-                            : null,
-                    );
-                } catch {
-                    filesAfter.set(absolutePath, null);
-                }
+                const snapshot = this._files.captureText(absolutePath);
+                if (snapshot.kind === 'unreadable') continue;
+                filesAfter.set(
+                    absolutePath,
+                    snapshot.kind === 'present' ? snapshot.content : null,
+                );
             }
 
             this._suspended.set(turnIndex, {

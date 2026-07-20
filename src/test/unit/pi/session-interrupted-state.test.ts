@@ -63,21 +63,39 @@ describe('PiSessionManager interrupted turn state', () => {
         await manager.dispose();
     });
 
-    it('does not mark a live turn or a completed assistant tail as interrupted', async () => {
+    it('lets a completed lifecycle marker override an assistant tool-call tail', async () => {
         const manager = new PiSessionManager({ appendLine(): void {} } as any) as any;
-        const startedLifecycle = {
+        await startRuntime(manager, createSession([{
+            role: 'assistant',
+            content: [{ type: 'toolCall', id: 'tool-1', name: 'edit' }],
+            stopReason: 'aborted',
+        }], false), {
             getBranch: () => [{
                 type: 'custom',
                 customType: 'pi-code.turn-lifecycle',
-                data: { status: 'started' },
+                data: { status: 'completed' },
             }],
-        };
+        });
+
+        expect(manager.serializeState()).not.toHaveProperty('interruptedTurn');
+        await manager.dispose();
+    });
+
+    it('does not mark a live turn or a completed assistant tail as interrupted', async () => {
+        const manager = new PiSessionManager({ appendLine(): void {} } as any) as any;
+        const getBranch = vi.fn(() => [{
+            type: 'custom',
+            customType: 'pi-code.turn-lifecycle',
+            data: { status: 'started' },
+        }]);
+        const startedLifecycle = { getBranch };
         await startRuntime(
             manager,
             createSession([{ role: 'user', content: 'Work' }], true),
             startedLifecycle,
         );
         expect(manager.serializeState()).not.toHaveProperty('interruptedTurn');
+        expect(getBranch).not.toHaveBeenCalled();
 
         await replaceRuntime(
             manager,
@@ -85,6 +103,7 @@ describe('PiSessionManager interrupted turn state', () => {
             startedLifecycle,
         );
         expect(manager.serializeState()).not.toHaveProperty('interruptedTurn');
+        expect(getBranch).not.toHaveBeenCalled();
 
         await replaceRuntime(manager, createSession([
             { role: 'user', content: 'Work' },

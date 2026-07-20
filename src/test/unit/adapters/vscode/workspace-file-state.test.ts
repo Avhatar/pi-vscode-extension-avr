@@ -22,12 +22,15 @@ describe('VsCodeWorkspaceFileState', () => {
         const files = new VsCodeWorkspaceFileState({
             homeDirectory: () => homeDirectory,
         });
-        const absolutePath = path.join(makeTemporaryDirectory(), 'absolute.txt');
+        const absoluteRoot = makeTemporaryDirectory();
+        const absolutePath = path.join(absoluteRoot, 'absolute.txt');
+        const nonCanonicalAbsolutePath = [absoluteRoot, 'nested', '..', 'absolute.txt'].join(path.sep);
 
         expect(files.resolvePath('nested/file.txt', 'workspace')).toBe(
             path.join(workspaceRoot, 'nested/file.txt'),
         );
         expect(files.resolvePath(absolutePath, 'workspace-with-home')).toBe(absolutePath);
+        expect(files.resolvePath(nonCanonicalAbsolutePath, 'workspace')).toBe(absolutePath);
         expect(files.resolvePath('~/home.txt', 'workspace')).toBe(
             path.join(workspaceRoot, '~/home.txt'),
         );
@@ -46,9 +49,11 @@ describe('VsCodeWorkspaceFileState', () => {
 
         expect(absolutePath).toBe(path.resolve(cwd, 'nested/file.txt'));
         expect(files.exists(absolutePath)).toBe(false);
+        expect(files.captureText(absolutePath)).toEqual({ kind: 'missing' });
         files.writeText(absolutePath, 'content', { createParentDirectories: true });
         expect(files.exists(absolutePath)).toBe(true);
         expect(files.readText(absolutePath)).toBe('content');
+        expect(files.captureText(absolutePath)).toEqual({ kind: 'present', content: 'content' });
         files.deleteFile(absolutePath);
         expect(files.exists(absolutePath)).toBe(false);
     });

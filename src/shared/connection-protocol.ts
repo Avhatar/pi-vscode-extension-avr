@@ -1,6 +1,7 @@
 import type { ClientMessage, ServerMessage } from './protocol';
 
-export const AGENT_PROTOCOL_VERSION = 1 as const;
+export const AGENT_PROTOCOL_VERSION = 2 as const;
+export const LONG_RUNNING_AGENT_REQUEST_TIMEOUT_MS = 120_000;
 
 export type MessagePayload<Message extends { type: string }> = Omit<Message, 'type'>;
 
@@ -45,12 +46,24 @@ export type AgentEventEnvelope<Message extends ServerMessage = ServerMessage> =
         ? {
             protocolVersion: typeof AGENT_PROTOCOL_VERSION;
             clientId: string;
+            epoch: string;
             sequence: number;
             tabId?: string;
             type: Message['type'];
             payload: MessagePayload<Message>;
         }
         : never;
+
+export function getAgentRequestTimeoutMs(
+    message: ClientMessage,
+    defaultTimeoutMs: number,
+): number | undefined {
+    if (message.type === 'confirmAction') return undefined;
+    if (message.type === 'getSessions' || message.type === 'searchWorkspaceFiles') {
+        return Math.max(defaultTimeoutMs, LONG_RUNNING_AGENT_REQUEST_TIMEOUT_MS);
+    }
+    return defaultTimeoutMs;
+}
 
 /** Transport-neutral connection used by VS Code, Electron IPC, and development transports. */
 export interface AgentConnection {
@@ -106,7 +119,10 @@ export function createErrorResponse(
 export class AgentEventSequencer {
     private sequence = 0;
 
-    constructor(private readonly clientId: string) {}
+    constructor(
+        private readonly clientId: string,
+        private readonly epoch: string = createEventEpoch(),
+    ) {}
 
     create<Message extends ServerMessage>(
         message: Message,
@@ -116,10 +132,17 @@ export class AgentEventSequencer {
         return {
             protocolVersion: AGENT_PROTOCOL_VERSION,
             clientId: this.clientId,
+            epoch: this.epoch,
             sequence: ++this.sequence,
             ...(tabId === undefined ? {} : { tabId }),
             type,
             payload,
         } as AgentEventEnvelope<Message>;
     }
+}
+
+function createEventEpoch(): string {
+    const randomUuid = globalThis.crypto?.randomUUID?.();
+    if (randomUuid) return randomUuid;
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

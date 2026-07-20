@@ -8,16 +8,16 @@ import {
 } from '../core/ports/session-platform';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
 import { TypedEventEmitter } from '../shared/typed-event';
+import { safeSerialize } from '../shared/safe-serialize';
 import {
     TURN_LIFECYCLE_CUSTOM_TYPE,
+    getLatestTurnLifecycleStatus,
     hasIncompleteTurnTail,
-    hasInterruptedTurnLifecycle,
 } from '../shared/interrupted-turn';
 import { EventRouter } from './events';
 import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, refreshModelRegistry, disposeModelRegistry } from './models';
 import { createCodexMonitorExtension } from './codex-monitor';
-import { getCodexUsageStore } from './codex-usage-store';
 import { getStandardSkillPaths } from './standard-resources';
 import { createClaudeContextExtension } from './claude-compat/context-extension';
 import { getRootClaudeFiles } from './claude-compat/context';
@@ -79,6 +79,9 @@ export class PiSessionManager {
     private readonly _pendingBackgroundNotifications: Array<{ content: string; details: Record<string, unknown> }> = [];
     private _backgroundNotificationUnsubscribe?: () => void;
     private _subagentParentTabId = 'unbound';
+    private _lifecycleTransition?: Promise<unknown>;
+    private _disposePromise?: Promise<void>;
+    private _disposeRequested = false;
 
     constructor(
         outputChannel: Logger,
@@ -135,28 +138,34 @@ export class PiSessionManager {
         return this._runtime.isReady;
     }
 
+    get isStreaming(): boolean {
+        return this._session?.isStreaming ?? false;
+    }
+
     async initialize(): Promise<void> {
-        this._outputChannel.appendLine('Initializing Pi session...');
-        const state = await this._runtime.start(() => this._createSessionRuntime('initial'));
-        await this._activateSessionRuntime(state);
+        return this._runLifecycleTransition(async () => {
+            this._outputChannel.appendLine('Initializing Pi session...');
+            const state = await this._runtime.start(() => this._createSessionRuntime('initial'));
+            await this._activateSessionRuntime(state);
 
-        if (state.modelFallbackMessage) {
-            this._outputChannel.appendLine(`Model fallback: ${state.modelFallbackMessage}`);
-        }
-        await this._applyDefaultSettings(state.session);
+            if (state.modelFallbackMessage) {
+                this._outputChannel.appendLine(`Model fallback: ${state.modelFallbackMessage}`);
+            }
+            await this._applyDefaultSettings(state.session);
 
-        // Initial todo visibility is decided by the controller from the
-        // per-session persisted toggle (see ChatController._subscribeTab
-        // and _applyPersistedTodo). The SDK enables all extension tools
-        // by default via `includeAllExtensionTools: true`, so doing
-        // nothing here leaves `todo` ON and the controller flips it
-        // OFF only when the user explicitly toggled it off for this
-        // session.
+            // Initial todo visibility is decided by the controller from the
+            // per-session persisted toggle (see ChatController._subscribeTab
+            // and _applyPersistedTodo). The SDK enables all extension tools
+            // by default via `includeAllExtensionTools: true`, so doing
+            // nothing here leaves `todo` ON and the controller flips it
+            // OFF only when the user explicitly toggled it off for this
+            // session.
 
-        const model = state.session.model;
-        this._outputChannel.appendLine(
-            `Pi session initialized. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
-        );
+            const model = state.session.model;
+            this._outputChannel.appendLine(
+                `Pi session initialized. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
+            );
+        });
     }
 
     /**
@@ -315,7 +324,6 @@ export class PiSessionManager {
         const { DefaultResourceLoader, getAgentDir, SettingsManager } = await import('@earendil-works/pi-coding-agent');
         const agentDir = getAgentDir();
         const settingsManager = SettingsManager.create(cwd, agentDir);
-        const usageStore = getCodexUsageStore();
         // Guidelines are read here (per resource-loader rebuild) so a
         // settings change picks up next time `_buildResourceLoader`
         // runs — i.e. on the next chat / loadSession / newSession /
@@ -387,7 +395,7 @@ export class PiSessionManager {
         const factories = [
             createCodexMonitorExtension({
                 onResponse: ({ headers }) => {
-                    usageStore.updateFromHeaders(headers);
+                    this._ports.codexUsage.updateFromHeaders(headers);
                 },
             }),
             createTodoExtension(this.todoStore, todoGuidelines),
@@ -562,12 +570,14 @@ export class PiSessionManager {
     }
 
     async newSession(): Promise<void> {
-        if (!this._runtime.isReady) { return; }
-        await this._subagentManager?.dispose();
-        this._subagentManager = undefined;
-        const state = await this._runtime.replace(() => this._createSessionRuntime('new'));
-        await this._activateSessionRuntime(state);
-        await this._applyDefaultSettings(state.session);
+        return this._runLifecycleTransition(async () => {
+            if (!this._runtime.isReady) { return; }
+            await this._subagentManager?.dispose();
+            this._subagentManager = undefined;
+            const state = await this._runtime.replace(() => this._createSessionRuntime('new'));
+            await this._activateSessionRuntime(state);
+            await this._applyDefaultSettings(state.session);
+        });
     }
 
     get sessionPath(): string | undefined {
@@ -575,17 +585,19 @@ export class PiSessionManager {
     }
 
     async initializeFromPath(sessionPath: string): Promise<void> {
-        this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
-        const state = await this._runtime.start(
-            () => this._createSessionRuntime('restore', sessionPath),
-        );
-        await this._activateSessionRuntime(state);
-        await this._applyDefaultSettings(state.session);
+        return this._runLifecycleTransition(async () => {
+            this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
+            const state = await this._runtime.start(
+                () => this._createSessionRuntime('restore', sessionPath),
+            );
+            await this._activateSessionRuntime(state);
+            await this._applyDefaultSettings(state.session);
 
-        const model = state.session.model;
-        this._outputChannel.appendLine(
-            `Session restored. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
-        );
+            const model = state.session.model;
+            this._outputChannel.appendLine(
+                `Session restored. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
+            );
+        });
     }
 
     async getSessions(): Promise<SessionInfo[]> {
@@ -607,13 +619,15 @@ export class PiSessionManager {
     }
 
     async loadSession(sessionPath: string): Promise<void> {
-        if (!this._runtime.isReady) { return; }
-        await this._subagentManager?.dispose();
-        this._subagentManager = undefined;
-        const state = await this._runtime.replace(
-            () => this._createSessionRuntime('load', sessionPath),
-        );
-        await this._activateSessionRuntime(state);
+        return this._runLifecycleTransition(async () => {
+            if (!this._runtime.isReady) { return; }
+            await this._subagentManager?.dispose();
+            this._subagentManager = undefined;
+            const state = await this._runtime.replace(
+                () => this._createSessionRuntime('load', sessionPath),
+            );
+            await this._activateSessionRuntime(state);
+        });
     }
 
     getModels(): ModelInfo[] {
@@ -724,7 +738,14 @@ export class PiSessionManager {
             };
         }
         const model = s.model;
-        const interruptedLifecycle = hasInterruptedTurnLifecycle(this._sessionManager?.getBranch() ?? []);
+        let hasInterruptedTurn = false;
+        if (!s.isStreaming && !s.isCompacting) {
+            const lifecycleStatus = getLatestTurnLifecycleStatus(
+                this._sessionManager?.getBranch() ?? [],
+            );
+            hasInterruptedTurn = lifecycleStatus === 'started'
+                || (lifecycleStatus === undefined && hasIncompleteTurnTail(s.messages));
+        }
         return {
             messages: s.messages.map(safeSerialize),
             model: model ? {
@@ -739,8 +760,7 @@ export class PiSessionManager {
             sessionId: s.sessionId,
             sessionName: s.sessionName,
             contextUsage: this._getContextUsage(),
-            ...(!s.isStreaming && !s.isCompacting
-                && (interruptedLifecycle || hasIncompleteTurnTail(s.messages))
+            ...(!s.isStreaming && !s.isCompacting && hasInterruptedTurn
                 ? { interruptedTurn: { reason: 'incomplete_session_tail' as const } }
                 : {}),
         };
@@ -1087,19 +1107,74 @@ export class PiSessionManager {
         });
     }
 
-    async dispose(): Promise<void> {
-        this._subagentManagerUnsubscribe?.();
-        this._subagentManagerUnsubscribe = undefined;
-        await this._subagentManager?.dispose();
-        this._subagentManager = undefined;
-        this._flushBackgroundSubagentNotifications();
-        this._backgroundNotificationUnsubscribe?.();
-        this._backgroundNotificationUnsubscribe = undefined;
-        await this._runtime.dispose();
-        this._onSubagentStateChanged.dispose();
-        this._onSubagentMutation.dispose();
-        this._onSubagentNotification.dispose();
-        this.events.clear();
+    private _runLifecycleTransition<Result>(operation: () => Promise<Result>): Promise<Result> {
+        if (this._disposeRequested) {
+            return Promise.reject(new Error('Pi session manager is disposing'));
+        }
+        if (this._lifecycleTransition) {
+            return Promise.reject(new Error('Pi session manager transition already in progress'));
+        }
+
+        let resolveTransition!: (value: Result | PromiseLike<Result>) => void;
+        let rejectTransition!: (reason?: unknown) => void;
+        const transition = new Promise<Result>((resolve, reject) => {
+            resolveTransition = resolve;
+            rejectTransition = reject;
+        });
+        this._lifecycleTransition = transition;
+        try {
+            void operation().then(resolveTransition, rejectTransition);
+        } catch (error) {
+            rejectTransition(error);
+        }
+        return transition.finally(() => {
+            if (this._lifecycleTransition === transition) this._lifecycleTransition = undefined;
+        });
+    }
+
+    dispose(): Promise<void> {
+        if (this._disposePromise) return this._disposePromise;
+        this._disposeRequested = true;
+        const pendingTransition = this._lifecycleTransition;
+        this._disposePromise = (async () => {
+            if (pendingTransition) {
+                try {
+                    await pendingTransition;
+                } catch {
+                    // The lifecycle caller receives the original transition failure.
+                }
+            }
+
+            let firstError: unknown;
+            const runCleanup = async (cleanup: () => void | Promise<void>): Promise<void> => {
+                try {
+                    await cleanup();
+                } catch (error) {
+                    firstError ??= error;
+                }
+            };
+
+            const unsubscribeSubagents = this._subagentManagerUnsubscribe;
+            this._subagentManagerUnsubscribe = undefined;
+            await runCleanup(() => unsubscribeSubagents?.());
+
+            const subagentManager = this._subagentManager;
+            this._subagentManager = undefined;
+            await runCleanup(async () => subagentManager?.dispose());
+            await runCleanup(() => this._flushBackgroundSubagentNotifications());
+
+            const unsubscribeBackground = this._backgroundNotificationUnsubscribe;
+            this._backgroundNotificationUnsubscribe = undefined;
+            await runCleanup(() => unsubscribeBackground?.());
+            await runCleanup(() => this._runtime.dispose());
+            await runCleanup(() => this._onSubagentStateChanged.dispose());
+            await runCleanup(() => this._onSubagentMutation.dispose());
+            await runCleanup(() => this._onSubagentNotification.dispose());
+            await runCleanup(() => this.events.clear());
+
+            if (firstError !== undefined) throw firstError;
+        })();
+        return this._disposePromise;
     }
 
     static async disposeGlobal(): Promise<void> {
@@ -1110,14 +1185,6 @@ export class PiSessionManager {
 
 function getProviderId(model: any): string {
     return String(model.provider);
-}
-
-function safeSerialize(obj: any): any {
-    try {
-        return JSON.parse(JSON.stringify(obj));
-    } catch {
-        return { _serializationFailed: true, type: obj?.type };
-    }
 }
 
 function estimateVisibleContextTokens(messages: any[]): number {

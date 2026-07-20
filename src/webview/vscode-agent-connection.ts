@@ -7,6 +7,7 @@ import type {
 import {
     createAgentRequestEnvelope,
     createErrorResponse,
+    getAgentRequestTimeoutMs,
 } from '../shared/connection-protocol';
 import {
     isAgentEventEnvelope,
@@ -40,6 +41,8 @@ export class VsCodeAgentConnection implements AgentConnection {
     private readonly tabId?: string;
     private readonly requestTimeoutMs: number;
     private requestCounter = 0;
+    private eventEpoch?: string;
+    private readonly retiredEventEpochs = new Set<string>();
     private lastSequence = 0;
     private recoveryPending = false;
     private closed = false;
@@ -78,19 +81,23 @@ export class VsCodeAgentConnection implements AgentConnection {
         }
 
         return new Promise<AgentResponseEnvelope<Result>>((resolve) => {
-            const timeout = setTimeout(() => {
-                if (!this.pending.delete(envelope.requestId)) return;
-                resolve(createErrorResponse(
-                    envelope,
-                    'request_timeout',
-                    'The VS Code agent request timed out.',
-                ));
-            }, this.requestTimeoutMs);
+            let timeout: ReturnType<typeof setTimeout> | undefined;
             const settle = (response: AgentResponseEnvelope<unknown>): void => {
-                clearTimeout(timeout);
+                if (timeout !== undefined) clearTimeout(timeout);
                 resolve(response as AgentResponseEnvelope<Result>);
             };
             this.pending.set(envelope.requestId, { resolve: settle });
+            const timeoutMs = getAgentRequestTimeoutMs(message, this.requestTimeoutMs);
+            if (timeoutMs !== undefined) {
+                timeout = setTimeout(() => {
+                    if (!this.pending.delete(envelope.requestId)) return;
+                    settle(createErrorResponse(
+                        envelope,
+                        'request_timeout',
+                        'The VS Code agent request timed out.',
+                    ));
+                }, timeoutMs);
+            }
             try {
                 this.api.postMessage(envelope);
             } catch (error) {
@@ -137,11 +144,26 @@ export class VsCodeAgentConnection implements AgentConnection {
         }
         if (!isAgentEventEnvelope(value) || value.clientId !== this.clientId) return;
         if (this.tabId !== undefined && value.tabId !== this.tabId) return;
+        if (this.eventEpoch === undefined) {
+            this.eventEpoch = value.epoch;
+        } else if (value.epoch !== this.eventEpoch) {
+            if (this.retiredEventEpochs.has(value.epoch)) return;
+            this.retiredEventEpochs.add(this.eventEpoch);
+            this.eventEpoch = value.epoch;
+            this.lastSequence = 0;
+            this.recoveryPending = false;
+        }
         if (value.sequence <= this.lastSequence) return;
 
         const hasGap = value.sequence > this.lastSequence + 1;
         this.lastSequence = value.sequence;
-        for (const listener of this.subscribers) listener(value);
+        for (const listener of [...this.subscribers]) {
+            try {
+                listener(value);
+            } catch {
+                // One webview consumer must not block remaining delivery or recovery.
+            }
+        }
 
         if (hasGap && !this.recoveryPending) {
             this.recoveryPending = true;
@@ -150,6 +172,40 @@ export class VsCodeAgentConnection implements AgentConnection {
             });
         }
     }
+}
+
+export interface InitialAgentStateRequestOptions {
+    maxAttempts?: number;
+    retryDelayMs?: number;
+    wait?: (delayMs: number) => Promise<void>;
+}
+
+export async function requestInitialAgentState(
+    connection: Pick<AgentConnection, 'request'>,
+    options: InitialAgentStateRequestOptions = {},
+): Promise<AgentResponseEnvelope<unknown>> {
+    const maxAttempts = Math.max(1, Math.floor(options.maxAttempts ?? 3));
+    const retryDelayMs = Math.max(0, options.retryDelayMs ?? 250);
+    const wait = options.wait ?? delay;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const response = await connection.request({ type: 'getState' });
+        if (response.ok || !isRetriableInitialStateError(response.error.code) || attempt === maxAttempts) {
+            return response;
+        }
+        await wait(retryDelayMs);
+    }
+    throw new Error('Initial agent state retry loop exited unexpectedly.');
+}
+
+function isRetriableInitialStateError(code: string): boolean {
+    return code === 'request_timeout'
+        || code === 'transport_error'
+        || code === 'bridge_dispatch_failed';
+}
+
+function delay(delayMs: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function createClientId(): string {

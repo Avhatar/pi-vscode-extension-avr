@@ -1,6 +1,6 @@
-import * as vscode from 'vscode';
 import type { AuthStorage } from '@earendil-works/pi-coding-agent';
 import type { SecretStore } from '../core/ports/session-platform';
+import { TypedEventEmitter } from '../shared/typed-event';
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
 
@@ -17,7 +17,7 @@ const KNOWN_PROVIDERS = [
 let cached: AuthStorage | undefined;
 let cachedSecrets: SecretStore | undefined;
 
-const _onAuthChanged = new vscode.EventEmitter<string | undefined>();
+const _onAuthChanged = new TypedEventEmitter<string | undefined>();
 export const onAuthChanged = _onAuthChanged.event;
 
 export function notifyAuthChanged(providerId?: string): void {

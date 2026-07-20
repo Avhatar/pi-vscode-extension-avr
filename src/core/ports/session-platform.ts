@@ -55,11 +55,16 @@ export interface SessionResourcePaths {
     readonly bundledPiPackagePaths: readonly string[];
 }
 
+export interface SessionCodexUsagePort {
+    updateFromHeaders(headers: Record<string, string>): boolean;
+}
+
 export interface SessionRuntimePorts {
     workspace: SessionWorkspacePort;
     settings: SessionSettingsPort;
     dialogs: SessionDialogPort;
     resources: SessionResourcePaths;
+    codexUsage: SessionCodexUsagePort;
 }
 
 export const DEFAULT_SESSION_RUNTIME_PORTS: SessionRuntimePorts = {
@@ -77,5 +82,8 @@ export const DEFAULT_SESSION_RUNTIME_PORTS: SessionRuntimePorts = {
     },
     resources: {
         bundledPiPackagePaths: [],
+    },
+    codexUsage: {
+        updateFromHeaders: () => false,
     },
 };

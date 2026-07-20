@@ -59,7 +59,7 @@ export interface ChatViewSink {
 }
 
 export type ChatCommandDispatchResult =
-    | { ok: true }
+    | { ok: true; result?: unknown }
     | { ok: false; code: 'tab_not_found' | 'command_failed'; message: string };
 
 let tabIdCounter = 0;
@@ -314,6 +314,7 @@ export class ChatController implements vscode.Disposable {
             diffManager: initialDiffManager,
             checkpointManager: initialCheckpointManager,
             projectToolDefault: this._getProjectToolSelectionDefault(),
+            initialTurnCounter: countUserTurns(initialSession.getMessages()),
         });
         this._tabs.register(tab);
         this._tabs.activate(id);
@@ -383,6 +384,9 @@ export class ChatController implements vscode.Disposable {
 
     /** Called by `ChatPanel` when its constructor finishes. */
     registerPanel(tabId: string, panel: { reveal(viewColumn?: vscode.ViewColumn): void }): void {
+        if (!this._tabs.has(tabId)) {
+            throw new Error(`Cannot register a panel for unknown tab: ${tabId}`);
+        }
         this._openPanels.set(tabId, panel);
         this._tabs.activate(tabId);
         this._persistTabs();
@@ -626,6 +630,7 @@ export class ChatController implements vscode.Disposable {
             session,
             diffManager: diff,
             checkpointManager: checkpoint,
+            initialTurnCounter: countUserTurns(session.getMessages()),
         });
         this._updateTabName(tab);
 
@@ -1186,24 +1191,13 @@ export class ChatController implements vscode.Disposable {
         return tab.isStreamingLocal || tab.isCompacting;
     }
 
-    // ── Turn-completion notifications ──
-
-    private async _promptUserTask(
-        tab: TabState,
-        text: string,
-        images?: ImageAttachment[],
-        files?: FileAttachment[],
-    ): Promise<void> {
-        const armToken = tab.turnNotificationGate.arm();
-        try {
-            await tab.session.prompt(text, images, files);
-        } finally {
-            // If prompt preflight returned without agent_start, do not let this
-            // task arm leak into a later internal run. Token matching preserves
-            // a newer arm that may already belong to a queued user task.
-            tab.turnNotificationGate.cancelArm(armToken);
+    private _assertFileHistoryIdle(tab: TabState): void {
+        if (this._isTabBusy(tab)) {
+            throw new Error('Wait for the agent to finish before undoing or redoing file changes.');
         }
     }
+
+    // ── Turn-completion notifications ──
 
     private _dispatchNextQueuedMessage(tab: TabState): Promise<void> {
         return this._chatService.dispatchNextQueued(tab, {
@@ -1211,9 +1205,19 @@ export class ChatController implements vscode.Disposable {
             compact: (instructions) => tab.session.compact(instructions),
             prompt: (text, onAgentStart) => {
                 const stopWatchingAgentStart = tab.session.events.on('agent_start', onAgentStart);
-                return this._promptUserTask(tab, text).finally(stopWatchingAgentStart);
+                return tab.session.prompt(text).finally(stopWatchingAgentStart);
             },
-            isSessionStreaming: () => tab.session.serializeState().isStreaming,
+            isSessionStreaming: () => tab.session.isStreaming,
+            handleLocalCommand: (text) => this._handleNameCommand(tab, text, false, false),
+            scheduleRetry: (retry) => {
+                queueMicrotask(() => {
+                    void retry().catch((error) => {
+                        this._outputChannel.appendLine(
+                            `[queued retry error] ${error instanceof Error ? error.message : String(error)}`,
+                        );
+                    });
+                });
+            },
             prepareRequest: () => this._prepareCacheForRequest(tab),
             logQueuedPrompt: () => this._logPromptToolState(tab, 'queued'),
             publishState: () => this.sendStateSync(tab.id),
@@ -1325,6 +1329,7 @@ export class ChatController implements vscode.Disposable {
 
     private async _handleTabEvent(tab: TabState, event: any): Promise<void> {
         let dispatchQueuedAfterEvent = false;
+        let queuedDispatchReserved = false;
         if (event.type === 'agent_start') tab.session.markTurnStarted?.();
         this._chatService.reduceEvent(tab, event);
 
@@ -1461,6 +1466,7 @@ export class ChatController implements vscode.Disposable {
         this._updateTabName(tab);
 
         if (dispatchQueuedAfterEvent && this._chatService.reserveQueuedDispatch(tab)) {
+            queuedDispatchReserved = true;
             // Reserve the tab before publishing terminal state. The queued
             // prompt may still need async file-mention expansion, and the
             // webview must continue treating Enter as queueing during that gap.
@@ -1489,7 +1495,7 @@ export class ChatController implements vscode.Disposable {
             this._postForTab(tab.id, { type: 'error', message: event.errorMessage });
         }
 
-        if (dispatchQueuedAfterEvent) {
+        if (dispatchQueuedAfterEvent && queuedDispatchReserved) {
             await this._dispatchNextQueuedMessage(tab);
         }
     }
@@ -1534,14 +1540,22 @@ export class ChatController implements vscode.Disposable {
     }
 
     /** Handle Pi's built-in session naming command without starting a model turn. */
-    private _handleNameCommand(tab: TabState, text: string): boolean {
+    private _handleNameCommand(
+        tab: TabState,
+        text: string,
+        hasAttachments = false,
+        publishState = true,
+    ): boolean {
         const name = parseNameCommand(text);
         if (name === null) return false;
         if (!name) throw new Error('Usage: /name <name>');
+        if (hasAttachments) {
+            throw new Error('The /name command cannot include attachments. Remove attachments and try again.');
+        }
 
         tab.session.setSessionName(name);
         this._updateTabName(tab);
-        this.sendStateSync(tab.id);
+        if (publishState) this.sendStateSync(tab.id);
         return true;
     }
 
@@ -1558,9 +1572,14 @@ export class ChatController implements vscode.Disposable {
                 return { ok: false, code: 'tab_not_found', message: `Chat tab not found: ${targetId}` };
             }
 
+            let commandResult: unknown;
             switch (msg.type) {
                 case 'prompt': {
-                    if (this._handleNameCommand(tab, msg.text)) break;
+                    if (this._handleNameCommand(
+                        tab,
+                        msg.text,
+                        Boolean(msg.images?.length || msg.files?.length),
+                    )) break;
 
                     await this._chatService.dispatchDirectPrompt(tab, msg, {
                         // Plan Mode remains a host preference. The service calls
@@ -1583,6 +1602,11 @@ export class ChatController implements vscode.Disposable {
                 case 'steer':
                 case 'followUp':
                 case 'abort':
+                    if (msg.type !== 'abort' && this._handleNameCommand(
+                        tab,
+                        msg.text,
+                        Boolean(msg.images?.length || msg.files?.length),
+                    )) break;
                     await this._chatService.dispatchStreamingCommand(msg, {
                         augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
                         prepareRequest: () => this._prepareCacheForRequest(tab),
@@ -1671,7 +1695,10 @@ export class ChatController implements vscode.Disposable {
                     this._applyPersistedToolSelection(tab);
                     tab.diffManager.clearAll();
                     tab.checkpointManager.clearAll();
-                    tab.resetSessionProjection(undefined);
+                    tab.resetSessionProjection(
+                        undefined,
+                        countUserTurns(tab.session.getMessages()),
+                    );
                     this._updateTabName(tab);
                     this._persistTabs();
                     this.sendStateSync(tab.id);
@@ -1725,10 +1752,12 @@ export class ChatController implements vscode.Disposable {
                     );
                     break;
                 case 'undoFileChange':
+                    this._assertFileHistoryIdle(tab);
                     await tab.diffManager.undoFileChange(msg.filePath, msg.toolCallId);
                     this.sendStateSync(tab.id);
                     break;
                 case 'restoreCheckpoint': {
+                    this._assertFileHistoryIdle(tab);
                     const restored = await tab.checkpointManager.restoreCheckpoint(msg.messageIndex);
                     tab.diffManager.suspendChangesAfter(msg.messageIndex);
 
@@ -1748,6 +1777,7 @@ export class ChatController implements vscode.Disposable {
                     break;
                 }
                 case 'redoCheckpoint': {
+                    this._assertFileHistoryIdle(tab);
                     const redone = await tab.checkpointManager.redoCheckpoint();
                     tab.diffManager.redoChanges();
 
@@ -1766,17 +1796,15 @@ export class ChatController implements vscode.Disposable {
                     break;
                 }
                 case 'confirmAction': {
+                    if (msg.action === 'restoreCheckpoint' || msg.action === 'redoCheckpoint') {
+                        this._assertFileHistoryIdle(tab);
+                    }
                     const answer = await vscode.window.showWarningMessage(
                         msg.message,
                         { modal: true },
                         'Yes',
                     );
-                    this._postForTab(tab.id, {
-                        type: 'confirmResult',
-                        action: msg.action,
-                        confirmed: answer === 'Yes',
-                        payload: msg.payload,
-                    });
+                    commandResult = { confirmed: answer === 'Yes' };
                     break;
                 }
                 case 'createTab':
@@ -1804,7 +1832,9 @@ export class ChatController implements vscode.Disposable {
                     );
                     break;
             }
-            return { ok: true };
+            return commandResult === undefined
+                ? { ok: true }
+                : { ok: true, result: commandResult };
         } catch (err: any) {
             // Errors from a panel-bound message route back to that panel; for sidebar
             // (no sourceTabId) they go to whoever currently shows the active tab.
@@ -1988,6 +2018,7 @@ export class ChatController implements vscode.Disposable {
             diffManager: newDiff,
             checkpointManager: newCheckpoint,
             projectToolDefault: this._getProjectToolSelectionDefault(),
+            initialTurnCounter: countUserTurns(newSession.getMessages()),
         });
         this._tabs.register(tab);
         this._subscribeTab(tab);
@@ -2075,6 +2106,7 @@ export class ChatController implements vscode.Disposable {
                     session,
                     diffManager: diff,
                     checkpointManager: checkpoint,
+                    initialTurnCounter: countUserTurns(session.getMessages()),
                 });
                 tab.name = name;
                 this._updateTabName(tab); // re-derive name from first message if needed
@@ -2161,11 +2193,20 @@ function renderTranscriptContent(content: unknown): string {
     }).join('\n\n');
 }
 
+function countUserTurns(messages: readonly unknown[]): number {
+    let count = 0;
+    for (const message of messages) {
+        if (message && typeof message === 'object' && (message as { role?: unknown }).role === 'user') {
+            count++;
+        }
+    }
+    return count;
+}
+
 function parseNameCommand(text: string): string | undefined | null {
     const trimmed = text.trim();
     if (trimmed === '/name') return undefined;
-    if (trimmed.startsWith('/name ')) {
-        return trimmed.slice('/name '.length).trim() || undefined;
-    }
-    return null;
+    const match = /^\/name\s+([\s\S]+)$/.exec(trimmed);
+    if (!match) return null;
+    return match[1].replace(/\s+/g, ' ').trim().slice(0, 60) || undefined;
 }

@@ -60,9 +60,10 @@ export async function activate(context: vscode.ExtensionContext) {
             context.extensionUri.fsPath,
             (msg) => sessionLogger.appendLine(msg),
         );
-        const sessionPorts = createVsCodeSessionRuntimePorts({
-            bundledPiPackagePaths: bundledPackagePaths,
-        });
+        const sessionPorts = createVsCodeSessionRuntimePorts(
+            { bundledPiPackagePaths: bundledPackagePaths },
+            getCodexUsageStore(),
+        );
         const initialSession = new PiSessionManager(
             sessionLogger, sessionSecrets, subagentCoordinator, subagentStore, writeIsolation, childToolFactories,
             sessionPorts,

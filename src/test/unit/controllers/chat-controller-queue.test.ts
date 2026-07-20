@@ -11,6 +11,7 @@ interface FakeSession {
     readonly todoStore: { subscribe(listener: () => void): () => void };
     readonly session: undefined;
     readonly sessionPath: undefined;
+    readonly isStreaming: boolean;
     prompt(text: string): Promise<void>;
     compact(instructions?: string): Promise<void>;
     getMessages(): any[];
@@ -129,7 +130,22 @@ describe('ChatController queued messages', () => {
         expect(tab.checkpointManager.startTurn).toHaveBeenCalledOnce();
     });
 
-    it('restores only prompts rejected before agent_start', async () => {
+    it('does not publish an extra state snapshot when settlement finds no queue', async () => {
+        controller = createControllerHarness();
+        const tab = createTab('tab-a');
+        registerTab(controller, tab);
+        controller._subscribeTab(tab);
+        controller.sendStateSync.mockClear();
+
+        tab.session.markIdle();
+        tab.session.events.dispatch({ type: 'agent_settled' } as any);
+        await Promise.resolve();
+
+        expect(controller.sendStateSync).not.toHaveBeenCalled();
+        expect(tab.isStreamingLocal).toBe(true);
+    });
+
+    it('retries only prompts rejected before agent_start', async () => {
         controller = createControllerHarness();
         const beforeStart = createTab('tab-a');
         const afterStart = createTab('tab-b');
@@ -142,10 +158,12 @@ describe('ChatController queued messages', () => {
         await controller.handleMessage({ type: 'queueMessage', text: 'retry me' }, beforeStart.id);
         beforeStart.session.events.dispatch({ type: 'agent_end' } as any);
         await vi.waitFor(() => expect(beforeStart.isStreamingLocal).toBe(false));
+        const retriedPrompt = beforeStart.session.waitForNextPrompt();
         beforeStart.session.markIdle();
         beforeStart.session.events.dispatch({ type: 'agent_settled' } as any);
-        await vi.waitFor(() => expect(beforeStart.queuedMessages).toEqual(['retry me']));
-        await vi.waitFor(() => expect(beforeStart.isStreamingLocal).toBe(false));
+        await expect(retriedPrompt).resolves.toBe('retry me');
+        expect(beforeStart.queuedMessages).toEqual([]);
+        expect(beforeStart.isStreamingLocal).toBe(true);
 
         afterStart.session.failNextPromptAfterStart();
         await controller.handleMessage({ type: 'queueMessage', text: 'do not duplicate' }, afterStart.id);
@@ -272,6 +290,9 @@ function createFakeSession(): FakeSession {
         todoStore: { subscribe: () => () => undefined },
         session: undefined,
         sessionPath: undefined,
+        get isStreaming(): boolean {
+            return isBusy;
+        },
         async prompt(text: string): Promise<void> {
             if (isBusy) {
                 throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");

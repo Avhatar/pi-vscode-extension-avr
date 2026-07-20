@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+import type { StateStore } from '../core/ports/chat-platform';
 import type { CodexUsageSnapshot } from '../shared/protocol';
 import { CODEX_USAGE_STALE_MS, normalizeCodexLimitId } from '../shared/codex-usage';
 import { getAuthStorage } from './auth';
@@ -17,11 +17,11 @@ export type CodexUsageListener = (snapshot: CodexUsageSnapshot | null) => void;
  */
 class CodexUsageStore {
     private _snapshot: CodexUsageSnapshot | null = null;
-    private _memento: vscode.Memento | undefined;
+    private _memento: StateStore | undefined;
     private _listeners = new Set<CodexUsageListener>();
     private _refreshPromise: Promise<CodexUsageSnapshot | null> | undefined;
 
-    init(memento: vscode.Memento): void {
+    init(memento: StateStore): void {
         this._memento = memento;
         const persisted = memento.get<CodexUsageSnapshot>(PERSIST_KEY);
         if (isPersistedSnapshotUsable(persisted)) {

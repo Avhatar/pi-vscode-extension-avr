@@ -53,7 +53,10 @@ describe('Pi session runtime ownership', () => {
 
         await expect(runtime.replace(async () => second)).rejects.toThrow('binding failed');
 
-        expect(runtime.session).toBe(second.session);
+        expect(second.session.dispose).toHaveBeenCalledOnce();
+        expect(runtime.session).toBeUndefined();
+        expect(runtime.sessionManager).toBeUndefined();
+        expect(runtime.isReady).toBe(false);
         await runtime.dispose();
         expect(second.session.dispose).toHaveBeenCalledOnce();
     });
@@ -227,7 +230,7 @@ describe('Pi session runtime ownership', () => {
         expect(runtime.isReady).toBe(false);
     });
 
-    it('retains the invalidated current identity when replacement creation fails', async () => {
+    it('clears the invalidated current identity when replacement creation fails', async () => {
         const first = createState('first', []);
         const runtime = new PiSessionRuntime(() => vi.fn());
         await runtime.start(async () => first);
@@ -237,9 +240,9 @@ describe('Pi session runtime ownership', () => {
         })).rejects.toThrow('replacement failed');
 
         expect(first.session.dispose).toHaveBeenCalledOnce();
-        expect(runtime.session).toBe(first.session);
-        expect(runtime.sessionManager).toBe(first.sessionManager);
-        expect(runtime.isReady).toBe(true);
+        expect(runtime.session).toBeUndefined();
+        expect(runtime.sessionManager).toBeUndefined();
+        expect(runtime.isReady).toBe(false);
 
         await runtime.dispose();
         expect(first.session.dispose).toHaveBeenCalledOnce();

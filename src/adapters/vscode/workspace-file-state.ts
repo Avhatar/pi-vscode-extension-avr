@@ -1,7 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import type { FileStatePort, FileWriteOptions, WorkspacePathResolution } from '../../core/ports/file-state';
+import type {
+    FileStatePort,
+    FileTextSnapshot,
+    FileWriteOptions,
+    WorkspacePathResolution,
+} from '../../core/ports/file-state';
 
 export interface VsCodeWorkspaceFileStateOptions {
     workspaceRoot?: () => string | undefined;
@@ -27,9 +32,19 @@ export class VsCodeWorkspaceFileState implements FileStatePort {
             const rest = filePath === '~' ? '' : filePath.slice(2);
             filePath = path.join(this._homeDirectory(), rest);
         }
-        if (path.isAbsolute(filePath)) return filePath;
+        if (path.isAbsolute(filePath)) return path.normalize(filePath);
         const root = this._workspaceRoot();
-        return root ? path.join(root, filePath) : path.resolve(this._cwd(), filePath);
+        return path.normalize(root ? path.join(root, filePath) : path.resolve(this._cwd(), filePath));
+    }
+
+    captureText(absolutePath: string): FileTextSnapshot {
+        try {
+            return { kind: 'present', content: this.readText(absolutePath) };
+        } catch (error) {
+            return isMissingFileError(error)
+                ? { kind: 'missing' }
+                : { kind: 'unreadable', error };
+        }
     }
 
     readText(absolutePath: string): string {
@@ -53,4 +68,10 @@ export class VsCodeWorkspaceFileState implements FileStatePort {
     deleteFile(absolutePath: string): void {
         fs.unlinkSync(absolutePath);
     }
+}
+
+function isMissingFileError(error: unknown): boolean {
+    return error instanceof Error
+        && 'code' in error
+        && (error as NodeJS.ErrnoException).code === 'ENOENT';
 }

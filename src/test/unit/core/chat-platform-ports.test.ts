@@ -55,6 +55,7 @@ describe('portable chat platform ports', () => {
         const fileChanges = {
             fileState: {
                 resolvePath: vi.fn((filePath: string) => filePath),
+                captureText: vi.fn(() => ({ kind: 'missing' as const })),
                 readText: vi.fn(() => ''),
                 exists: vi.fn(() => false),
                 writeText: vi.fn(),

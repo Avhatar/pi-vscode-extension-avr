@@ -2124,10 +2124,15 @@ body[data-mode="panel"] .input-container {
     border-radius: 4px;
     transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
-.changed-files-link:hover {
+.changed-files-link:hover:not(:disabled) {
     color: var(--fg);
     background: rgba(255, 255, 255, 0.06);
     border-color: var(--muted);
+}
+.changed-files-link:disabled {
+    color: var(--muted);
+    cursor: not-allowed;
+    opacity: 0.5;
 }
 
 .changed-files-review-btn {

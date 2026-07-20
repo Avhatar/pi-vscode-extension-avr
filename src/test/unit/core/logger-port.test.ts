@@ -13,12 +13,12 @@ describe('portable session logger port', () => {
         expect(appendLine).toHaveBeenCalledWith('session ready');
     });
 
-    it('preserves the portable logger for replacement session construction', () => {
+    it('preserves the portable logger for replacement session construction', async () => {
         const logger: Logger = { appendLine: vi.fn() };
         const manager = new PiSessionManager(logger);
 
         expect(manager.logger).toBe(logger);
 
-        manager.dispose();
+        await manager.dispose();
     });
 });

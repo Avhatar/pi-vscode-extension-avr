@@ -1,4 +1,4 @@
-import { TurnNotificationGate } from '../../notifications/turn-notification-gate';
+import { TurnNotificationGate } from './turn-notification-gate';
 import type { CacheEffective, CodexTurnUsage, CodexUsageSnapshot } from '../../shared/agent-protocol';
 import type { ProjectToolSelectionDefault } from '../../shared/project-tool-default';
 
@@ -28,6 +28,7 @@ export interface TabRuntimeOptions<
     diffManager: TDiff;
     checkpointManager: TCheckpoint;
     projectToolDefault?: ProjectToolSelectionDefault;
+    initialTurnCounter?: number;
 }
 
 /**
@@ -57,6 +58,8 @@ export class TabRuntime<
     readonly turnNotificationGate: TurnNotificationGate;
     hasNotification: boolean;
     queuedMessages: string[];
+    queuedRetryHead?: string;
+    queuedRetryAttempts: number;
     isStreamingLocal: boolean;
     isCompacting: boolean;
     codexTurnBaseline?: CodexUsageSnapshot | null;
@@ -65,7 +68,7 @@ export class TabRuntime<
     lastTurnEndAt: number;
     maxIdleGapMs: number;
     cacheEffective: CacheEffective;
-    readonly pendingTools: Map<string, { name: string; startTime: number }>;
+    readonly pendingTools: Map<string, { name: string; startTime: number; args?: unknown }>;
     projectToolDefault?: ProjectToolSelectionDefault;
 
     private _subscriptions: Array<() => void> = [];
@@ -77,7 +80,7 @@ export class TabRuntime<
         this.session = options.session;
         this.diffManager = options.diffManager;
         this.checkpointManager = options.checkpointManager;
-        this.turnCounter = 0;
+        this.turnCounter = Math.max(0, Math.trunc(options.initialTurnCounter ?? 0));
         this.suspendedMessages = [];
         this.streamingText = '';
         this.streamingThinking = '';
@@ -90,6 +93,7 @@ export class TabRuntime<
         this.turnNotificationGate = new TurnNotificationGate();
         this.hasNotification = false;
         this.queuedMessages = [];
+        this.queuedRetryAttempts = 0;
         this.isStreamingLocal = false;
         this.isCompacting = false;
         this.errorReportedThisRun = false;
@@ -124,9 +128,12 @@ export class TabRuntime<
         if (didThrow) throw firstError;
     }
 
-    resetSessionProjection(projectToolDefault?: ProjectToolSelectionDefault): void {
+    resetSessionProjection(
+        projectToolDefault?: ProjectToolSelectionDefault,
+        initialTurnCounter = 0,
+    ): void {
         this.projectToolDefault = projectToolDefault;
-        this.turnCounter = 0;
+        this.turnCounter = Math.max(0, Math.trunc(initialTurnCounter));
         this.suspendedMessages = [];
         this.name = 'New Agent';
         this.streamingText = '';
@@ -141,6 +148,8 @@ export class TabRuntime<
         this.messageMeta.clear();
         this.turnNotificationGate.reset();
         this.queuedMessages = [];
+        this.queuedRetryHead = undefined;
+        this.queuedRetryAttempts = 0;
         this.lastTurnEndAt = 0;
         this.maxIdleGapMs = 0;
     }

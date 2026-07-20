@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { SessionRuntimePorts } from '../../../core/ports/session-platform';
 import {
     VsCodeSessionSettings,
@@ -38,16 +40,34 @@ describe('portable session workspace and settings ports', () => {
         expect(source.getConfiguration).toHaveBeenCalledWith('pi-code');
     });
 
-    it('composes explicit bundled-package paths without deriving host locations', () => {
+    it('composes explicit bundled-package paths and Codex response ownership', () => {
         const bundledPiPackagePaths = ['X:/extensions/pi-code/node_modules/pi-web-access'];
+        const codexUsage = { updateFromHeaders: vi.fn(() => true) };
 
-        const ports = createVsCodeSessionRuntimePorts({ bundledPiPackagePaths });
+        const ports = createVsCodeSessionRuntimePorts(
+            { bundledPiPackagePaths },
+            codexUsage,
+        );
 
         expect(ports.resources.bundledPiPackagePaths).toBe(bundledPiPackagePaths);
+        expect(ports.codexUsage).toBe(codexUsage);
         expect(createVsCodeSessionRuntimePorts().resources.bundledPiPackagePaths).toEqual([]);
     });
 
-    it('preserves one port set for replacement session construction', () => {
+    it('keeps session, auth, Codex persistence, and tab notification state free of VS Code imports', () => {
+        const readSource = (relativePath: string) => fs.readFileSync(path.resolve(relativePath), 'utf8');
+        const sessionSource = readSource('src/pi/session.ts');
+        const authSource = readSource('src/pi/auth.ts');
+        const codexSource = readSource('src/pi/codex-usage-store.ts');
+        const tabSource = readSource('src/core/chat/tab-runtime.ts');
+
+        expect(authSource).not.toMatch(/from ['"]vscode['"]/);
+        expect(codexSource).not.toMatch(/from ['"]vscode['"]/);
+        expect(sessionSource).not.toMatch(/from ['"].*codex-usage-store['"]/);
+        expect(tabSource).not.toMatch(/notifications\/turn-notification-gate/);
+    });
+
+    it('preserves one port set for replacement session construction', async () => {
         const ports: SessionRuntimePorts = {
             workspace: {
                 getRoot: () => '/workspace',
@@ -61,6 +81,9 @@ describe('portable session workspace and settings ports', () => {
             },
             resources: {
                 bundledPiPackagePaths: ['/extension/node_modules/pi-web-access'],
+            },
+            codexUsage: {
+                updateFromHeaders: () => false,
             },
         };
         const secrets = {
@@ -95,7 +118,7 @@ describe('portable session workspace and settings ports', () => {
         expect(replacement.secrets).toBe(manager.secrets);
         expect(replacement.ports).toBe(ports);
 
-        replacement.dispose();
-        manager.dispose();
+        await replacement.dispose();
+        await manager.dispose();
     });
 });

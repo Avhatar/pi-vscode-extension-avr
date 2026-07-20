@@ -2,6 +2,9 @@ export const TURN_LIFECYCLE_CUSTOM_TYPE = 'pi-code.turn-lifecycle';
 
 const CONVERSATION_ROLES = new Set(['user', 'assistant', 'toolResult', 'tool']);
 const TOOL_CALL_TYPES = new Set(['toolCall', 'tool_call', 'tool_use']);
+const TERMINAL_TOOL_CALL_STOP_REASONS = new Set(['aborted', 'error']);
+
+export type TurnLifecycleStatus = 'started' | 'completed';
 
 /**
  * Detects a persisted conversation tail that cannot be complete without
@@ -9,10 +12,15 @@ const TOOL_CALL_TYPES = new Set(['toolCall', 'tool_call', 'tool_use']);
  * it never implies that replaying a side-effecting tool is safe.
  */
 export function hasIncompleteTurnTail(messages: readonly unknown[]): boolean {
-    const last = [...messages].reverse().find((message) => {
-        const role = getRole(message);
-        return role !== undefined && CONVERSATION_ROLES.has(role);
-    });
+    let last: unknown;
+    for (let index = messages.length - 1; index >= 0; index--) {
+        const candidate = messages[index];
+        const role = getRole(candidate);
+        if (role !== undefined && CONVERSATION_ROLES.has(role)) {
+            last = candidate;
+            break;
+        }
+    }
     if (!last || typeof last !== 'object') return false;
 
     const role = getRole(last);
@@ -24,6 +32,8 @@ export function hasIncompleteTurnTail(messages: readonly unknown[]): boolean {
     if (role !== 'assistant') return false;
 
     const message = last as Record<string, unknown>;
+    const stopReason = message.stopReason ?? message.stop_reason;
+    if (typeof stopReason === 'string' && TERMINAL_TOOL_CALL_STOP_REASONS.has(stopReason)) return false;
     if (hasItems(message.toolCalls) || hasItems(message.tool_calls)) return true;
     return Array.isArray(message.content)
         && message.content.some((part) => {
@@ -33,17 +43,24 @@ export function hasIncompleteTurnTail(messages: readonly unknown[]): boolean {
         });
 }
 
-export function hasInterruptedTurnLifecycle(entries: readonly unknown[]): boolean {
+export function getLatestTurnLifecycleStatus(
+    entries: readonly unknown[],
+): TurnLifecycleStatus | undefined {
     for (let index = entries.length - 1; index >= 0; index--) {
         const entry = entries[index];
         if (!entry || typeof entry !== 'object') continue;
         const candidate = entry as Record<string, unknown>;
         if (candidate.type !== 'custom' || candidate.customType !== TURN_LIFECYCLE_CUSTOM_TYPE) continue;
         const data = candidate.data;
-        if (!data || typeof data !== 'object') return false;
-        return (data as Record<string, unknown>).status === 'started';
+        if (!data || typeof data !== 'object') return undefined;
+        const status = (data as Record<string, unknown>).status;
+        return status === 'started' || status === 'completed' ? status : undefined;
     }
-    return false;
+    return undefined;
+}
+
+export function hasInterruptedTurnLifecycle(entries: readonly unknown[]): boolean {
+    return getLatestTurnLifecycleStatus(entries) === 'started';
 }
 
 function getRole(message: unknown): string | undefined {

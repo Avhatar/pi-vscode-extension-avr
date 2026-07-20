@@ -90,12 +90,9 @@ export class DiffManager {
         const filePath = event.args?.file_path ?? event.args?.path ?? '';
         if (!filePath) return;
 
-        let originalContent: string | null = null;
-        try {
-            originalContent = this._files.readText(this._resolveFilePath(filePath));
-        } catch {
-            // Missing and unreadable files are both treated as new baselines.
-        }
+        const snapshot = this._files.captureText(this._resolveFilePath(filePath));
+        if (snapshot.kind === 'unreadable') return;
+        const originalContent = snapshot.kind === 'present' ? snapshot.content : null;
 
         this._checkpoint.recordFileState(filePath, originalContent);
 
