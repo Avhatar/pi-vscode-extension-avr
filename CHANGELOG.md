@@ -7,8 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-07-20
+
 ### Added
 - Added production Node adapters for workspace discovery, filesystem state, session settings, persistent application state, dialogs, and logging as the foundation of the standalone host.
+- Added a production Node workspace file-mention index and watcher with the same search, exclusions, and prompt augmentation as the VS Code client.
 
 ### Changed
 - Continued the shared session-runtime extraction by moving host capabilities behind platform-neutral ports and centralizing Pi session ownership and replacement in a portable runtime.

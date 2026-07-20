@@ -1,53 +1,26 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { FileMentionsPort } from '../core/ports/chat-platform';
+import {
+    DEFAULT_FILE_MENTION_CONFIG_PATH,
+    augmentPromptWithFileMentions,
+    compileFileMentionExcludePatterns,
+    createFileMentionEntry,
+    extractValidFileMentions,
+    isFileMentionPathExcluded,
+    normalizeFileMentionPath,
+    resolveFileMentionConfig,
+    searchFileMentionEntries,
+    toFileMentionExcludeGlob,
+    type FileMentionConfig,
+    type FileMentionEntry,
+    type ProjectFileMentionConfig,
+} from '../core/files/file-mentions';
 import type { WorkspaceFileSuggestion } from '../shared/agent-protocol';
 
-interface WorkspaceFileEntry {
+interface WorkspaceFileEntry extends FileMentionEntry {
     uri: vscode.Uri;
-    relativePath: string;
-    relativePathLower: string;
-    basename: string;
-    basenameLower: string;
 }
-
-interface FileMentionsConfig {
-    enabled: boolean;
-    useDefaultExcludes: boolean;
-    exclude: string[];
-    maxSuggestions: number;
-    configPath: string;
-}
-
-interface ProjectFileMentionsConfig {
-    useDefaultExcludes?: boolean;
-    exclude?: string[];
-    maxSuggestions?: number;
-}
-
-const DEFAULT_EXCLUDES = [
-    '**/.git/**',
-    '**/node_modules/**',
-    '**/.next/**',
-    '**/.nuxt/**',
-    '**/dist/**',
-    '**/out/**',
-    '**/build/**',
-    '**/coverage/**',
-    '**/.vscode-test/**',
-    '**/*.map',
-    '**/.DS_Store',
-    '**/Thumbs.db',
-    '**/.env',
-    '**/.env.*',
-    '**/*.pem',
-    '**/*.key',
-    '**/id_rsa',
-    '**/id_ed25519',
-];
-
-const DEFAULT_MAX_SUGGESTIONS = 30;
-const DEFAULT_CONFIG_PATH = '.pi/file-mentions.json';
 const REBUILD_BURST_THRESHOLD = 25;
 const REBUILD_DEBOUNCE_MS = 800;
 
@@ -62,8 +35,8 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
     private _pendingWatcherEvents = 0;
     private _watcher: vscode.FileSystemWatcher | undefined;
     private _configWatcher: vscode.FileSystemWatcher | undefined;
-    private _configPath = DEFAULT_CONFIG_PATH;
-    private _config: FileMentionsConfig | undefined;
+    private _configPath = DEFAULT_FILE_MENTION_CONFIG_PATH;
+    private _config: FileMentionConfig | undefined;
     private _excludeRegexes: RegExp[] = [];
     private readonly _disposables: vscode.Disposable[] = [];
 
@@ -81,7 +54,7 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
             }),
         );
 
-        this._resetConfigWatcher(DEFAULT_CONFIG_PATH);
+        this._resetConfigWatcher(DEFAULT_FILE_MENTION_CONFIG_PATH);
     }
 
     get isReady(): boolean {
@@ -123,30 +96,11 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
         const config = this._config ?? await this._loadEffectiveConfig();
         if (!config.enabled) return [];
 
-        const limit = Math.max(1, Math.min(200, maxSuggestions ?? config.maxSuggestions));
-        const normalizedQuery = normalizePath(query).trim().toLowerCase();
-        const scored: Array<{ entry: WorkspaceFileEntry; score: number }> = [];
-
-        for (const entry of this._entries) {
-            const score = scoreEntry(entry, normalizedQuery);
-            if (score !== null) {
-                scored.push({ entry, score });
-            }
-        }
-
-        scored.sort((a, b) => {
-            if (a.score !== b.score) return a.score - b.score;
-            if (a.entry.relativePath.length !== b.entry.relativePath.length) {
-                return a.entry.relativePath.length - b.entry.relativePath.length;
-            }
-            return a.entry.relativePath.localeCompare(b.entry.relativePath);
-        });
-
-        return scored.slice(0, limit).map(({ entry }) => ({
-            relativePath: entry.relativePath,
-            basename: entry.basename,
-            insertText: formatMentionInsertText(entry.relativePath),
-        }));
+        return searchFileMentionEntries(
+            this._entries,
+            query,
+            maxSuggestions ?? config.maxSuggestions,
+        );
     }
 
     async augmentPromptIfNeeded(text: string): Promise<string> {
@@ -156,26 +110,12 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
     }
 
     augmentPrompt(text: string): string {
-        const mentions = this.extractValidMentions(text);
-        if (mentions.length === 0) return text;
-        return `${text}\n\nReferenced workspace files to inspect if needed:\n${mentions.map(p => `- ${p}`).join('\n')}`;
+        return augmentPromptWithFileMentions(text, this._entriesByRelativePath);
     }
 
     extractValidMentions(text: string): string[] {
-        if (!this._ready || this._entriesByRelativePath.size === 0) return [];
-        const found: string[] = [];
-        const seen = new Set<string>();
-
-        for (const candidate of parseMentionCandidates(text)) {
-            const normalized = normalizePath(candidate);
-            const key = normalized.toLowerCase();
-            const entry = this._entriesByRelativePath.get(key);
-            if (!entry || seen.has(key)) continue;
-            seen.add(key);
-            found.push(entry.relativePath);
-        }
-
-        return found;
+        if (!this._ready) return [];
+        return extractValidFileMentions(text, this._entriesByRelativePath);
     }
 
     dispose(): void {
@@ -212,8 +152,8 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
             return;
         }
 
-        this._excludeRegexes = config.exclude.map(globToRegExp);
-        const excludeGlob = toVsCodeExcludeGlob(config.exclude);
+        this._excludeRegexes = compileFileMentionExcludePatterns(config.exclude);
+        const excludeGlob = toFileMentionExcludeGlob(config.exclude);
         const started = Date.now();
         const uris = await vscode.workspace.findFiles('**/*', excludeGlob);
         const entries: WorkspaceFileEntry[] = [];
@@ -222,14 +162,7 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
         for (const uri of uris) {
             const relativePath = this._relativePath(uri);
             if (!relativePath || this._isExcluded(relativePath)) continue;
-            const basename = relativePath.split('/').pop() ?? relativePath;
-            const entry: WorkspaceFileEntry = {
-                uri,
-                relativePath,
-                relativePathLower: relativePath.toLowerCase(),
-                basename,
-                basenameLower: basename.toLowerCase(),
-            };
+            const entry: WorkspaceFileEntry = { uri, ...createFileMentionEntry(relativePath) };
             entries.push(entry);
             byPath.set(entry.relativePathLower, entry);
         }
@@ -241,39 +174,29 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
         this._outputChannel.appendLine(`Workspace file mention index ready: ${entries.length} file(s) in ${Date.now() - started} ms.`);
     }
 
-    private async _loadEffectiveConfig(): Promise<FileMentionsConfig> {
+    private async _loadEffectiveConfig(): Promise<FileMentionConfig> {
         const settings = vscode.workspace.getConfiguration('pi-code');
-        const projectConfigPath = normalizePath(settings.get<string>('fileMentions.configPath', DEFAULT_CONFIG_PATH) || DEFAULT_CONFIG_PATH);
-        const projectConfig = await this._loadProjectConfig(projectConfigPath);
-
-        const settingsUseDefaults = settings.get<boolean>('fileMentions.useDefaultExcludes', true);
-        const useDefaultExcludes = projectConfig.useDefaultExcludes ?? settingsUseDefaults;
-        const settingsExclude = settings.get<string[]>('fileMentions.exclude', []);
-        const projectExclude = Array.isArray(projectConfig.exclude) ? projectConfig.exclude : [];
-        const maxSuggestions = clampNumber(
-            projectConfig.maxSuggestions ?? settings.get<number>('fileMentions.maxSuggestions', DEFAULT_MAX_SUGGESTIONS),
-            1,
-            200,
-            DEFAULT_MAX_SUGGESTIONS,
+        const projectConfigPath = normalizeFileMentionPath(
+            settings.get<string>('fileMentions.configPath', DEFAULT_FILE_MENTION_CONFIG_PATH)
+                || DEFAULT_FILE_MENTION_CONFIG_PATH,
         );
-
-        return {
+        const projectConfig = await this._loadProjectConfig(projectConfigPath);
+        return resolveFileMentionConfig({
             enabled: settings.get<boolean>('fileMentions.enabled', true),
-            useDefaultExcludes,
-            exclude: uniquePatterns([
-                ...(useDefaultExcludes ? DEFAULT_EXCLUDES : []),
-                ...settingsExclude,
-                ...projectExclude,
-            ]),
-            maxSuggestions,
+            useDefaultExcludes: settings.get<boolean>('fileMentions.useDefaultExcludes', true),
+            exclude: settings.get<string[]>('fileMentions.exclude', []),
+            maxSuggestions: settings.get<number>('fileMentions.maxSuggestions', 30),
             configPath: projectConfigPath,
-        };
+        }, projectConfig);
     }
 
-    private async _loadProjectConfig(configPath: string): Promise<ProjectFileMentionsConfig> {
+    private async _loadProjectConfig(configPath: string): Promise<ProjectFileMentionConfig> {
         const workspaceFolder = getWorkspaceFolder();
         if (!workspaceFolder || !configPath) return {};
-        const uri = vscode.Uri.joinPath(workspaceFolder.uri, ...normalizePath(configPath).split('/').filter(Boolean));
+        const uri = vscode.Uri.joinPath(
+            workspaceFolder.uri,
+            ...normalizeFileMentionPath(configPath).split('/').filter(Boolean),
+        );
         try {
             const bytes = await vscode.workspace.fs.readFile(uri);
             const raw = Buffer.from(bytes).toString('utf8');
@@ -304,14 +227,7 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
         }
         const key = relativePath.toLowerCase();
         if (this._entriesByRelativePath.has(key)) return;
-        const basename = relativePath.split('/').pop() ?? relativePath;
-        const entry: WorkspaceFileEntry = {
-            uri,
-            relativePath,
-            relativePathLower: key,
-            basename,
-            basenameLower: basename.toLowerCase(),
-        };
+        const entry: WorkspaceFileEntry = { uri, ...createFileMentionEntry(relativePath) };
         this._entriesByRelativePath.set(key, entry);
         this._entries.push(entry);
         this._entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
@@ -359,7 +275,9 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
     }
 
     private _resetConfigWatcher(configPath: string): void {
-        const normalized = normalizePath(configPath || DEFAULT_CONFIG_PATH);
+        const normalized = normalizeFileMentionPath(
+            configPath || DEFAULT_FILE_MENTION_CONFIG_PATH,
+        );
         if (this._configWatcher && this._configPath === normalized) return;
         this._configWatcher?.dispose();
         this._configPath = normalized;
@@ -374,140 +292,14 @@ export class WorkspaceFileMentions implements vscode.Disposable, FileMentionsPor
         if (!workspaceFolder) return undefined;
         const rel = path.relative(workspaceFolder.uri.fsPath, uri.fsPath);
         if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return undefined;
-        return normalizePath(rel);
+        return normalizeFileMentionPath(rel);
     }
 
     private _isExcluded(relativePath: string): boolean {
-        const normalized = normalizePath(relativePath);
-        return this._excludeRegexes.some(regex => regex.test(normalized));
+        return isFileMentionPathExcluded(relativePath, this._excludeRegexes);
     }
 }
 
 function getWorkspaceFolder(): vscode.WorkspaceFolder | undefined {
     return vscode.workspace.workspaceFolders?.[0];
-}
-
-function formatMentionInsertText(relativePath: string): string {
-    return /\s/.test(relativePath) ? `@{${relativePath}} ` : `@${relativePath} `;
-}
-
-function parseMentionCandidates(text: string): string[] {
-    const candidates: string[] = [];
-
-    const braced = /@\{([^}\r\n]+)\}/g;
-    let bracedMatch: RegExpExecArray | null;
-    while ((bracedMatch = braced.exec(text)) !== null) {
-        candidates.push(bracedMatch[1].trim());
-    }
-
-    const normal = /(^|[\s([{:,;])@([^\s{}]+)/g;
-    let normalMatch: RegExpExecArray | null;
-    while ((normalMatch = normal.exec(text)) !== null) {
-        const raw = normalMatch[2];
-        if (!raw) continue;
-        const trimmed = raw.replace(/[.,;:!?\])]+$/g, '');
-        if (trimmed) candidates.push(trimmed);
-    }
-
-    return candidates;
-}
-
-function scoreEntry(entry: WorkspaceFileEntry, query: string): number | null {
-    if (!query) return 1000;
-
-    const basename = entry.basenameLower;
-    const relative = entry.relativePathLower;
-
-    if (basename === query) return 0;
-    if (basename.startsWith(query)) return 10 + basename.length - query.length;
-    const basenameIndex = basename.indexOf(query);
-    if (basenameIndex >= 0) return 100 + basenameIndex + basename.length * 0.01;
-    if (relative.startsWith(query)) return 200 + relative.length * 0.01;
-    const relativeIndex = relative.indexOf(query);
-    if (relativeIndex >= 0) return 300 + relativeIndex + relative.length * 0.01;
-
-    const fuzzy = fuzzyScore(relative, query);
-    if (fuzzy !== null) return 500 + fuzzy + relative.length * 0.01;
-
-    return null;
-}
-
-function fuzzyScore(value: string, query: string): number | null {
-    let valueIndex = 0;
-    let score = 0;
-    let lastMatch = -1;
-
-    for (let queryIndex = 0; queryIndex < query.length; queryIndex++) {
-        const ch = query[queryIndex];
-        const found = value.indexOf(ch, valueIndex);
-        if (found < 0) return null;
-        score += found - valueIndex;
-        if (lastMatch >= 0 && found === lastMatch + 1) score -= 1;
-        lastMatch = found;
-        valueIndex = found + 1;
-    }
-
-    return score;
-}
-
-function normalizePath(value: string): string {
-    return value.replace(/\\/g, '/').replace(/^\.\//, '');
-}
-
-function uniquePatterns(patterns: string[]): string[] {
-    const seen = new Set<string>();
-    const result: string[] = [];
-    for (const pattern of patterns) {
-        const normalized = normalizePath(String(pattern ?? '').trim());
-        if (!normalized || seen.has(normalized)) continue;
-        seen.add(normalized);
-        result.push(normalized);
-    }
-    return result;
-}
-
-function toVsCodeExcludeGlob(patterns: string[]): string | undefined {
-    if (patterns.length === 0) return undefined;
-    if (patterns.length === 1) return patterns[0];
-    return `{${patterns.join(',')}}`;
-}
-
-function globToRegExp(glob: string): RegExp {
-    const normalized = normalizePath(glob);
-    let source = '^';
-    for (let i = 0; i < normalized.length; i++) {
-        const ch = normalized[i];
-        const next = normalized[i + 1];
-        if (ch === '*') {
-            if (next === '*') {
-                const after = normalized[i + 2];
-                if (after === '/') {
-                    source += '(?:.*/)?';
-                    i += 2;
-                } else {
-                    source += '.*';
-                    i += 1;
-                }
-            } else {
-                source += '[^/]*';
-            }
-            continue;
-        }
-        if (ch === '?') {
-            source += '[^/]';
-            continue;
-        }
-        source += escapeRegExp(ch);
-    }
-    source += '$';
-    return new RegExp(source, 'i');
-}
-
-function escapeRegExp(value: string): string {
-    return value.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
-}
-
-function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
-    const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-    return Math.max(min, Math.min(max, Math.round(n)));
 }
