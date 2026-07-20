@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
+import { ChatService } from '../../../core/chat/chat-service';
 import { TabRegistry } from '../../../core/chat/tab-registry';
 
 function createRegistry(tabs: any[], activeId?: string): TabRegistry<any> {
@@ -12,7 +13,7 @@ function createRegistry(tabs: any[], activeId?: string): TabRegistry<any> {
 describe('ChatController tab registry integration', () => {
     it('activates only registered tabs when panel focus changes', () => {
         const first = { id: 'tab-a' };
-        const second = { id: 'tab-b' };
+        const second = { id: 'tab-b', hasNotification: true };
         const controller = Object.create(ChatController.prototype) as any;
         controller._tabs = createRegistry([first, second], first.id);
         controller._onLauncherStateChanged = { fire: vi.fn() };
@@ -22,6 +23,7 @@ describe('ChatController tab registry integration', () => {
         controller.markActiveTab('missing');
 
         expect(controller.activeTabId).toBe(second.id);
+        expect(second.hasNotification).toBe(true);
         expect(controller._onLauncherStateChanged.fire).toHaveBeenCalledOnce();
     });
 
@@ -86,6 +88,24 @@ describe('ChatController tab registry integration', () => {
         expect(controller.sendStateSync).toHaveBeenCalledWith(second.id);
     });
 
+    it('disposes an initialized session when tab resource construction fails', async () => {
+        const session = {
+            initializeFromPath: vi.fn(async () => undefined),
+            dispose: vi.fn(async () => undefined),
+        };
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._createSessionManager = vi.fn(() => session);
+        controller._createFileChangeManagers = vi.fn(() => { throw new Error('diff failed'); });
+
+        await expect(controller._createTabState({
+            kind: 'sessionPath',
+            sessionPath: '/sessions/restored.jsonl',
+        })).rejects.toThrow('diff failed');
+
+        expect(session.initializeFromPath).toHaveBeenCalledWith('/sessions/restored.jsonl');
+        expect(session.dispose).toHaveBeenCalledOnce();
+    });
+
     it('registers a restored session path without changing the active tab', async () => {
         const order: string[] = [];
         const existing = { id: 'tab-existing' };
@@ -104,7 +124,9 @@ describe('ChatController tab registry integration', () => {
             checkpoint: { dispose: vi.fn() },
             diff: { dispose: vi.fn() },
         }));
-        controller._updateTabName = vi.fn(() => order.push('name'));
+        controller._chatService = new ChatService({ now: () => 0 });
+        controller._onTabRenamed = { fire: vi.fn(() => order.push('name')) };
+        controller._onLauncherStateChanged = { fire: vi.fn(() => order.push('launcher')) };
         controller._subscribeTab = vi.fn(() => order.push('subscribe'));
         controller._persistTabs = vi.fn(() => order.push('persist'));
 
@@ -112,11 +134,14 @@ describe('ChatController tab registry integration', () => {
 
         expect(order).toEqual([
             'initialize:/sessions/restored.jsonl',
+            'persist',
             'name',
+            'launcher',
             'subscribe',
             'persist',
         ]);
         expect(controller._tabs.get(restoredId)?.session).toBe(session);
+        expect(controller._tabs.get(restoredId)?.name).toBe('first');
         expect(controller._tabs.get(restoredId)?.turnCounter).toBe(2);
         expect(controller.activeTabId).toBe(existing.id);
     });

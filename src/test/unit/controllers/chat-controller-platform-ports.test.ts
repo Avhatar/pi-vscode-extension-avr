@@ -104,6 +104,7 @@ describe('ChatController platform ports', () => {
         controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = {
             reduceEvent: vi.fn(() => order.push('reduce-event')),
+            updateTabName: vi.fn(() => ({ changed: false, name: 'Chat' })),
         };
         controller._onLauncherStateChanged = { fire: vi.fn() };
         controller._updateTabName = vi.fn();

@@ -8,19 +8,11 @@ import type { FileChangePlatformPorts } from '../core/ports/file-state';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
 import { ChatService, countUserTurns } from '../core/chat/chat-service';
-import { ChatApplication } from '../core/chat/chat-application';
 import {
-    ChatCommandService,
-    type ChatCommandIntent,
-} from '../core/chat/chat-command-service';
-import {
-    classifyAssistantTurnIssue,
-    collectOrphanedTools,
-    findLastAssistantMessage,
-    shouldDispatchQueueAfterTerminal,
-    shouldSyncStateForEvent,
-    turnCompletionOutcome,
-} from '../core/chat/chat-event-policy';
+    ChatHost,
+    type ChatHostTabRequest,
+} from '../core/chat/chat-host';
+import { collectOrphanedTools } from '../core/chat/chat-event-policy';
 import {
     projectLauncherState,
     type ActiveLauncherProjection,
@@ -34,6 +26,11 @@ import type {
     CacheMode, CacheEffective, LauncherSubagentSnapshot,
     TurnNotificationSettings,
 } from '../shared/protocol';
+import type {
+    AgentServerMessage,
+    FileAttachment,
+    ImageAttachment,
+} from '../shared/agent-protocol';
 import {
     createProjectToolSelectionDefault,
     parseProjectToolSelectionDefault,
@@ -64,7 +61,6 @@ import type { WriteIsolationManager } from '../pi/subagents/write-isolation';
 import type { ChildToolFactoryRegistry } from '../pi/subagents/child-tools';
 import { routeSubagentMutation } from '../pi/subagents/mutations';
 import { TurnNotifier } from '../notifications/turn-notifier';
-import { safeSerialize } from '../shared/safe-serialize';
 
 type TabState = TabRuntime<PiSessionManager, DiffManager, CheckpointManager>;
 
@@ -151,7 +147,7 @@ export class ChatController implements vscode.Disposable {
     private readonly _globalState: StateStore;
     private readonly _fileChangePorts: FileChangePlatformPorts;
     private readonly _chatService: ChatService;
-    private _commandService?: ChatCommandService;
+    private _hostInstance?: ChatHost<TabState>;
     private _context: vscode.ExtensionContext;
 
     private _cacheMode: CacheMode = 'auto';
@@ -161,18 +157,18 @@ export class ChatController implements vscode.Disposable {
     private static readonly NOTIFICATION_PLAY_SOUND_KEY = 'pi-code.notifications.playSound';
 
     private readonly _tabs = new TabRegistry<TabState>();
-    private _application?: ChatApplication<TabState>;
 
-    private get _app(): ChatApplication<TabState> {
-        if (!this._application || this._application.tabs !== this._tabs) {
-            this._application = new ChatApplication(this._tabs);
+    private get _host(): ChatHost<TabState> {
+        if (!this._hostInstance
+            || this._hostInstance.tabs !== this._tabs
+            || this._hostInstance.chat !== this._chatService) {
+            this._hostInstance = this._createChatHost();
         }
-        return this._application;
+        return this._hostInstance;
     }
 
-    private get _commands(): ChatCommandService {
-        this._commandService ??= new ChatCommandService(this._chatService);
-        return this._commandService;
+    private get _app() {
+        return this._host.application;
     }
 
     private get _activeTabId(): string {
@@ -251,7 +247,7 @@ export class ChatController implements vscode.Disposable {
             projectToolDefault: this._getProjectToolSelectionDefault(),
             initialTurnCounter: countUserTurns(initialSession.getMessages()),
         });
-        this._app.register(tab, { activate: true });
+        this._host.register(tab, { activate: true });
         this._subscribeTab(tab);
 
         this._authChangedSubscription = onAuthChanged((providerId) => {
@@ -322,7 +318,7 @@ export class ChatController implements vscode.Disposable {
             throw new Error(`Cannot register a panel for unknown tab: ${tabId}`);
         }
         this._openPanels.set(tabId, panel);
-        this._app.activate(tabId);
+        this._host.activateTab(tabId);
         this._persistTabs();
         this._onLauncherStateChanged.fire();
     }
@@ -335,7 +331,7 @@ export class ChatController implements vscode.Disposable {
      * once panels have been created.
      */
     markActiveTab(tabId: string): void {
-        if (!this._app.activate(tabId)) return;
+        if (!this._host.activateTab(tabId)) return;
         this._onLauncherStateChanged.fire();
     }
 
@@ -373,16 +369,9 @@ export class ChatController implements vscode.Disposable {
             try { (panel as any).dispose(); } catch { /* ignore */ }
         }
 
-        const tab = this._tabs.get(tabId);
-        if (!tab) {
+        if (!await this._host.dropTab(tabId)) {
             this._onLauncherStateChanged.fire();
-            return;
         }
-
-        await this._app.remove(tabId);
-
-        this._persistTabs();
-        this._onLauncherStateChanged.fire();
     }
 
     /** Build a snapshot of launcher state (panel tabs + recent sessions). */
@@ -485,9 +474,7 @@ export class ChatController implements vscode.Disposable {
         }
 
         const loadedTabId = this.findTabIdBySessionPath(sessionPath);
-        if (loadedTabId) {
-            await this._app.remove(loadedTabId);
-        }
+        if (loadedTabId) await this._host.detachTab(loadedTabId);
 
         await this._subagentStore.deleteByParentSessionPath(sessionPath);
         await unlink(sessionPath);
@@ -517,36 +504,192 @@ export class ChatController implements vscode.Disposable {
         return { checkpoint, diff };
     }
 
+    private _createChatHost(): ChatHost<TabState> {
+        return new ChatHost({
+            tabs: this._tabs,
+            chat: this._chatService,
+            factory: (request) => this._createTabState(request),
+            commandCallbacks: (tab) => this._createCommandCallbacks(tab),
+            stateContext: (tab) => ({
+                cacheMode: this._cacheMode,
+                getCacheEffective: () => this._computeEffectiveCache(tab),
+                getFileUndoViewEnabled: () => this._isFileUndoViewEnabledFor(tab),
+            }),
+            preferences: {
+                getCacheMode: () => this._cacheMode,
+                setCacheMode: async (mode) => {
+                    this._cacheMode = mode;
+                    await this._globalState.update('pi-code.cacheMode', mode);
+                },
+                getFavorites: () => [...this._favoriteModels],
+                setFavorites: async (favorites) => {
+                    this._favoriteModels = new Set(favorites);
+                    await this._globalState.update(
+                        ChatController.FAVORITES_KEY,
+                        [...this._favoriteModels],
+                    );
+                },
+                getProjectToolDefault: () => this._getProjectToolSelectionDefault(),
+                applyPersistedToolSelection: (tab) => this._applyPersistedToolSelection(tab),
+                refreshCacheEffective: (tab) => {
+                    tab.cacheEffective = this._computeEffectiveCache(tab);
+                },
+                getDisabledTools: (tab) => this._getDisabledToolsFor(tab),
+                setDisabledTools: (tab, disabled) => this._setDisabledToolsFor(tab, [...disabled]),
+                setTodoEnabled: (tab, enabled) => writeSessionBoolean(
+                    this._workspaceState,
+                    TODO_ENABLED_KEY_PREFIX,
+                    tab.session.sessionPath,
+                    enabled,
+                ),
+                setSubagentsEnabled: (tab, enabled) => this._subagentGate.setEnabled(
+                    tab.session.sessionPath,
+                    enabled,
+                    false,
+                ),
+                setPlanModeEnabled: (tab, enabled) => writeSessionBoolean(
+                    this._workspaceState,
+                    PLAN_MODE_KEY_PREFIX,
+                    tab.session.sessionPath,
+                    enabled,
+                ),
+                setFileUndoViewEnabled: (tab, enabled) => writeSessionBoolean(
+                    this._workspaceState,
+                    FILE_UNDO_VIEW_KEY_PREFIX,
+                    tab.session.sessionPath,
+                    enabled,
+                ),
+            },
+            effects: {
+                bindTab: (tab) => this._subscribeTab(tab),
+                persistTabs: () => this._persistTabs(),
+                tabsChanged: () => this._onLauncherStateChanged.fire(),
+                publishState: (tabId) => this.sendStateSync(tabId),
+                openTab: (tabId) => this._panelOpener?.(tabId),
+                activeTabChanged: (tab) => {
+                    void vscode.commands.executeCommand(
+                        'setContext',
+                        'pi-code.isStreaming',
+                        tab.isStreamingLocal,
+                    );
+                },
+                tabRenamed: (tabId, name) => this._onTabRenamed.fire({ tabId, name }),
+                modelsChanged: () => this._broadcastModels(),
+                reportCommandFailure: (messageType, tabId, error) => {
+                    this._reportCommandFailure(messageType, tabId, error);
+                },
+                restoreFailed: (entry, error) => {
+                    const message = error instanceof Error ? error.message : String(error);
+                    this._outputChannel.appendLine(
+                        `Failed to restore tab "${entry.name}": ${message}`,
+                    );
+                },
+            },
+            eventEffects: {
+                agentStarted: (tab) => {
+                    const currentModel = tab.session.getCurrentModel();
+                    const currentUsage = getCodexUsageStore().getCurrent();
+                    tab.codexTurnModelId = currentModel?.provider === 'openai-codex'
+                        ? currentModel.id
+                        : undefined;
+                    tab.codexTurnBaseline = tab.codexTurnModelId
+                        && currentUsage
+                        && !isCodexUsageStale(currentUsage)
+                        ? currentUsage
+                        : null;
+                },
+                streamingContextChanged: (isStreaming) => {
+                    void vscode.commands.executeCommand(
+                        'setContext',
+                        'pi-code.isStreaming',
+                        isStreaming,
+                    );
+                },
+                reportAgentError: (tab, raw, assistantMessage) => {
+                    this._postAgentError(tab, raw, assistantMessage);
+                },
+                reportAgentNotice: (tab, message, severity, assistantMessage) => {
+                    this._postAgentNotice(tab, message, severity, assistantMessage);
+                },
+                showAutoRetry: (event) => {
+                    const delaySec = Math.max(1, Math.round((event.delayMs ?? 0) / 1000));
+                    const reason = trimErrorForStatus(event.errorMessage);
+                    const text = `Pi: rate limited, retry ${event.attempt}/${event.maxAttempts} in ${delaySec}s — ${reason}`;
+                    vscode.window.setStatusBarMessage(text, (delaySec + 2) * 1000);
+                },
+                logTurnEnd: (tab, assistantMessage) => this._logTurnEnd(tab, assistantMessage),
+                sweepPendingTools: (tab, assistantMessage) => {
+                    this._sweepPendingTools(tab, assistantMessage);
+                },
+                completeAgentEndAccounting: async (tab) => {
+                    const baseline = tab.codexTurnBaseline;
+                    const codexModelId = tab.codexTurnModelId;
+                    tab.codexTurnBaseline = undefined;
+                    tab.codexTurnModelId = undefined;
+                    if (codexModelId) await this._refreshCodexUsageForTab(tab, 'turn ended');
+                    return computeCodexTurnUsage(
+                        baseline ?? null,
+                        getCodexUsageStore().getCurrent(),
+                        codexModelId,
+                    );
+                },
+                notifyTurnCompletion: (completion) => {
+                    this._turnNotifier.notify(completion, this.getTurnNotificationSettings());
+                },
+                emitAgentEvent: (tabId, event) => {
+                    this._postForTab(tabId, { type: 'agentEvent', event });
+                },
+                dispatchNextQueued: (tab) => this._dispatchNextQueuedMessage(tab),
+            },
+        });
+    }
+
+    private async _createTabState(request: ChatHostTabRequest): Promise<TabState> {
+        const session = this._createSessionManager();
+        let checkpoint: CheckpointManager | undefined;
+        let diff: DiffManager | undefined;
+        let tab: TabState | undefined;
+        try {
+            if (request.kind === 'new') await session.initialize();
+            else await session.initializeFromPath(request.sessionPath);
+
+            ({ checkpoint, diff } = this._createFileChangeManagers(session));
+            tab = new TabRuntime({
+                id: nextTabId(),
+                session,
+                diffManager: diff,
+                checkpointManager: checkpoint,
+                projectToolDefault: request.kind === 'new'
+                    ? this._getProjectToolSelectionDefault()
+                    : undefined,
+                initialTurnCounter: countUserTurns(session.getMessages()),
+            });
+            if (request.kind === 'sessionPath' && request.name) tab.name = request.name;
+            return tab;
+        } catch (error) {
+            if (tab) {
+                await tab.disposeResources().catch(() => undefined);
+            } else {
+                await Promise.resolve(diff?.dispose()).catch(() => undefined);
+                await Promise.resolve(checkpoint?.dispose()).catch(() => undefined);
+                await Promise.resolve(session.dispose()).catch(() => undefined);
+            }
+            throw error;
+        }
+    }
+
     /**
      * Load a session from disk into a brand-new tab and return its id.
      * Used by the panel serializer when restoring a panel whose session
      * is not currently represented by any tab.
      */
     async createTabFromSessionPath(sessionPath: string): Promise<string> {
-        const session = this._createSessionManager();
-        await session.initializeFromPath(sessionPath);
-
-        const { checkpoint, diff } = this._createFileChangeManagers(session);
-
-        const id = nextTabId();
-        const tab = new TabRuntime({
-            id,
-            session,
-            diffManager: diff,
-            checkpointManager: checkpoint,
-            initialTurnCounter: countUserTurns(session.getMessages()),
-        });
-        this._updateTabName(tab);
-
-        this._app.register(tab);
-        this._subscribeTab(tab);
-        this._persistTabs();
-        return id;
+        return this._host.createTabFromSessionPath(sessionPath);
     }
 
     /** Public: create a new agent tab. */
     async createTab(): Promise<string> {
-        return this._createTab();
+        return this._host.createTab();
     }
 
     /** Public: tell the active sidebar view to show the session history list. */
@@ -723,26 +866,12 @@ export class ChatController implements vscode.Disposable {
         return this._subagentGate.isEnabled(tab.session.sessionPath);
     }
 
-    private async _setSubagentsEnabledFor(tab: TabState, enabled: boolean): Promise<boolean> {
-        const changed = await this._subagentGate.setEnabled(
-            tab.session.sessionPath,
-            enabled,
-            this._isTabBusy(tab),
-        );
-        if (!changed) return false;
-        this._applyPersistedToolSelection(tab);
-        this._onLauncherStateChanged.fire();
-        return true;
-    }
-
     async setActiveTabSubagentsEnabled(enabled: boolean): Promise<void> {
         if (this._subagentSmokeSnapshot) {
             this._subagentSmokeSnapshot = undefined;
             this._subagentSmokeTranscripts.clear();
         }
-        const tab = this._tabs.get(this._activeTabId);
-        if (!tab) return;
-        await this._setSubagentsEnabledFor(tab, enabled);
+        await this._host.setActiveSubagentsEnabled(enabled);
     }
 
     stopActiveTabSubagent(agentId: string): boolean {
@@ -921,76 +1050,22 @@ export class ChatController implements vscode.Disposable {
         );
     }
 
-    private async _setTodoEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
-        await writeSessionBoolean(
-            this._workspaceState,
-            TODO_ENABLED_KEY_PREFIX,
-            tab.session.sessionPath,
-            enabled,
-        );
-        this._applyPersistedToolSelection(tab);
-        this._onLauncherStateChanged.fire();
-    }
-
     /** Public entry for the launcher's toggle click. Routes to the
      *  active tab. Ignored if the active tab is busy — the launcher
      *  webview also greys out the toggle, this is belt-and-braces. */
     async setActiveTabTodoEnabled(enabled: boolean): Promise<void> {
-        const tab = this._tabs.get(this._activeTabId);
-        if (!tab) return;
-        if (this._isTabBusy(tab)) return;
-        await this._setTodoEnabledFor(tab, enabled);
+        await this._host.setActiveTodoEnabled(enabled);
     }
 
     /** Public entry — flip a single tool's disabled state via the Tools panel. */
     async setActiveTabToolDisabled(toolName: string, disabled: boolean): Promise<void> {
-        const tab = this._tabs.get(this._activeTabId);
-        if (!tab) return;
-        if (this._isTabBusy(tab)) return;
-
-        // `todo` has its own persisted flag (existing UX + config default).
-        // Route through the ToDo toggle path so the two views stay in sync.
-        if (toolName === 'todo') {
-            await this._setTodoEnabledFor(tab, !disabled);
-            return;
-        }
-        if (toolName === 'subagent') {
-            await this._setSubagentsEnabledFor(tab, !disabled);
-            return;
-        }
-
-        const current = new Set(this._getDisabledToolsFor(tab));
-        if (disabled) current.add(toolName);
-        else current.delete(toolName);
-        await this._setDisabledToolsFor(tab, [...current]);
-        this._applyPersistedToolSelection(tab);
-        this._onLauncherStateChanged.fire();
+        await this._host.setActiveToolDisabled(toolName, disabled);
     }
 
     /** Public entry — replace the disabled-tools list wholesale (used by
      *  the Enable-all / Disable-all buttons and by Paste). */
     async setActiveTabToolsBulk(disabled: string[]): Promise<void> {
-        const tab = this._tabs.get(this._activeTabId);
-        if (!tab) return;
-        if (this._isTabBusy(tab)) return;
-
-        const filtered = disabled.filter((t) => typeof t === 'string' && t.length > 0);
-        // Split dedicated capability tools out of the generic denylist so
-        // their per-chat toggle storage remains authoritative.
-        const wantsTodoDisabled = filtered.includes('todo');
-        const wantsSubagentDisabled = filtered.includes('subagent');
-        const others = filtered.filter((t) => t !== 'todo' && t !== 'subagent');
-
-        await writeSessionBoolean(
-            this._workspaceState,
-            TODO_ENABLED_KEY_PREFIX,
-            tab.session.sessionPath,
-            !wantsTodoDisabled,
-        );
-        await this._subagentGate.setEnabled(tab.session.sessionPath, !wantsSubagentDisabled, false);
-        await this._setDisabledToolsFor(tab, others);
-        this._applyPersistedToolSelection(tab);
-        this._onLauncherStateChanged.fire();
+        await this._host.setActiveToolsBulk(disabled);
     }
 
     /** Copy the active tab's tool selection as JSON to the system clipboard.
@@ -1055,20 +1130,15 @@ export class ChatController implements vscode.Disposable {
         }
         const others = cfg.disabled.filter((t: unknown): t is string =>
             typeof t === 'string' && t.length > 0 && t !== 'todo' && t !== 'subagent');
-        await writeSessionBoolean(
-            this._workspaceState,
-            TODO_ENABLED_KEY_PREFIX,
-            tab.session.sessionPath,
-            cfg.todoEnabled,
-        );
         const subagentsEnabled = typeof cfg.subagentsEnabled === 'boolean'
             ? cfg.subagentsEnabled
             : !cfg.disabled.includes('subagent');
-        await this._subagentGate.setEnabled(tab.session.sessionPath, subagentsEnabled, false);
-        await this._setDisabledToolsFor(tab, others);
-        this._applyPersistedToolSelection(tab);
-        this._onLauncherStateChanged.fire();
-        vscode.window.setStatusBarMessage('Pi Code: tool selection pasted.', 2500);
+        const applied = await this._host.applyActiveToolSelection({
+            todoEnabled: cfg.todoEnabled,
+            subagentsEnabled,
+            disabled: others,
+        });
+        if (applied) vscode.window.setStatusBarMessage('Pi Code: tool selection pasted.', 2500);
     }
 
     private _isTabBusy(tab: TabState): boolean {
@@ -1147,22 +1217,9 @@ export class ChatController implements vscode.Disposable {
         );
     }
 
-    private async _setPlanModeEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
-        await writeSessionBoolean(
-            this._workspaceState,
-            PLAN_MODE_KEY_PREFIX,
-            tab.session.sessionPath,
-            enabled,
-        );
-        this._onLauncherStateChanged.fire();
-    }
-
     /** Public entry for the launcher's Plan Mode toggle click. */
     async setActiveTabPlanModeEnabled(enabled: boolean): Promise<void> {
-        const tab = this._tabs.get(this._activeTabId);
-        if (!tab) return;
-        if (this._isTabBusy(tab)) return;
-        await this._setPlanModeEnabledFor(tab, enabled);
+        await this._host.setActivePlanModeEnabled(enabled);
     }
 
     // ── File Undo View ──
@@ -1182,181 +1239,17 @@ export class ChatController implements vscode.Disposable {
         );
     }
 
-    private async _setFileUndoViewEnabledFor(tab: TabState, enabled: boolean): Promise<void> {
-        await writeSessionBoolean(
-            this._workspaceState,
-            FILE_UNDO_VIEW_KEY_PREFIX,
-            tab.session.sessionPath,
-            enabled,
-        );
-        // Push fresh state to the chat panel so the bar appears/hides
-        // immediately, and to the launcher so the toggle reflects the
-        // new value.
-        this.sendStateSync(tab.id);
-        this._onLauncherStateChanged.fire();
-    }
-
     /** Public entry for the launcher's File Undo View toggle click. */
     async setActiveTabFileUndoViewEnabled(enabled: boolean): Promise<void> {
-        const tab = this._tabs.get(this._activeTabId);
-        if (!tab) return;
-        await this._setFileUndoViewEnabledFor(tab, enabled);
+        await this._host.setActiveFileUndoViewEnabled(enabled);
     }
 
     private async _handleTabEvent(tab: TabState, event: any): Promise<void> {
-        let dispatchQueuedAfterEvent = false;
-        let queuedDispatchReserved = false;
-        if (event.type === 'agent_start') tab.session.markTurnStarted?.();
-        this._chatService.reduceEvent(tab, event);
-
-        if (event.type === 'agent_start') {
-            const currentModel = tab.session.getCurrentModel();
-            const currentUsage = getCodexUsageStore().getCurrent();
-            tab.codexTurnModelId = currentModel?.provider === 'openai-codex' ? currentModel.id : undefined;
-            tab.codexTurnBaseline = tab.codexTurnModelId && currentUsage && !isCodexUsageStale(currentUsage)
-                ? currentUsage
-                : null;
-            if (tab.id === this._activeTabId) {
-                vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
-            }
-            this._onLauncherStateChanged.fire();
-        }
-
-        if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'error'
-            && event.assistantMessageEvent.reason === 'error') {
-            const raw = event.assistantMessageEvent.error?.errorMessage;
-            this._postAgentError(tab, raw);
-        }
-
-        if (event.type === 'auto_retry_start') {
-            const delaySec = Math.max(1, Math.round((event.delayMs ?? 0) / 1000));
-            const reason = trimErrorForStatus(event.errorMessage);
-            const text = `Pi: rate limited, retry ${event.attempt}/${event.maxAttempts} in ${delaySec}s — ${reason}`;
-            vscode.window.setStatusBarMessage(text, (delaySec + 2) * 1000);
-        }
-
-        if (event.type === 'compaction_start') {
-            if (tab.id === this._activeTabId) {
-                vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
-            }
-            this._onLauncherStateChanged.fire();
-        }
-
-        if (event.type === 'compaction_end') {
-            if (tab.id === this._activeTabId && !tab.isStreamingLocal) {
-                vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
-            }
-            this._onLauncherStateChanged.fire();
-        }
-
-        if (event.type === 'agent_end') {
-            // Persist completion before slower post-turn accounting so a window
-            // reload cannot misclassify a settled terminal-tool batch.
-            tab.session.markTurnCompleted?.();
-            const lastAssistant = findLastAssistantMessage(tab.session.getMessages());
-            if (!tab.errorReportedThisRun && lastAssistant) {
-                const issue = classifyAssistantTurnIssue(lastAssistant);
-                if (issue?.kind === 'provider-error') {
-                    this._postAgentError(tab, issue.message, lastAssistant);
-                } else if (issue?.kind === 'notice' && issue.message && issue.severity) {
-                    this._postAgentNotice(tab, issue.message, issue.severity, lastAssistant);
-                }
-            }
-            this._logTurnEnd(tab, lastAssistant);
-            this._sweepPendingTools(tab, lastAssistant);
-            const agentEndProjection = this._chatService.beginAgentEnd(
-                tab,
-                turnCompletionOutcome(lastAssistant),
-            );
-            const baseline = tab.codexTurnBaseline;
-            const codexModelId = tab.codexTurnModelId;
-            tab.codexTurnBaseline = undefined;
-            tab.codexTurnModelId = undefined;
-            if (codexModelId) {
-                await this._refreshCodexUsageForTab(tab, 'turn ended');
-            }
-            const after = getCodexUsageStore().getCurrent();
-            const turn = computeCodexTurnUsage(baseline ?? null, after, codexModelId);
-            this._chatService.completeAgentEnd(tab, agentEndProjection, turn);
-            if (tab.id === this._activeTabId) {
-                vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
-            }
-            this._persistTabs();
-            this._onLauncherStateChanged.fire();
-
-            // EventRouter does not await async reducers. If the SDK reached
-            // agent_settled while Codex accounting above was still pending,
-            // this agent_end reducer is responsible for dispatching after it
-            // finishes publishing the old run's terminal state.
-            dispatchQueuedAfterEvent = shouldDispatchQueueAfterTerminal(event.type, {
-                isStreamingLocal: tab.isStreamingLocal,
-                isSessionStreaming: tab.session.serializeState().isStreaming,
-            });
-        }
-
-        if (event.type === 'agent_settled') {
-            const completion = this._chatService.settleAgent(tab);
-            if (completion) {
-                this._turnNotifier.notify(completion, this.getTurnNotificationSettings());
-                if (tab.id !== this._activeTabId) {
-                    tab.hasNotification = true;
-                    this._persistTabs();
-                    this._onLauncherStateChanged.fire();
-                }
-            }
-
-            // AgentSession remains busy while it emits agent_end. Wait until
-            // both the SDK is settled and the async agent_end reducer has
-            // published the old run's terminal state before starting a normal
-            // prompt. If that reducer is still active, it dispatches instead.
-            dispatchQueuedAfterEvent = shouldDispatchQueueAfterTerminal(event.type, {
-                isStreamingLocal: tab.isStreamingLocal,
-                isSessionStreaming: tab.session.isStreaming,
-            });
-        }
-
-        this._updateTabName(tab);
-
-        if (dispatchQueuedAfterEvent && this._chatService.reserveQueuedDispatch(tab)) {
-            queuedDispatchReserved = true;
-            // Reserve the tab before publishing terminal state. The queued
-            // prompt may still need async file-mention expansion, and the
-            // webview must continue treating Enter as queueing during that gap.
-            if (event.type === 'agent_settled') {
-                // agent_settled is not part of the regular state-sync set below;
-                // publish the reservation before awaiting prompt augmentation.
-                this.sendStateSync(tab.id);
-            }
-        }
-
-        // Stream raw events to whoever is watching this tab (the sidebar if active, panels for this tab).
-        this._postForTab(tab.id, { type: 'agentEvent', event: safeSerialize(event) });
-
-        if (shouldSyncStateForEvent(event.type)) {
-            this.sendStateSync(tab.id);
-            // When activity happens on a non-active tab, also refresh the sidebar
-            // so its tab indicators (streaming spinner / unread dot) update.
-            if (tab.id !== this._activeTabId
-                && (event.type === 'agent_start' || event.type === 'agent_end')) {
-                this.sendStateSync(this._activeTabId);
-            }
-        }
-
-        if (event.type === 'compaction_end' && event.errorMessage) {
-            this._postForTab(tab.id, { type: 'error', message: event.errorMessage });
-        }
-
-        if (dispatchQueuedAfterEvent && queuedDispatchReserved) {
-            await this._dispatchNextQueuedMessage(tab);
-        }
+        await this._host.handleEvent(tab, event);
     }
 
     private _updateTabName(tab: TabState): void {
-        const update = this._chatService.updateTabName(tab);
-        if (!update.changed) return;
-        this._persistTabs();
-        this._onTabRenamed.fire({ tabId: tab.id, name: update.name });
-        this._onLauncherStateChanged.fire();
+        this._host.refreshTabName(tab);
     }
 
     /**
@@ -1368,20 +1261,12 @@ export class ChatController implements vscode.Disposable {
         const tab = this._tabs.get(targetId);
         if (!tab) return;
 
-        const state = this._chatService.buildState(tab, {
-            activeTabId: this._activeTabId,
-            getTabs: () => this._getTabInfos(),
-            cacheMode: this._cacheMode,
-            // Recompute on every sync so `auto` reflects the latest idle gap
-            // and context size without waiting for the next prompt.
-            getCacheEffective: () => this._computeEffectiveCache(tab),
-            getFileUndoViewEnabled: () => this._isFileUndoViewEnabledFor(tab),
-        });
-        this._postForTab(targetId, { type: 'stateSync', state });
+        const state = this._host.getState(targetId);
+        if (state) this._postForTab(targetId, { type: 'stateSync', state });
     }
 
     private _getTabInfos(): TabInfo[] {
-        return this._app.getTabInfos();
+        return this._host.application.getTabInfos();
     }
 
     /** Handle Pi's built-in session naming command without starting a model turn. */
@@ -1402,6 +1287,58 @@ export class ChatController implements vscode.Disposable {
         this._updateTabName(tab);
         if (publishState) this.sendStateSync(tab.id);
         return true;
+    }
+
+    private _createCommandCallbacks(tab: TabState) {
+        return {
+            directPrompt: {
+                decoratePrompt: (text: string) => decorateDirectPrompt(
+                    text,
+                    this._isPlanModeEnabledFor(tab),
+                ),
+                augmentPrompt: (text: string) => this._fileMentions.augmentPromptIfNeeded(text),
+                compact: (instructions?: string) => tab.session.compact(instructions),
+                prompt: (
+                    text: string,
+                    images?: ImageAttachment[],
+                    files?: FileAttachment[],
+                ) => tab.session.prompt(text, images, files),
+                prepareRequest: () => this._prepareCacheForRequest(tab),
+                logPrompt: () => this._logPromptToolState(tab, 'prompt'),
+                publishState: () => this.sendStateSync(tab.id),
+                reportDetachedFailure: (error: unknown) => {
+                    this._reportCommandFailure('prompt', tab.id, error);
+                },
+            },
+            streaming: {
+                augmentPrompt: (text: string) => this._fileMentions.augmentPromptIfNeeded(text),
+                prepareRequest: () => this._prepareCacheForRequest(tab),
+                logPrompt: (kind: 'steer' | 'followUp') => this._logPromptToolState(tab, kind),
+                steer: (
+                    text: string,
+                    images?: ImageAttachment[],
+                    files?: FileAttachment[],
+                ) => tab.session.steer(text, images, files),
+                followUp: (
+                    text: string,
+                    images?: ImageAttachment[],
+                    files?: FileAttachment[],
+                ) => tab.session.followUp(text, images, files),
+                abort: () => tab.session.abort(),
+            },
+            fileMentions: this._fileMentions,
+            handleName: (text: string, hasAttachments: boolean, publishState?: boolean) => (
+                this._handleNameCommand(tab, text, hasAttachments, publishState)
+            ),
+            publishState: () => this.sendStateSync(tab.id),
+            emit: (message: AgentServerMessage) => this._postForTab(tab.id, message),
+            notifyFileHistory: (kind: 'restore' | 'redo', fileCount: number) => {
+                const text = kind === 'restore'
+                    ? `Restored ${fileCount} file(s) to checkpoint.`
+                    : `Re-applied ${fileCount} file(s).`;
+                vscode.window.showInformationMessage(text);
+            },
+        };
     }
 
     /**
@@ -1460,50 +1397,8 @@ export class ChatController implements vscode.Disposable {
                     );
                     break;
                 default: {
-                    const outcome = await this._commands.dispatch(tab, msg, {
-                        directPrompt: {
-                            decoratePrompt: (text) => decorateDirectPrompt(
-                                text,
-                                this._isPlanModeEnabledFor(tab),
-                            ),
-                            augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
-                            compact: (instructions) => tab.session.compact(instructions),
-                            prompt: (text, images, files) => tab.session.prompt(text, images, files),
-                            prepareRequest: () => this._prepareCacheForRequest(tab),
-                            logPrompt: () => this._logPromptToolState(tab, 'prompt'),
-                            publishState: () => this.sendStateSync(tab.id),
-                            reportDetachedFailure: (error) => {
-                                this._reportCommandFailure(msg.type, tab.id, error);
-                            },
-                        },
-                        streaming: {
-                            augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
-                            prepareRequest: () => this._prepareCacheForRequest(tab),
-                            logPrompt: (kind) => this._logPromptToolState(tab, kind),
-                            steer: (text, images, files) => tab.session.steer(text, images, files),
-                            followUp: (text, images, files) => tab.session.followUp(text, images, files),
-                            abort: () => tab.session.abort(),
-                        },
-                        fileMentions: this._fileMentions,
-                        getFavorites: () => [...this._favoriteModels],
-                        handleName: (text, hasAttachments, publishState) => this._handleNameCommand(
-                            tab,
-                            text,
-                            hasAttachments,
-                            publishState,
-                        ),
-                        publishState: () => this.sendStateSync(tab.id),
-                        emit: (message) => this._postForTab(tab.id, message),
-                        notifyFileHistory: (kind, fileCount) => {
-                            const text = kind === 'restore'
-                                ? `Restored ${fileCount} file(s) to checkpoint.`
-                                : `Re-applied ${fileCount} file(s).`;
-                            vscode.window.showInformationMessage(text);
-                        },
-                    });
-                    if (outcome.intent) {
-                        await this._executeCommandIntent(tab, outcome.intent);
-                    }
+                    const result = await this._host.dispatch(msg, targetId);
+                    if (!result.ok) return result;
                     break;
                 }
             }
@@ -1518,66 +1413,6 @@ export class ChatController implements vscode.Disposable {
                 sourceTabId ?? this._activeTabId,
                 err,
             );
-        }
-    }
-
-    private async _executeCommandIntent(tab: TabState, intent: ChatCommandIntent): Promise<void> {
-        switch (intent.type) {
-            case 'setCacheMode':
-                this._cacheMode = intent.mode;
-                await this._globalState.update('pi-code.cacheMode', intent.mode);
-                for (const candidate of this._tabs.values()) {
-                    candidate.cacheEffective = this._computeEffectiveCache(candidate);
-                }
-                for (const id of this._tabs.keys()) this.sendStateSync(id);
-                return;
-            case 'toggleFavorite': {
-                const key = `${intent.provider}:${intent.modelId}`;
-                if (this._favoriteModels.has(key)) this._favoriteModels.delete(key);
-                else this._favoriteModels.add(key);
-                await this._globalState.update(
-                    ChatController.FAVORITES_KEY,
-                    [...this._favoriteModels],
-                );
-                this._broadcastModels();
-                return;
-            }
-            case 'newSession': {
-                await tab.session.newSession();
-                const projectToolDefault = this._getProjectToolSelectionDefault();
-                tab.projectToolDefault = projectToolDefault;
-                this._applyPersistedToolSelection(tab);
-                this._chatService.resetSessionProjection(
-                    tab,
-                    projectToolDefault,
-                    tab.session.getMessages(),
-                );
-                this._onTabRenamed.fire({ tabId: tab.id, name: tab.name });
-                this.sendStateSync(tab.id);
-                return;
-            }
-            case 'loadSession':
-                await tab.session.loadSession(intent.sessionPath);
-                tab.projectToolDefault = undefined;
-                this._applyPersistedToolSelection(tab);
-                this._chatService.resetSessionProjection(
-                    tab,
-                    undefined,
-                    tab.session.getMessages(),
-                );
-                this._updateTabName(tab);
-                this._persistTabs();
-                this.sendStateSync(tab.id);
-                return;
-            case 'createTab':
-                await this._createTab();
-                return;
-            case 'closeTab':
-                await this._closeTab(intent.tabId);
-                return;
-            case 'switchTab':
-                this._switchTab(intent.tabId);
-                return;
         }
     }
 
@@ -1735,61 +1570,15 @@ export class ChatController implements vscode.Disposable {
     }
 
     private async _createTab(): Promise<string> {
-        const newSession = this._createSessionManager();
-        await newSession.initialize();
-
-        const { checkpoint: newCheckpoint, diff: newDiff } =
-            this._createFileChangeManagers(newSession);
-
-        const id = nextTabId();
-        const tab = new TabRuntime({
-            id,
-            session: newSession,
-            diffManager: newDiff,
-            checkpointManager: newCheckpoint,
-            projectToolDefault: this._getProjectToolSelectionDefault(),
-            initialTurnCounter: countUserTurns(newSession.getMessages()),
-        });
-        this._app.register(tab, { activate: true });
-        this._subscribeTab(tab);
-
-        this._persistTabs();
-        this._onLauncherStateChanged.fire();
-        // Auto-open an editor panel for the new tab. After Phase 3 the
-        // sidebar is a launcher, so without this the user would create a
-        // tab and have nowhere to type into it.
-        this._panelOpener?.(id);
-        this.sendStateSync(id);
-        return id;
+        return this._host.createTab();
     }
 
     private async _closeTab(tabId: string): Promise<void> {
-        if (this._tabs.size <= 1) return;
-
-        const tab = this._tabs.get(tabId);
-        if (!tab) return;
-
-        await this._app.remove(tabId);
-
-        this._persistTabs();
-        this._onLauncherStateChanged.fire();
-        if (this._activeTabId) this.sendStateSync(this._activeTabId);
+        await this._host.closeTab(tabId);
     }
 
     private _switchTab(tabId: string): void {
-        if (!this._app.activate(tabId, { clearNotification: true })) return;
-
-        const tab = this._activeTab;
-        if (!tab) return;
-        if (tab.isStreamingLocal) {
-            vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', true);
-        } else {
-            vscode.commands.executeCommand('setContext', 'pi-code.isStreaming', false);
-        }
-
-        this._persistTabs();
-        this._onLauncherStateChanged.fire();
-        this.sendStateSync(this._activeTabId);
+        this._host.switchTab(tabId);
     }
 
     private _persistTabs(): void {
@@ -1812,53 +1601,11 @@ export class ChatController implements vscode.Disposable {
 
     async restorePersistedTabs(): Promise<void> {
         const persisted = this._workspaceState.get<PersistedTabsState>('pi-code.tabs');
-        if (!persisted || persisted.tabs.length === 0) { return; }
+        if (!persisted || persisted.tabs.length === 0) return;
 
-        // Remember the initial empty tab to dispose after successful restore
-        const initialTabId = this._activeTabId;
-        const initialTab = this._tabs.get(initialTabId);
-
-        const restoredIds: string[] = [];
-
-        for (const { name, sessionPath } of persisted.tabs) {
-            try {
-                const session = this._createSessionManager();
-                await session.initializeFromPath(sessionPath);
-
-                const { checkpoint, diff } = this._createFileChangeManagers(session);
-
-                const id = nextTabId();
-                const tab = new TabRuntime({
-                    id,
-                    session,
-                    diffManager: diff,
-                    checkpointManager: checkpoint,
-                    initialTurnCounter: countUserTurns(session.getMessages()),
-                });
-                tab.name = name;
-                this._updateTabName(tab); // re-derive name from first message if needed
-
-                this._app.register(tab);
-                this._subscribeTab(tab);
-                restoredIds.push(id);
-            } catch (err: any) {
-                this._outputChannel.appendLine(`Failed to restore tab "${name}": ${err.message}`);
-            }
-        }
-
-        if (restoredIds.length === 0) { return; }
-
-        // Dispose the initial empty tab
-        if (initialTab) {
-            await this._app.remove(initialTabId);
-        }
-
-        // Restore active tab
-        const activeIdx = Math.min(persisted.activeIndex ?? 0, restoredIds.length - 1);
-        this._app.activate(restoredIds[activeIdx]);
-
+        const restoredIds = await this._host.restoreTabs(persisted, this._activeTabId);
+        if (restoredIds.length === 0) return;
         this._outputChannel.appendLine(`Restored ${restoredIds.length} tab(s).`);
-        this.sendStateSync(this._activeTabId);
     }
 
     dispose(): void {

@@ -10,6 +10,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - Added exclusive writable-session ownership across VS Code and standalone hosts, with typed conflicts and explicit stale-lock recovery safeguards.
 
+### Changed
+- Routed chat lifecycle, commands, queue settlement, preferences, and state projection through a shared headless host so VS Code and desktop clients can use the same backend behavior.
+
 ## [0.59.0] - 2026-07-20
 
 ### Added
