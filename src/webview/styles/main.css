@@ -374,10 +374,6 @@ body[data-mode="panel"] .tab-strip,
     overflow: hidden;
 }
 
-.message-group-current-user.message-group-user-expanded {
-    position: relative;
-}
-
 .message-group-current-user.message-group-user-expanded .message-user {
     max-height: none;
     overflow: visible;
