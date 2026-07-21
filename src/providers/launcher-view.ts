@@ -84,8 +84,10 @@ export class LauncherView implements vscode.WebviewViewProvider, vscode.Disposab
                     break;
                 }
                 case 'deleteSession':
+                    // Controller fires onLauncherStateChanged after the delete,
+                    // which triggers _sendState via the subscription. No need
+                    // to schedule a second scan of every JSONL from here.
                     await this._controller.deleteHistorySession(msg.sessionPath);
-                    await this._sendState();
                     break;
                 case 'setHistoryCollapsed':
                     await this._globalState.update(LauncherView.HISTORY_COLLAPSED_KEY, msg.collapsed);

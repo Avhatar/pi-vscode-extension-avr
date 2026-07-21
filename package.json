@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.60.0",
+  "version": "0.61.1",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -245,7 +245,11 @@
         },
         "pi-code.claudeCompat.mode": {
           "type": "string",
-          "enum": ["auto", "on", "off"],
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
           "enumDescriptions": [
             "Detect Claude infrastructure automatically and treat a CLAUDE.md that only redirects to AGENTS.md as a shim (skips duplicate injection because Pi already loads AGENTS.md natively).",
             "Force activation whenever any Claude context file exists, including shim CLAUDE.md files that alias AGENTS.md. Use this if you rely on Claude-specific import resolution or additional resources beyond AGENTS.md.",

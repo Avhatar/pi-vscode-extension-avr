@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.61.1] - 2026-07-21
+
+### Fixed
+- Fixed noticeable delay when deleting a chat from History: the delete path no longer scans every JSONL session file on disk before unlinking, and the launcher no longer re-scans a second time after the delete completes.
+
+## [0.61.0] - 2026-07-21
+
 ### Added
 - Added `pi-code.claudeCompat.enabled` master switch (default on) and `pi-code.claudeCompat.mode` (`auto` / `on` / `off`, default `auto`) so users can disable the Claude Code compatibility bridge globally or per workspace.
 - Added a Raw View toolbar button to every chat editor panel, next to the New Chat and History icons, so opening the developer view no longer requires the command palette.
@@ -15,6 +22,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Stopped injecting the Claude Code compatibility bridge when the only Claude marker in a project is a `CLAUDE.md` that just redirects to `AGENTS.md`. Pi already loads `AGENTS.md` natively, so the redirect no longer duplicates project rules or spends tokens on the compatibility boundary.
 
 ### Fixed
+- Fixed expanded latest user prompts losing their top-pinned position in the chat transcript.
 - Fixed restored chat and Raw Mode editor tabs waiting for the Pi Code sidebar to open after Reload Window before they reconnect.
 
 ## [0.60.0] - 2026-07-21

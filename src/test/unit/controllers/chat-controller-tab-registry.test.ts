@@ -120,11 +120,15 @@ describe('ChatController tab registry integration', () => {
 
     it('deleteHistorySession disposes the raw recorder and storage before unlinking', async () => {
         const order: string[] = [];
+        const getSessionsSpy = vi.fn(async () => {
+            order.push('getSessions');
+            return [{ path: '/target.jsonl' }, { path: '/other.jsonl' }];
+        });
         const existing = {
             id: 'tab-existing',
             session: {
                 sessionPath: '/other.jsonl',
-                getSessions: async () => ([{ path: '/target.jsonl' }, { path: '/other.jsonl' }]),
+                getSessions: getSessionsSpy,
             },
         };
         const controller = Object.create(ChatController.prototype) as any;
@@ -159,6 +163,8 @@ describe('ChatController tab registry integration', () => {
         expect(controller._rawRecorderRegistry.dispose).toHaveBeenCalledWith('/target.jsonl');
         expect(controller._rawStorage.deleteSession).toHaveBeenCalledWith('/target.jsonl');
         expect(mockedUnlink).toHaveBeenCalledWith('/target.jsonl');
+        // Should not scan the full session directory on delete.
+        expect(getSessionsSpy).not.toHaveBeenCalled();
         expect(order).toEqual([
             'subagent',
             'rawRecorder',
@@ -200,6 +206,33 @@ describe('ChatController tab registry integration', () => {
 
         await expect(controller.deleteHistorySession('/target.jsonl')).resolves.toBeUndefined();
         expect(mockedUnlink).toHaveBeenCalledWith('/target.jsonl');
+    });
+
+    it('deleteHistorySession maps unlink ENOENT to a friendly missing-session error', async () => {
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = createRegistry([], undefined);
+        controller._openPanels = new Map();
+        controller._subagentStore = { deleteByParentSessionPath: vi.fn(async () => undefined) };
+        controller._rawRecorderRegistry = undefined;
+        controller._rawStorage = undefined;
+        controller._persistTabs = vi.fn();
+        controller._onLauncherStateChanged = { fire: vi.fn() };
+        controller.sendStateSync = vi.fn();
+        controller._hostInstance = {
+            tabs: controller._tabs,
+            chat: {},
+            detachTab: vi.fn(async () => undefined),
+        };
+        controller._chatService = controller._hostInstance.chat;
+        controller.findTabIdBySessionPath = ChatController.prototype.findTabIdBySessionPath.bind(controller);
+        const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        (mockedUnlink as unknown as ReturnType<typeof vi.fn>).mockClear();
+        (mockedUnlink as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => { throw enoent; });
+
+        await expect(controller.deleteHistorySession('/missing.jsonl'))
+            .rejects.toThrow('Session was not found in history.');
+        expect(controller._persistTabs).not.toHaveBeenCalled();
+        expect(controller._onLauncherStateChanged.fire).not.toHaveBeenCalled();
     });
 
     it('registers a restored session path without changing the active tab', async () => {

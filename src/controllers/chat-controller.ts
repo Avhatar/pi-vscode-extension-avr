@@ -487,12 +487,6 @@ export class ChatController implements vscode.Disposable {
             throw new Error('Close the chat before deleting it from history.');
         }
 
-        const anySession = this._tabs.values().next().value?.session;
-        const sessions = anySession ? await anySession.getSessions() : [];
-        if (!sessions.some((session: any) => session.path === sessionPath)) {
-            throw new Error('Session was not found in history.');
-        }
-
         const loadedTabId = this.findTabIdBySessionPath(sessionPath);
         if (loadedTabId) await this._host.detachTab(loadedTabId);
 
@@ -505,7 +499,14 @@ export class ChatController implements vscode.Disposable {
         // Panels bound to this session watch the registry's `onDataCleared`
         // hook and close themselves.
         this._rawRecorderRegistry?.notifyDataCleared(sessionPath);
-        await unlink(sessionPath);
+        try {
+            await unlink(sessionPath);
+        } catch (err: any) {
+            if (err?.code === 'ENOENT') {
+                throw new Error('Session was not found in history.');
+            }
+            throw err;
+        }
         this._persistTabs();
         this._onLauncherStateChanged.fire();
         if (this._activeTabId) this.sendStateSync(this._activeTabId);
