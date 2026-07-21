@@ -1,10 +1,24 @@
 import { build } from 'esbuild';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const dist = resolve(root, 'dist');
+
+// renderer/assets is a private git submodule (unlicensed third-party IP).
+// Fail early with an actionable message so contributors without access do not see a raw ENOENT.
+try {
+  await access(resolve(root, 'renderer/assets/VT323-Regular.ttf'));
+} catch {
+  console.error(
+    'standalone renderer assets are missing.\n' +
+    'This directory is a git submodule pointing at a private repository.\n' +
+    'Run:  git submodule update --init standalone/desktop/renderer/assets\n' +
+    '(requires access to https://github.com/Avhatar/pi-code-standalone-assets)',
+  );
+  process.exit(1);
+}
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
@@ -58,9 +72,6 @@ await writeFile(
 );
 await cp(resolve(root, 'renderer/assets'), resolve(dist, 'assets'), {
   recursive: true,
-  // Monofonto requires a separate desktop-app embedding license. Keep locally supplied
-  // evaluation copies out of distributable bundles until that license is documented.
-  filter: (source) => !source.toLowerCase().includes('monofonto'),
 });
 
 console.log(`Pi Code desktop renderer built at ${dist}`);

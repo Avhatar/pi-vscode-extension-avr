@@ -4,7 +4,7 @@ Production Electron host for the standalone Pi Code client. It composes the same
 
 The renderer provides a responsive phosphor-terminal interface with real isolated chat tabs, a compact transcript and live thinking/tool activity, prompt queue/steer/stop controls, session history, changed-file previews, model/thinking/cache status, and a slide-out operational panel for Plan Mode, File Undo View, ToDo, subagent visibility, and per-chat tool selection. The shared Agent Host still starts only after canonical workspace trust approval. Renderer reload reconnects to the existing host and restores an authoritative snapshot without replaying prompts or tools.
 
-Credential entry, attachments, workspace mentions, native diff opening, OS notification effects, direct ToDo editing, and subagent lifecycle/worktree actions remain later renderer slices. The packaged renderer uses the OFL-licensed VT323 font. Locally supplied Monofonto files are excluded from generated bundles until a desktop-app embedding license is documented.
+Credential entry, attachments, workspace mentions, native diff opening, OS notification effects, direct ToDo editing, and subagent lifecycle/worktree actions remain later renderer slices. The packaged renderer bundles fonts, images, and sounds from the private assets submodule at [renderer/assets/](renderer/assets/).
 
 ## Requirements
 
@@ -14,6 +14,14 @@ Credential entry, attachments, workspace mentions, native diff opening, OS notif
 - Provider credentials available through the environment until the encrypted credential settings UI is implemented
 
 ## Run from source
+
+The renderer assets under [renderer/assets/](renderer/assets/) live in a private git submodule. Initialize it before building the desktop bundle:
+
+```powershell
+git submodule update --init standalone/desktop/renderer/assets
+```
+
+Cloning the main repository with `git clone --recurse-submodules` initializes the submodule automatically. Access to the private assets repository is required; contributors without access can still build and test the VS Code extension itself.
 
 ```powershell
 npm install
@@ -60,9 +68,9 @@ npm run smoke:portable
 
 The smoke approves two fresh canonical workspaces, verifies independent process ownership, gracefully closes one without terminating the other, relaunches a trusted path without another prompt, and checks process cleanup. Native trust dialogs are detected by their top-level window title rather than `Get-Process.MainWindowTitle`, which may continue reporting the renderer title for Electron secondary dialogs.
 
-## Packaged font boundary
+## Packaged asset boundary
 
-The production bundle uses `renderer/assets/VT323-Regular.ttf` and ships its OFL text. `build.mjs` deliberately excludes every Monofonto path, and `verify:bundle` fails if Monofonto appears in generated output or if VT323/license assets are missing. Because `standalone/**` is excluded from the VSIX, neither desktop font enters the extension package.
+All files under [renderer/assets/](renderer/assets/) are bundled from the private assets submodule and copied into `dist/assets/` as-is; the desktop build does not gate any file per license. Because `standalone/**` is excluded from the VSIX, no standalone asset ever enters the VS Code extension package. The public/private repository split is the only asset boundary the desktop build relies on.
 
 ## Security boundary
 

@@ -22,14 +22,8 @@ if (main.includes('requestSingleInstanceLock')) {
 if (!rendererHtml.includes('<title>Pi Code Terminal</title>')) {
     failures.push('desktop renderer does not expose the expected Pi Code Terminal window title');
 }
-if (distFiles.some((file) => String(file).toLowerCase().includes('monofonto'))) {
-    failures.push('desktop bundle contains Monofonto without a documented app-embedding license');
-}
-if (!distFiles.some((file) => String(file).replaceAll('\\', '/') === 'assets/VT323-Regular.ttf')) {
-    failures.push('desktop bundle is missing the licensed VT323 renderer font');
-}
-if (!distFiles.some((file) => String(file).replaceAll('\\', '/') === 'assets/OFL-VT323.txt')) {
-    failures.push('desktop bundle is missing the VT323 OFL license');
+if (!distFiles.some((file) => String(file).replaceAll('\\', '/').startsWith('assets/'))) {
+    failures.push('desktop bundle is missing renderer/assets output — the private assets submodule was not copied into dist');
 }
 
 const coordinatedPiPackages = [

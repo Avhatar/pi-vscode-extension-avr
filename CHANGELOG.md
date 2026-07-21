@@ -17,6 +17,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Added active project wiki skills `wiki-read` and `wiki-maintain` under `.agents/skills/` alongside a `wiki/` scaffold at repo root, so any agent runtime that discovers `.agents/` skills can orient on and maintain repo documentation without depending on a Claude-specific `.claude/skills/` layout.
 
 ### Changed
+- Moved standalone desktop renderer assets into a private git submodule so the public repository no longer carries third-party fonts and images; the VS Code extension build is unaffected and desktop contributors initialize the submodule once with `git submodule update --init`.
+- Removed per-asset license filters in the standalone desktop build and verify scripts so every file under the private renderer assets submodule is packaged as-is; the public/private repository split is now the single asset boundary.
 - Routed chat lifecycle, commands, queue settlement, preferences, and state projection through a shared headless host so VS Code and desktop clients can use the same backend behavior.
 - Reused one browser-safe request correlation and event recovery implementation across VS Code and desktop transports.
 - Changed standalone launches and New Window actions to use independent workspace processes, so one project failure does not terminate another.

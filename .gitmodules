@@ -1,0 +1,3 @@
+[submodule "standalone/desktop/renderer/assets"]
+	path = standalone/desktop/renderer/assets
+	url = https://github.com/Avhatar/pi-code-standalone-assets.git
