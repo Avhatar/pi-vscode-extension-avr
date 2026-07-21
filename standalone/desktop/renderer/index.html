@@ -2,21 +2,147 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self'; img-src 'self' data:">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pi Code Desktop</title>
+  <title>Pi Code Terminal</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
-  <main>
-    <p class="eyebrow">PI CODE // DESKTOP TRANSPORT</p>
-    <h1 id="status">CONNECTING TO AGENT HOST</h1>
-    <p id="details">Loading desktop shell…</p>
-    <div id="actions" class="actions" hidden>
-      <button id="open-workspace" type="button">OPEN WORKSPACE</button>
-      <button id="new-window" type="button">NEW WINDOW</button>
+<body class="crt-med">
+  <section id="welcome-view" class="welcome-view" aria-labelledby="status">
+    <div class="welcome-mark" aria-hidden="true">π</div>
+    <p class="eyebrow">PI CODE // SECURE WORKSPACE TERMINAL</p>
+    <h1 id="status">BOOTING TERMINAL</h1>
+    <p id="details">Loading the sandboxed desktop shell…</p>
+    <div id="actions" class="welcome-actions" hidden>
+      <button id="open-workspace" class="plate plate-active" type="button">OPEN WORKSPACE</button>
+      <button id="new-window" class="plate" type="button">NEW WINDOW</button>
     </div>
+    <p class="welcome-security">AGENT HOST REMAINS OFFLINE UNTIL WORKSPACE TRUST IS CONFIRMED</p>
+  </section>
+
+  <main id="workspace-view" class="workspace-view" hidden>
+    <nav class="icon-rail" aria-label="Terminal actions">
+      <button id="new-chat" class="rail-button" type="button" title="New chat" aria-label="New chat">
+        <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M2 2h24v20h-9l-5 5v-5H2zM12 7h4v4h4v4h-4v4h-4v-4H8v-4h4z"/></svg>
+      </button>
+      <button id="panel-toggle" class="rail-button rail-arrow" type="button" title="Toggle control panel" aria-label="Toggle control panel">◀</button>
+      <span class="rail-spacer"></span>
+      <button id="rail-new-window" class="rail-button rail-small" type="button" title="Open independent window" aria-label="New window">⊞</button>
+      <button id="crt-level" class="rail-button rail-small" type="button" title="Cycle CRT intensity" aria-label="Cycle CRT intensity">M</button>
+    </nav>
+
+    <aside id="control-panel" class="control-panel pb-scroll" aria-label="Workspace controls">
+      <header class="panel-product">
+        <span>PI CODE</span>
+        <span id="host-indicator" class="host-indicator">LINK</span>
+      </header>
+      <div id="workspace-name" class="workspace-name">NO WORKSPACE</div>
+
+      <button id="plan-mode-toggle" class="toggle-row" type="button">
+        <span>PLAN MODE</span><span class="square-toggle" aria-hidden="true"><i></i></span>
+      </button>
+      <button id="file-undo-toggle" class="toggle-row section-divider" type="button">
+        <span>FILE UNDO VIEW</span><span class="square-toggle" aria-hidden="true"><i></i></span>
+      </button>
+
+      <details id="notifications-section" class="panel-section" open>
+        <summary>NOTIFICATIONS</summary>
+        <button id="show-popup-toggle" class="toggle-row" type="button" disabled title="Portable OS popup notifications are not available yet">
+          <span>SHOW POPUP</span><span class="square-toggle" aria-hidden="true"><i></i></span>
+        </button>
+        <button id="play-sound-toggle" class="toggle-row" type="button">
+          <span>PLAY SOUND</span><span class="square-toggle is-on" aria-hidden="true"><i></i></span>
+        </button>
+      </details>
+
+      <section class="panel-section section-divider">
+        <div class="section-heading">
+          <button id="todo-collapse" class="section-title" type="button" aria-expanded="true">▾ TODO</button>
+          <span id="todo-progress" class="section-count">0/0</span>
+          <button id="todo-enabled-toggle" class="square-toggle-button" type="button" aria-label="Toggle ToDo"><span class="square-toggle" aria-hidden="true"><i></i></span></button>
+        </div>
+        <div id="todo-list" class="panel-list todo-list pb-scroll empty-copy">No tasks yet.</div>
+      </section>
+
+      <section class="panel-section section-divider">
+        <div class="section-heading">
+          <button id="subagents-collapse" class="section-title" type="button" aria-expanded="true">▾ SUBAGENTS</button>
+          <span id="subagent-count" class="section-count">0</span>
+          <button id="subagents-enabled-toggle" class="square-toggle-button" type="button" aria-label="Toggle subagents"><span class="square-toggle" aria-hidden="true"><i></i></span></button>
+        </div>
+        <div id="subagent-list" class="panel-list empty-copy">No subagent runs yet.</div>
+      </section>
+
+      <details id="history-section" class="panel-section section-divider" open>
+        <summary><span>HISTORY</span><span id="history-count" class="section-count">—</span></summary>
+        <button id="refresh-history" class="mini-action" type="button">REFRESH</button>
+        <div id="history-list" class="panel-list empty-copy">History not loaded.</div>
+      </details>
+
+      <details id="tools-section" class="panel-section section-divider" open>
+        <summary><span>TOOLS</span><span id="tools-section-count" class="section-count">0/0</span></summary>
+        <div class="tool-actions">
+          <button id="enable-all-tools" class="mini-action" type="button">ENABLE ALL</button>
+          <button id="disable-all-tools" class="mini-action" type="button">DISABLE ALL</button>
+          <input id="tool-filter" class="tool-filter" type="search" placeholder="FILTER…" aria-label="Filter tools">
+        </div>
+        <div id="tools-list" class="panel-list tool-list empty-copy">No tools reported.</div>
+      </details>
+    </aside>
+
+    <section class="main-column" aria-label="Chat terminal">
+      <header class="terminal-header">
+        <span>PI-CODE TERMLINK · AGENT HOST</span>
+        <span id="terminal-clock">00:00:00</span>
+      </header>
+
+      <div id="tab-list" class="tab-list" role="tablist" aria-label="Chats"></div>
+      <div class="terminal-divider"></div>
+
+      <div class="terminal-state-line">
+        <span id="session-title">ACTIVE SESSION</span>
+        <span id="connection-label">CONNECTING</span>
+      </div>
+
+      <div id="feed" class="feed pb-scroll" role="tabpanel" tabindex="0" aria-label="Conversation and agent activity">
+        <div id="feed-items" class="feed-items"></div>
+        <div id="live-items" class="live-items" aria-live="polite"></div>
+      </div>
+      <button id="scroll-latest" class="scroll-latest" type="button" title="Scroll to latest" aria-label="Scroll to latest" hidden>▼</button>
+
+      <section class="command-dock" aria-label="Prompt composer">
+        <details id="file-undo-bar" class="file-undo-bar" hidden>
+          <summary>
+            <span id="file-undo-summary">0 FILES</span>
+            <span class="file-undo-spacer"></span>
+            <button id="file-undo-action" class="mini-action" type="button">UNDO</button>
+          </summary>
+          <div id="file-undo-list" class="file-undo-list"></div>
+        </details>
+        <div id="queue-strip" class="queue-strip" hidden></div>
+        <div class="terminal-divider"></div>
+        <div class="command-line">
+          <span class="command-prompt" aria-hidden="true">&gt;</span>
+          <span class="block-caret" aria-hidden="true"></span>
+          <textarea id="composer" rows="1" spellcheck="true" aria-label="Agent command"></textarea>
+          <button id="send-command" class="command-submit" type="button" title="Submit command" aria-label="Submit command">↵</button>
+        </div>
+        <footer class="status-bar">
+          <label class="status-control"><span class="visually-hidden">Model</span><select id="model-select" aria-label="Model"><option value="">MODEL: —</option></select></label>
+          <label class="status-control"><span class="visually-hidden">Thinking level</span><select id="thinking-select" aria-label="Thinking level"><option value="">THINKING: —</option></select></label>
+          <button id="cache-mode" class="status-plate" type="button" title="Cycle prompt cache mode">CACHE: —</button>
+          <span id="command-state" class="command-state">READY</span>
+          <span id="context-usage" class="context-usage">CONTEXT: —</span>
+          <button id="stop-command" class="stop-command" type="button" title="Stop active turn" aria-label="Stop active turn" disabled>■</button>
+        </footer>
+      </section>
+    </section>
+
+    <div class="crt-scanlines" aria-hidden="true"></div>
+    <div class="crt-vignette" aria-hidden="true"></div>
   </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script src="renderer.js"></script>
 </body>
 </html>

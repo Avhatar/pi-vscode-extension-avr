@@ -14,6 +14,8 @@ function createTab(id: string): ChatHostTab {
             getMessages: vi.fn(() => []),
             newSession: vi.fn(async () => undefined),
             loadSession: vi.fn(async () => undefined),
+            setModel: vi.fn(async () => undefined),
+            setThinkingLevel: vi.fn(),
         },
         diffManager: { clearAll: vi.fn() },
         checkpointManager: { clearAll: vi.fn() },
@@ -385,6 +387,7 @@ describe('portable ChatHost', () => {
         tab.isStreamingLocal = true;
         await expect(host.setActiveTodoEnabled(false)).resolves.toBe(false);
         await expect(host.setActivePlanModeEnabled(true)).resolves.toBe(false);
+        await expect(host.setActiveFileUndoViewEnabled(true)).resolves.toBe(false);
         await expect(host.setActiveToolDisabled('read', true)).resolves.toBe(false);
         expect(preferences.setTodoEnabled).not.toHaveBeenCalled();
 
@@ -413,6 +416,45 @@ describe('portable ChatHost', () => {
         expect(preferences.setFileUndoViewEnabled).toHaveBeenCalledWith(tab, true);
         expect(effects.publishState).toHaveBeenCalledWith(tab.id);
         expect(effects.tabsChanged).toHaveBeenCalled();
+    });
+
+    it('routes portable control intents through shared preference policy and publishes authoritative state', async () => {
+        const { host, commands, preferences, effects } = createHarness();
+        const tab = createTab('tab-1');
+        host.register(tab, { activate: true });
+        commands.dispatch.mockImplementation(async (_tab: unknown, message: any) => ({ intent: message }));
+
+        await expect(host.dispatch({ type: 'setModel', provider: 'provider', modelId: 'model' }, tab.id)).resolves.toEqual({ ok: true });
+        await expect(host.dispatch({ type: 'setThinkingLevel', level: 'high' }, tab.id)).resolves.toEqual({ ok: true });
+        await expect(host.dispatch({ type: 'setTodoEnabled', enabled: false }, tab.id)).resolves.toEqual({ ok: true });
+        await expect(host.dispatch({ type: 'setSubagentsEnabled', enabled: true }, tab.id)).resolves.toEqual({ ok: true });
+        await expect(host.dispatch({ type: 'setPlanModeEnabled', enabled: true }, tab.id)).resolves.toEqual({ ok: true });
+        await expect(host.dispatch({ type: 'setFileUndoViewEnabled', enabled: true }, tab.id)).resolves.toEqual({ ok: true });
+        await expect(host.dispatch({ type: 'setToolDisabled', toolName: 'read', disabled: true }, tab.id)).resolves.toEqual({ ok: true });
+        await expect(host.dispatch({ type: 'setToolsBulk', disabled: ['read'] }, tab.id)).resolves.toEqual({ ok: true });
+
+        expect(tab.session.setModel).toHaveBeenCalledWith('provider', 'model');
+        expect(tab.session.setThinkingLevel).toHaveBeenCalledWith('high');
+        expect(preferences.setTodoEnabled).toHaveBeenCalledWith(tab, false);
+        expect(preferences.setSubagentsEnabled).toHaveBeenCalledWith(tab, true);
+        expect(preferences.setPlanModeEnabled).toHaveBeenCalledWith(tab, true);
+        expect(preferences.setFileUndoViewEnabled).toHaveBeenCalledWith(tab, true);
+        expect(preferences.setDisabledTools).toHaveBeenCalled();
+        expect(effects.publishState.mock.calls.filter(([tabId]) => tabId === tab.id).length).toBeGreaterThanOrEqual(8);
+
+        tab.isStreamingLocal = true;
+        await expect(host.dispatch({ type: 'setModel', provider: 'other', modelId: 'busy' }, tab.id)).resolves.toMatchObject({
+            ok: false,
+            code: 'command_failed',
+        });
+        await expect(host.dispatch({ type: 'setThinkingLevel', level: 'low' }, tab.id)).resolves.toMatchObject({
+            ok: false,
+            code: 'command_failed',
+        });
+        await expect(host.dispatch({ type: 'setPlanModeEnabled', enabled: false }, tab.id)).resolves.toMatchObject({
+            ok: false,
+            code: 'command_failed',
+        });
     });
 
     it('returns typed failures and projects state with host-owned tab context', async () => {

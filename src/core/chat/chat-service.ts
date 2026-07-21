@@ -1,5 +1,6 @@
 import type {
     AgentClientMessage,
+    AgentTabControls,
     CacheEffective,
     CacheMode,
     CodexTurnUsage,
@@ -53,6 +54,7 @@ export interface ChatStateContext {
     readonly cacheMode: CacheMode;
     readonly getCacheEffective: () => CacheEffective;
     readonly getFileUndoViewEnabled: () => boolean;
+    readonly getControls?: () => AgentTabControls | undefined;
 }
 
 export interface AgentEndProjection {
@@ -139,6 +141,7 @@ export interface FileHistoryTarget {
 }
 
 export interface QueuedDispatchCallbacks {
+    decoratePrompt(text: string): string;
     augmentPrompt(text: string): Promise<string>;
     compact(instructions?: string): Promise<void>;
     prompt(text: string, onAgentStart: () => void): Promise<void>;
@@ -491,7 +494,7 @@ export class ChatService {
 
         let queuedPrompt: string;
         try {
-            queuedPrompt = await callbacks.augmentPrompt(text);
+            queuedPrompt = await callbacks.augmentPrompt(callbacks.decoratePrompt(text));
         } catch (error) {
             tab.isStreamingLocal = false;
             callbacks.reportError(error);
@@ -628,6 +631,8 @@ export class ChatService {
         state.cacheEffective = cacheEffective;
         tab.cacheEffective = cacheEffective;
         state.fileUndoViewEnabled = context.getFileUndoViewEnabled();
+        const controls = context.getControls?.();
+        if (controls) state.controls = controls;
         state.pendingTools = [...tab.pendingTools.entries()].map(([toolCallId, tool]) => ({
             toolCallId,
             toolName: tool.name,

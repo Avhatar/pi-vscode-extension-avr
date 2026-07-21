@@ -25,12 +25,20 @@ export interface ChatCommandSession {
 
 export type ChatCommandIntent =
     | { readonly type: 'setCacheMode'; readonly mode: CacheMode }
+    | { readonly type: 'setModel'; readonly provider: string; readonly modelId: string }
+    | { readonly type: 'setThinkingLevel'; readonly level: string }
     | { readonly type: 'toggleFavorite'; readonly provider: string; readonly modelId: string }
     | { readonly type: 'newSession' }
     | { readonly type: 'loadSession'; readonly sessionPath: string }
     | { readonly type: 'createTab' }
     | { readonly type: 'closeTab'; readonly tabId: string }
-    | { readonly type: 'switchTab'; readonly tabId: string };
+    | { readonly type: 'switchTab'; readonly tabId: string }
+    | { readonly type: 'setTodoEnabled'; readonly enabled: boolean }
+    | { readonly type: 'setSubagentsEnabled'; readonly enabled: boolean }
+    | { readonly type: 'setPlanModeEnabled'; readonly enabled: boolean }
+    | { readonly type: 'setFileUndoViewEnabled'; readonly enabled: boolean }
+    | { readonly type: 'setToolDisabled'; readonly toolName: string; readonly disabled: boolean }
+    | { readonly type: 'setToolsBulk'; readonly disabled: string[] };
 
 export interface ChatCommandCallbacks {
     readonly directPrompt: DirectPromptCallbacks;
@@ -100,6 +108,13 @@ export class ChatCommandService {
                 return {};
             case 'setCacheMode':
                 return { intent: { type: 'setCacheMode', mode: message.mode } };
+            case 'setTodoEnabled':
+            case 'setSubagentsEnabled':
+            case 'setPlanModeEnabled':
+            case 'setFileUndoViewEnabled':
+            case 'setToolDisabled':
+            case 'setToolsBulk':
+                return { intent: message };
             case 'getModels':
                 callbacks.emit({
                     type: 'models',
@@ -110,9 +125,7 @@ export class ChatCommandService {
                 });
                 return {};
             case 'setModel':
-                await tab.session.setModel(message.provider, message.modelId);
-                callbacks.publishState();
-                return {};
+                return { intent: message };
             case 'toggleFavorite':
                 return {
                     intent: {
@@ -122,9 +135,7 @@ export class ChatCommandService {
                     },
                 };
             case 'setThinkingLevel':
-                tab.session.setThinkingLevel(message.level);
-                callbacks.publishState();
-                return {};
+                return { intent: message };
             case 'newSession':
                 return { intent: { type: 'newSession' } };
             case 'loadSession':

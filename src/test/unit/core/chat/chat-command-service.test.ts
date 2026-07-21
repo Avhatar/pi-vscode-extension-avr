@@ -69,6 +69,12 @@ describe('portable ChatCommandService', () => {
             [{ type: 'createTab' }, { type: 'createTab' }],
             [{ type: 'closeTab', tabId: 'tab-2' }, { type: 'closeTab', tabId: 'tab-2' }],
             [{ type: 'switchTab', tabId: 'tab-2' }, { type: 'switchTab', tabId: 'tab-2' }],
+            [{ type: 'setTodoEnabled', enabled: false }, { type: 'setTodoEnabled', enabled: false }],
+            [{ type: 'setSubagentsEnabled', enabled: true }, { type: 'setSubagentsEnabled', enabled: true }],
+            [{ type: 'setPlanModeEnabled', enabled: true }, { type: 'setPlanModeEnabled', enabled: true }],
+            [{ type: 'setFileUndoViewEnabled', enabled: true }, { type: 'setFileUndoViewEnabled', enabled: true }],
+            [{ type: 'setToolDisabled', toolName: 'read', disabled: true }, { type: 'setToolDisabled', toolName: 'read', disabled: true }],
+            [{ type: 'setToolsBulk', disabled: ['read'] }, { type: 'setToolsBulk', disabled: ['read'] }],
         ] as const;
         for (const [message, intent] of cases) {
             await expect(service.dispatch(tab, message, callbacks)).resolves.toEqual({ intent });
@@ -109,12 +115,19 @@ describe('portable ChatCommandService', () => {
             favorites: ['p:m'],
         });
 
-        await service.dispatch(tab, { type: 'setModel', provider: 'p2', modelId: 'm2' }, callbacks);
-        expect(session.setModel).toHaveBeenCalledWith('p2', 'm2');
-        expect(publishState).toHaveBeenCalled();
+        await expect(service.dispatch(
+            tab,
+            { type: 'setModel', provider: 'p2', modelId: 'm2' },
+            callbacks,
+        )).resolves.toEqual({ intent: { type: 'setModel', provider: 'p2', modelId: 'm2' } });
+        expect(session.setModel).not.toHaveBeenCalled();
 
-        await service.dispatch(tab, { type: 'setThinkingLevel', level: 'low' }, callbacks);
-        expect(session.setThinkingLevel).toHaveBeenCalledWith('low');
+        await expect(service.dispatch(
+            tab,
+            { type: 'setThinkingLevel', level: 'low' },
+            callbacks,
+        )).resolves.toEqual({ intent: { type: 'setThinkingLevel', level: 'low' } });
+        expect(session.setThinkingLevel).not.toHaveBeenCalled();
 
         await service.dispatch(tab, { type: 'getSessions' }, callbacks);
         expect(emit).toHaveBeenCalledWith({

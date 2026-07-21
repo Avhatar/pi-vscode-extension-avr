@@ -15,6 +15,7 @@ $env:ELECTRON_RUN_AS_NODE = $null
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pi-code-desktop-smoke-$([guid]::NewGuid())"
 $workspaceA = Join-Path $temporaryRoot 'workspace-a'
 $workspaceB = Join-Path $temporaryRoot 'workspace-b'
+$rendererWindowTitle = 'Pi Code Terminal'
 New-Item -ItemType Directory -Path $workspaceA, $workspaceB -Force | Out-Null
 $launchedPortableProcessIds = [System.Collections.Generic.List[int]]::new()
 
@@ -45,18 +46,36 @@ function Wait-ForNewWindow([string]$title, [int[]]$excludedProcessIds) {
     throw "Timed out waiting for new packaged desktop window: $title"
 }
 
+function Wait-ForNewDialog([string]$title, [int[]]$excludedProcessIds) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $shell = New-Object -ComObject WScript.Shell
+    do {
+        $newProcess = Get-DesktopProcesses | Where-Object {
+            $excludedProcessIds -notcontains $_.Id
+        } | Select-Object -First 1
+        # Native Electron dialogs are secondary top-level windows. Depending on
+        # focus timing, Get-Process.MainWindowTitle may continue to report the
+        # renderer title, so activate the exact dialog title through WScript.
+        if ($newProcess -and $shell.AppActivate($title)) {
+            return $newProcess
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    throw "Timed out waiting for new packaged desktop dialog: $title"
+}
+
 function Start-WorkspaceProcess([string]$workspace) {
+    Write-Host "Launching untrusted workspace smoke: $workspace"
     $existingIds = @(Get-DesktopProcesses | ForEach-Object Id)
     $portable = Start-Process -FilePath $Executable -ArgumentList @('--cwd', $workspace) -PassThru
     $launchedPortableProcessIds.Add($portable.Id)
-    $trustProcess = Wait-ForNewWindow 'Trust this workspace?' $existingIds
-    $shell = New-Object -ComObject WScript.Shell
-    if (-not $shell.AppActivate($trustProcess.Id)) {
-        throw 'Could not activate the workspace trust dialog.'
-    }
+    $trustProcess = Wait-ForNewDialog 'Trust this workspace?' $existingIds
+    Write-Host "Workspace trust dialog opened for process $($trustProcess.Id)."
     Start-Sleep -Milliseconds 250
+    $shell = New-Object -ComObject WScript.Shell
     $shell.SendKeys('{TAB}{ENTER}')
-    $renderer = Wait-ForNewWindow 'Pi Code Desktop' $existingIds
+    $renderer = Wait-ForNewWindow $rendererWindowTitle $existingIds
+    Write-Host "Workspace renderer opened in process $($renderer.Id)."
     return [pscustomobject]@{
         PortableProcessId = $portable.Id
         RendererProcessId = $renderer.Id
@@ -68,12 +87,13 @@ function Start-TrustedWorkspaceProcess([string]$workspace) {
     $portable = Start-Process -FilePath $Executable -ArgumentList @('--cwd', $workspace) -PassThru
     $launchedPortableProcessIds.Add($portable.Id)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $shell = New-Object -ComObject WScript.Shell
     do {
         $newProcesses = @(Get-DesktopProcesses | Where-Object { $existingIds -notcontains $_.Id })
-        if ($newProcesses | Where-Object MainWindowTitle -eq 'Trust this workspace?') {
+        if ($newProcesses.Count -gt 0 -and $shell.AppActivate('Trust this workspace?')) {
             throw 'Previously trusted canonical workspace prompted for trust again.'
         }
-        $renderer = $newProcesses | Where-Object MainWindowTitle -eq 'Pi Code Desktop' | Select-Object -First 1
+        $renderer = $newProcesses | Where-Object MainWindowTitle -eq $rendererWindowTitle | Select-Object -First 1
         if ($renderer) {
             return [pscustomobject]@{
                 PortableProcessId = $portable.Id
@@ -135,7 +155,7 @@ try {
     Close-WorkspaceProcess $first
     Start-Sleep -Seconds 2
     $secondRenderer = Get-Process -Id $second.RendererProcessId -ErrorAction SilentlyContinue
-    if (-not $secondRenderer -or $secondRenderer.MainWindowTitle -ne 'Pi Code Desktop') {
+    if (-not $secondRenderer -or $secondRenderer.MainWindowTitle -ne $rendererWindowTitle) {
         throw 'Gracefully closing the first workspace process terminated the second workspace window.'
     }
 

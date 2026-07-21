@@ -5,6 +5,7 @@ import type { VsCodeClientMessage, VsCodeServerMessage } from './vscode-protocol
 export type {
     AgentClientMessage,
     AgentServerMessage,
+    AgentTabControls,
     CacheEffective,
     CacheMode,
     CodexSpendControlLimit,

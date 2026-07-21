@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -6,6 +6,8 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const mainPath = resolve(packageRoot, 'dist', 'main.js');
 const main = await readFile(mainPath, 'utf8');
 const packageJson = JSON.parse(await readFile(resolve(packageRoot, 'package.json'), 'utf8'));
+const rendererHtml = await readFile(resolve(packageRoot, 'dist', 'index.html'), 'utf8');
+const distFiles = await readdir(resolve(packageRoot, 'dist'), { recursive: true });
 const failures = [];
 
 if (main.includes('Dynamic require of "')) {
@@ -16,6 +18,18 @@ if (/\/\/ .*node_modules\//.test(main)) {
 }
 if (main.includes('requestSingleInstanceLock')) {
     failures.push('main.js still redirects independent launches through Electron single-instance locking');
+}
+if (!rendererHtml.includes('<title>Pi Code Terminal</title>')) {
+    failures.push('desktop renderer does not expose the expected Pi Code Terminal window title');
+}
+if (distFiles.some((file) => String(file).toLowerCase().includes('monofonto'))) {
+    failures.push('desktop bundle contains Monofonto without a documented app-embedding license');
+}
+if (!distFiles.some((file) => String(file).replaceAll('\\', '/') === 'assets/VT323-Regular.ttf')) {
+    failures.push('desktop bundle is missing the licensed VT323 renderer font');
+}
+if (!distFiles.some((file) => String(file).replaceAll('\\', '/') === 'assets/OFL-VT323.txt')) {
+    failures.push('desktop bundle is missing the VT323 OFL license');
 }
 
 const coordinatedPiPackages = [

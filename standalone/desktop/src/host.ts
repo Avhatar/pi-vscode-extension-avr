@@ -43,12 +43,14 @@ import { PiSessionManager } from '../../../src/pi/session';
 import { ChildToolFactoryRegistry } from '../../../src/pi/subagents/child-tools';
 import { SubagentCoordinator } from '../../../src/pi/subagents/coordinator';
 import { SubagentCapabilityGate } from '../../../src/pi/subagents/gating';
+import { projectSubagentLauncherSnapshot } from '../../../src/pi/subagents/launcher-state';
 import { routeSubagentMutation } from '../../../src/pi/subagents/mutations';
 import { SubagentRunStore } from '../../../src/pi/subagents/persistence';
 import { WriteIsolationManager } from '../../../src/pi/subagents/write-isolation';
 import type {
     AgentClientMessage,
     AgentServerMessage,
+    AgentTabControls,
     CacheEffective,
     CacheMode,
     FileAttachment,
@@ -140,6 +142,7 @@ export class DesktopChatRuntime implements DesktopAgentBackend {
                 cacheMode: this.cacheMode,
                 getCacheEffective: () => this.computeEffectiveCache(tab),
                 getFileUndoViewEnabled: () => this.isFileUndoViewEnabled(tab),
+                getControls: () => this.getControls(tab),
             }),
             preferences: {
                 getCacheMode: () => this.cacheMode,
@@ -233,6 +236,13 @@ export class DesktopChatRuntime implements DesktopAgentBackend {
                     );
                 },
                 sweepPendingTools: (tab, assistant) => this.sweepPendingTools(tab, assistant),
+                notifyTurnCompletion: (tab, completion) => {
+                    this.dependencies.emit({
+                        type: 'turnCompleted',
+                        outcome: completion.outcome,
+                        ...(completion.durationMs === undefined ? {} : { durationMs: completion.durationMs }),
+                    }, tab.id);
+                },
                 emitAgentEvent: (tabId, event) => {
                     this.dependencies.emit({ type: 'agentEvent', event }, tabId);
                 },
@@ -446,6 +456,7 @@ export class DesktopChatRuntime implements DesktopAgentBackend {
 
     private dispatchNextQueued(tab: DesktopTab): Promise<void> {
         return this.chat.dispatchNextQueued(tab, {
+            decoratePrompt: (text) => decorateDirectPrompt(text, this.isPlanModeEnabled(tab)),
             augmentPrompt: (text) => this.dependencies.fileMentions.augmentPromptIfNeeded(text),
             compact: (instructions) => tab.session.compact(instructions),
             prompt: (text, onAgentStart) => {
@@ -561,6 +572,36 @@ export class DesktopChatRuntime implements DesktopAgentBackend {
             tab.projectToolDefault,
             tab.session.getRegisteredToolsInfo().map((tool) => tool.name),
         );
+    }
+
+    private getControls(tab: DesktopTab): AgentTabControls {
+        const busy = tab.isStreamingLocal || tab.isCompacting;
+        const todoState = tab.session.todoStore.getState();
+        const todoEnabled = this.isTodoEnabled(tab);
+        const subagentsEnabled = this.isSubagentsEnabled(tab);
+        return {
+            todos: { tasks: todoState.tasks, nextId: todoState.nextId },
+            todoEnabled,
+            todoToggleDisabled: busy,
+            planModeEnabled: this.isPlanModeEnabled(tab),
+            planModeToggleDisabled: busy,
+            subagents: projectSubagentLauncherSnapshot(
+                tab.session.getSubagentSnapshot(),
+                {
+                    enabled: subagentsEnabled,
+                    toggleDisabled: busy,
+                },
+            ),
+            toolSelection: {
+                registered: tab.session.getRegisteredToolsInfo(),
+                disabled: composeEffectiveDisabledTools(
+                    this.getDisabledTools(tab),
+                    todoEnabled,
+                    subagentsEnabled,
+                ),
+                toggleDisabled: busy,
+            },
+        };
     }
 
     private applyPersistedToolSelection(tab: DesktopTab): void {

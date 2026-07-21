@@ -27,13 +27,16 @@ describe('Protocol types', () => {
             'setThinkingLevel', 'newSession', 'loadSession', 'getSessions', 'getState',
             'undoFileChange', 'restoreCheckpoint', 'redoCheckpoint', 'createTab', 'closeTab',
             'switchTab', 'getSkills', 'searchWorkspaceFiles', 'queueMessage', 'editQueuedMessage',
-            'removeQueuedMessage', 'cancelQueue', 'setCacheMode',
+            'removeQueuedMessage', 'cancelQueue', 'setCacheMode', 'setTodoEnabled',
+            'setSubagentsEnabled', 'setPlanModeEnabled', 'setFileUndoViewEnabled',
+            'setToolDisabled', 'setToolsBulk',
         ] as const;
         const platformClientTypes = ['openFile', 'confirmAction'] as const;
         const vsCodeClientTypes = ['openDiff', 'openSettings', 'openKeybindings', 'openChangelog'] as const;
         const agentServerTypes = [
             'stateSync', 'agentEvent', 'models', 'modelChanged', 'sessions', 'sessionChanged',
-            'fileChange', 'skills', 'workspaceFileSuggestions', 'codexUsage', 'codexUsageError', 'error',
+            'fileChange', 'skills', 'workspaceFileSuggestions', 'codexUsage', 'codexUsageError',
+            'turnCompleted', 'error',
         ] as const;
         const platformServerTypes = [] as const;
         const vsCodeServerTypes = ['ready'] as const;
@@ -61,12 +64,12 @@ describe('Protocol types', () => {
             ...agentClientTypes,
             ...platformClientTypes,
             ...vsCodeClientTypes,
-        ]).toHaveLength(31);
+        ]).toHaveLength(37);
         expect([
             ...agentServerTypes,
             ...platformServerTypes,
             ...vsCodeServerTypes,
-        ]).toHaveLength(13);
+        ]).toHaveLength(14);
     });
 
     it('client messages serialize correctly', () => {
@@ -79,6 +82,9 @@ describe('Protocol types', () => {
             { type: 'getModels' },
             { type: 'getSessions' },
             { type: 'getState' },
+            { type: 'setPlanModeEnabled', enabled: true },
+            { type: 'setTodoEnabled', enabled: false },
+            { type: 'setToolDisabled', toolName: 'read', disabled: true },
         ];
 
         for (const msg of messages) {

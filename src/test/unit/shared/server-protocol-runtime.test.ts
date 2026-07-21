@@ -61,6 +61,37 @@ const serverMessages: ServerMessage[] = [
             cacheMode: 'auto',
             cacheEffective: 'short',
             fileUndoViewEnabled: true,
+            controls: {
+                todos: {
+                    tasks: [{ id: 1, subject: 'Implement controls', status: 'in_progress' }],
+                    nextId: 2,
+                },
+                todoEnabled: true,
+                todoToggleDisabled: false,
+                planModeEnabled: true,
+                planModeToggleDisabled: false,
+                subagents: {
+                    enabled: true,
+                    toggleDisabled: false,
+                    activeCount: 1,
+                    queuedCount: 0,
+                    runs: [{
+                        agentId: 'child-1',
+                        name: 'reviewer',
+                        task: 'Review controls',
+                        taskPreview: 'Review controls',
+                        status: 'running',
+                        elapsedMs: 100,
+                        turnCount: 1,
+                        canDismiss: false,
+                    }],
+                },
+                toolSelection: {
+                    registered: [{ name: 'read', source: 'builtin' }],
+                    disabled: [],
+                    toggleDisabled: false,
+                },
+            },
             interruptedTurn: { reason: 'incomplete_session_tail' },
         },
     },
@@ -133,6 +164,7 @@ const serverMessages: ServerMessage[] = [
         },
     },
     { type: 'codexUsageError', message: 'Unavailable' },
+    { type: 'turnCompleted', outcome: 'completed', durationMs: 1200 },
     { type: 'error', message: 'Failed', severity: 'warning' },
 ];
 
@@ -152,7 +184,7 @@ describe('server protocol runtime validation', () => {
     it('accepts every current server message payload through an event envelope', () => {
         const sequencer = new AgentEventSequencer('client-1');
 
-        expect(serverMessages).toHaveLength(13);
+        expect(serverMessages).toHaveLength(14);
         for (const message of serverMessages) {
             expect(isAgentEventEnvelope(sequencer.create(message, 'tab-1')), message.type).toBe(true);
         }
@@ -188,6 +220,25 @@ describe('server protocol runtime validation', () => {
                     isStreaming: false,
                     tools: [],
                     model: { provider: 'provider', id: 'model', unexpected: true },
+                },
+            }),
+            eventEnvelope('stateSync', {
+                state: {
+                    messages: [],
+                    isStreaming: false,
+                    tools: [],
+                    controls: {
+                        todos: { tasks: [], nextId: 1 },
+                        todoEnabled: true,
+                        todoToggleDisabled: false,
+                        planModeEnabled: false,
+                        planModeToggleDisabled: false,
+                        subagents: {
+                            enabled: true, toggleDisabled: false, activeCount: 0, queuedCount: 0,
+                            runs: [], unexpected: true,
+                        },
+                        toolSelection: { registered: [], disabled: [], toggleDisabled: false },
+                    },
                 },
             }),
             eventEnvelope('models', { models: [{ provider: 'provider' }] }),

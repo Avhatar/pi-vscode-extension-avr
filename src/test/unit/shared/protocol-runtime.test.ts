@@ -64,9 +64,15 @@ describe('chat protocol runtime validation', () => {
             { type: 'removeQueuedMessage', index: 0 },
             { type: 'cancelQueue' },
             { type: 'setCacheMode', mode: 'auto' },
+            { type: 'setTodoEnabled', enabled: true },
+            { type: 'setSubagentsEnabled', enabled: false },
+            { type: 'setPlanModeEnabled', enabled: true },
+            { type: 'setFileUndoViewEnabled', enabled: true },
+            { type: 'setToolDisabled', toolName: 'read', disabled: true },
+            { type: 'setToolsBulk', disabled: ['bash', 'write'] },
         ];
 
-        expect(messages).toHaveLength(31);
+        expect(messages).toHaveLength(37);
         for (const message of messages) expect(isClientMessage(message), message.type).toBe(true);
     });
 
@@ -112,6 +118,9 @@ describe('chat protocol runtime validation', () => {
             { type: 'editQueuedMessage', index: 0.5, text: 'fractional' },
             { type: 'removeQueuedMessage', index: -1 },
             { type: 'setCacheMode', mode: 'forever' },
+            { type: 'setTodoEnabled', enabled: 'yes' },
+            { type: 'setToolDisabled', toolName: 'read' },
+            { type: 'setToolsBulk', disabled: ['read', 7] },
             { type: 'abort', unexpected: true },
         ];
 

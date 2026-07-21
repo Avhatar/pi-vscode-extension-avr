@@ -35,7 +35,13 @@ function createSession(path: string) {
     const events = new EventRouter();
     const session = {
         events,
-        todoStore: { subscribe: vi.fn(() => () => undefined) },
+        todoStore: {
+            subscribe: vi.fn(() => () => undefined),
+            getState: vi.fn(() => ({
+                tasks: [{ id: 1, subject: 'Desktop controls', status: 'in_progress' }],
+                nextId: 2,
+            })),
+        },
         onSubagentStateChanged: vi.fn(() => ({ dispose: vi.fn() })),
         onSubagentMutation: vi.fn(() => ({ dispose: vi.fn() })),
         onSubagentNotification: vi.fn(() => ({ dispose: vi.fn() })),
@@ -58,7 +64,8 @@ function createSession(path: string) {
         setThinkingLevel: vi.fn(),
         getSessions: vi.fn(async () => []),
         getSkills: vi.fn(() => []),
-        getRegisteredToolsInfo: vi.fn(() => [{ name: 'read' }]),
+        getRegisteredToolsInfo: vi.fn(() => [{ name: 'read', source: 'builtin' }]),
+        getSubagentSnapshot: vi.fn(() => ({ runs: [], activeCount: 0, queuedCount: 0 })),
         applyToolSelection: vi.fn(),
         debugSnapshotTools: vi.fn(() => ({
             active: ['read'], hasTodo: false, todoRegistered: false,
@@ -117,7 +124,23 @@ describe('desktop ChatHost composition', () => {
             activeTabId: expect.any(String),
             sessionId: '/sessions/1.jsonl',
             tools: ['read'],
+            controls: {
+                todos: {
+                    tasks: [{ id: 1, subject: 'Desktop controls', status: 'in_progress' }],
+                    nextId: 2,
+                },
+                todoEnabled: true,
+                planModeEnabled: false,
+                subagents: { enabled: false, runs: [] },
+                toolSelection: {
+                    registered: [{ name: 'read', source: 'builtin' }],
+                    disabled: ['subagent'],
+                },
+            },
         });
+
+        await expect(runtime.dispatch({ type: 'setPlanModeEnabled', enabled: true })).resolves.toEqual({ ok: true });
+        expect(runtime.getState()?.controls?.planModeEnabled).toBe(true);
 
         await expect(runtime.dispatch({ type: 'getModels' })).resolves.toEqual({ ok: true });
         expect(emitted.some(({ message }) => message.type === 'models')).toBe(true);
@@ -142,6 +165,55 @@ describe('desktop ChatHost composition', () => {
             message.type === 'agentEvent' && message.event.type === 'agent_start'
         ))).toBe(true);
         expect(runtime.getState()?.isStreaming).toBe(true);
+        await runtime.dispose();
+    });
+
+    it('keeps queued prompts in Plan Mode and rejects busy preference changes', async () => {
+        const { dependencies, sessions } = createDependencies();
+        const runtime = createDesktopChatRuntime(dependencies);
+        await runtime.initialize();
+
+        await expect(runtime.dispatch({ type: 'setPlanModeEnabled', enabled: true })).resolves.toEqual({ ok: true });
+        sessions[0].events.dispatch({ type: 'agent_start' } as any);
+        await vi.waitFor(() => expect(runtime.getState()?.isStreaming).toBe(true));
+        await expect(runtime.dispatch({ type: 'queueMessage', text: 'queued task' })).resolves.toEqual({ ok: true });
+        await expect(runtime.dispatch({ type: 'setPlanModeEnabled', enabled: false })).resolves.toMatchObject({
+            ok: false,
+            code: 'command_failed',
+        });
+
+        sessions[0].events.dispatch({ type: 'agent_end' } as any);
+        await vi.waitFor(() => expect(runtime.getState()?.isStreaming).toBe(false));
+        sessions[0].events.dispatch({ type: 'agent_settled' } as any);
+        await vi.waitFor(() => expect(sessions[0].prompt).toHaveBeenCalledOnce());
+        const queuedPrompt = (sessions[0].prompt.mock.calls as unknown as Array<[string]>)[0][0];
+        expect(queuedPrompt).toContain('<plan-mode-instructions>');
+        expect(queuedPrompt).toContain('queued task');
+        await runtime.dispose();
+    });
+
+    it('emits an authoritative completion event only after agent settlement', async () => {
+        const { dependencies, sessions, emitted } = createDependencies();
+        const runtime = createDesktopChatRuntime(dependencies);
+        await runtime.initialize();
+
+        let finishPrompt!: () => void;
+        sessions[0].prompt.mockImplementationOnce(() => new Promise<undefined>((resolve) => {
+            finishPrompt = () => resolve(undefined);
+        }));
+        await expect(runtime.dispatch({ type: 'prompt', text: 'user task' })).resolves.toEqual({ ok: true });
+        await vi.waitFor(() => expect(sessions[0].prompt).toHaveBeenCalledOnce());
+        sessions[0].events.dispatch({ type: 'agent_start' } as any);
+        finishPrompt();
+        await vi.waitFor(() => expect(runtime.getState()?.isStreaming).toBe(true));
+        sessions[0].events.dispatch({ type: 'agent_end' } as any);
+        await vi.waitFor(() => expect(runtime.getState()?.isStreaming).toBe(false));
+        expect(emitted.some(({ message }) => message.type === 'turnCompleted')).toBe(false);
+        sessions[0].events.dispatch({ type: 'agent_settled' } as any);
+
+        await vi.waitFor(() => expect(emitted.some(({ message }) => (
+            message.type === 'turnCompleted'
+        ))).toBe(true));
         await runtime.dispose();
     });
 

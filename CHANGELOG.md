@@ -13,6 +13,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Added a portable Windows build for testing the production standalone desktop shell without an installer.
 - Added an in-application standalone workspace welcome flow that initializes the Agent Host only after workspace trust approval.
 - Added encrypted standalone credential storage through Electron safeStorage, persistent canonical-workspace trust, shared desktop session settings, and recent workspace state without plaintext fallback.
+- Added a functional Pi Code Terminal desktop interface with real chat tabs, compact transcript and streaming activity, prompt queue/steer/stop controls, session history, file-change previews, model controls, and a slide-out panel for Plan Mode, File Undo View, ToDo, subagents, and per-chat tool selection.
 - Added active project wiki skills `wiki-read` and `wiki-maintain` under `.agents/skills/` alongside a `wiki/` scaffold at repo root, so any agent runtime that discovers `.agents/` skills can orient on and maintain repo documentation without depending on a Claude-specific `.claude/skills/` layout.
 
 ### Changed
@@ -20,9 +21,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Reused one browser-safe request correlation and event recovery implementation across VS Code and desktop transports.
 - Changed standalone launches and New Window actions to use independent workspace processes, so one project failure does not terminate another.
 - Changed standalone shutdown to record interrupted turns, abort parent and child work, dispose resources within a process-scoped deadline, and reconnect renderer reloads without replaying work.
+- Restyled the standalone workspace as a flat, responsive phosphor terminal with compact tabs, a line-oriented activity feed, square controls, a live clock, and reduced-motion CRT effects.
 - Documented the wiki-first repo orientation soft rule in `AGENTS.md` and updated the project skill catalog with the new wiki workflows.
 
+### Removed
+- Removed the obsolete disposable CRT spike now that the production standalone desktop application provides the maintained renderer, shared Agent Host integration, and portable build.
+
 ### Fixed
+- Fixed standalone queued prompts bypassing Plan Mode instructions and made active model, thinking, File Undo View, ToDo, subagent, and tool controls consistently reject changes while a turn is busy.
+- Fixed the standalone File Undo View and sound controls by adding compact changed-file undo/redo actions above the composer and an audible local turn-completion cue.
+- Fixed standalone New Window controls remaining available before the current workspace Agent Host connection was ready, and prevented duplicate launch requests while a new process is starting.
 - Fixed the portable standalone executable failing during startup when its Electron main bundle loaded CommonJS dependencies.
 - Fixed the standalone agent host failing to initialize when a newer incompatible Pi SDK patch release was resolved during packaging.
 

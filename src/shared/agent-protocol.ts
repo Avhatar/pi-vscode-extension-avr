@@ -1,3 +1,17 @@
+import type { AgentTabControls } from './agent-control-protocol';
+
+export type {
+    AgentTabControls,
+    LauncherSubagentRun,
+    LauncherSubagentSnapshot,
+    LauncherSubagentStatus,
+    RegisteredToolInfo,
+    TaskInfo,
+    TaskStatus,
+    TodoSnapshot,
+    ToolSelectionSnapshot,
+} from './agent-control-protocol';
+
 export interface ContextUsageInfo {
     tokens: number | null;
     contextWindow: number;
@@ -130,6 +144,8 @@ export interface SerializedAgentState {
     /** Whether the always-visible File Undo View (changed-files bar with
      *  Undo / Redo / Review above the input) is enabled for this tab. */
     fileUndoViewEnabled?: boolean;
+    /** Active-tab capabilities and preferences used by portable desktop control panels. */
+    controls?: AgentTabControls;
     /** An idle persisted conversation tail still requires an assistant continuation. */
     interruptedTurn?: { reason: 'incomplete_session_tail' };
 }
@@ -208,7 +224,13 @@ export type AgentClientMessage =
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
     | { type: 'cancelQueue' }
-    | { type: 'setCacheMode'; mode: CacheMode };
+    | { type: 'setCacheMode'; mode: CacheMode }
+    | { type: 'setTodoEnabled'; enabled: boolean }
+    | { type: 'setSubagentsEnabled'; enabled: boolean }
+    | { type: 'setPlanModeEnabled'; enabled: boolean }
+    | { type: 'setFileUndoViewEnabled'; enabled: boolean }
+    | { type: 'setToolDisabled'; toolName: string; disabled: boolean }
+    | { type: 'setToolsBulk'; disabled: string[] };
 
 /** Host events and snapshots whose semantics belong to the shared agent application. */
 export type AgentServerMessage =
@@ -223,4 +245,5 @@ export type AgentServerMessage =
     | { type: 'workspaceFileSuggestions'; requestId: number; query: string; isIndexing?: boolean; items: WorkspaceFileSuggestion[] }
     | { type: 'codexUsage'; usage: CodexUsageSnapshot | null }
     | { type: 'codexUsageError'; message: string }
+    | { type: 'turnCompleted'; outcome: 'completed' | 'failed' | 'stopped' | 'truncated'; durationMs?: number }
     | { type: 'error'; message: string; severity?: 'error' | 'warning' | 'info' };

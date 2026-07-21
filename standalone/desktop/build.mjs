@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -56,5 +56,11 @@ await writeFile(
   await readFile(resolve(root, 'renderer/styles.css'), 'utf8'),
   'utf8',
 );
+await cp(resolve(root, 'renderer/assets'), resolve(dist, 'assets'), {
+  recursive: true,
+  // Monofonto requires a separate desktop-app embedding license. Keep locally supplied
+  // evaluation copies out of distributable bundles until that license is documented.
+  filter: (source) => !source.toLowerCase().includes('monofonto'),
+});
 
-console.log(`Pi Code desktop transport shell built at ${dist}`);
+console.log(`Pi Code desktop renderer built at ${dist}`);

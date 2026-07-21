@@ -95,6 +95,19 @@ describe('portable ChatService event and state projection', () => {
         const tabs: TabInfo[] = [{
             id: 'tab-1', name: 'Chat', isActive: true, isStreaming: true, hasNotification: false,
         }];
+        const controls = {
+            todos: { tasks: [{ id: 1, subject: 'Ship controls', status: 'in_progress' as const }], nextId: 2 },
+            todoEnabled: true,
+            todoToggleDisabled: true,
+            planModeEnabled: false,
+            planModeToggleDisabled: true,
+            subagents: {
+                enabled: true, toggleDisabled: true, activeCount: 0, queuedCount: 0, runs: [],
+            },
+            toolSelection: {
+                registered: [{ name: 'read' }], disabled: [], toggleDisabled: true,
+            },
+        };
 
         const state = service.buildState(tab, {
             activeTabId: 'tab-1',
@@ -102,6 +115,7 @@ describe('portable ChatService event and state projection', () => {
             cacheMode: 'auto',
             getCacheEffective: () => 'long',
             getFileUndoViewEnabled: () => true,
+            getControls: () => controls,
         });
 
         expect(state).toMatchObject({
@@ -121,6 +135,7 @@ describe('portable ChatService event and state projection', () => {
             cacheMode: 'auto',
             cacheEffective: 'long',
             fileUndoViewEnabled: true,
+            controls,
             pendingTools: [{
                 toolCallId: 'tool-1',
                 toolName: 'bash',
@@ -634,6 +649,7 @@ describe('portable ChatService streaming command dispatch', () => {
 
 function createQueueCallbacks(overrides: Record<string, unknown> = {}): any {
     return {
+        decoratePrompt: vi.fn((text: string) => text),
         augmentPrompt: vi.fn(async (text: string) => text),
         compact: vi.fn(async () => undefined),
         prompt: vi.fn(async (_text: string, onAgentStart: () => void) => onAgentStart()),
@@ -649,6 +665,23 @@ function createQueueCallbacks(overrides: Record<string, unknown> = {}): any {
 }
 
 describe('portable ChatService queue orchestration', () => {
+    it('decorates a queued prompt before file-mention augmentation', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        tab.queuedMessages = ['queued task'];
+        const callbacks = createQueueCallbacks({
+            decoratePrompt: vi.fn((text: string) => `PLAN\n${text}`),
+            augmentPrompt: vi.fn(async (text: string) => `FILES\n${text}`),
+        });
+
+        service.reserveQueuedDispatch(tab);
+        await service.dispatchNextQueued(tab, callbacks);
+
+        expect(callbacks.decoratePrompt).toHaveBeenCalledWith('queued task');
+        expect(callbacks.augmentPrompt).toHaveBeenCalledWith('PLAN\nqueued task');
+        expect(callbacks.prompt).toHaveBeenCalledWith('FILES\nPLAN\nqueued task', expect.any(Function));
+    });
+
     it('applies validated queue controls to only the supplied tab', () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();

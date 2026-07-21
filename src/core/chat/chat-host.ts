@@ -106,7 +106,7 @@ export interface ChatHostEventEffects<TTab extends ChatHostTab> {
     logTurnEnd?(tab: TTab, assistantMessage: any | undefined): void;
     sweepPendingTools?(tab: TTab, assistantMessage: any | undefined): void;
     completeAgentEndAccounting?(tab: TTab): Promise<CodexTurnUsage | undefined>;
-    notifyTurnCompletion?(completion: TurnCompletionInfo): void;
+    notifyTurnCompletion?(tab: TTab, completion: TurnCompletionInfo): void;
     emitAgentEvent(tabId: string, event: unknown): void;
     dispatchNextQueued(tab: TTab): Promise<void>;
 }
@@ -294,7 +294,7 @@ export class ChatHost<TTab extends ChatHostTab> {
     }
 
     async setActiveFileUndoViewEnabled(enabled: boolean): Promise<boolean> {
-        const tab = this.activeTab;
+        const tab = this._idleActiveTab();
         if (!tab) return false;
         await this._options.preferences.setFileUndoViewEnabled(tab, enabled);
         this._options.effects.publishState(tab.id);
@@ -482,7 +482,7 @@ export class ChatHost<TTab extends ChatHostTab> {
         if (event.type === 'agent_settled') {
             const completion = this.chat.settleAgent(runtime);
             if (completion) {
-                eventEffects?.notifyTurnCompletion?.(completion);
+                eventEffects?.notifyTurnCompletion?.(tab, completion);
                 if (tab.id !== this.activeTabId) {
                     runtime.hasNotification = true;
                     this._options.effects.persistTabs();
@@ -564,6 +564,54 @@ export class ChatHost<TTab extends ChatHostTab> {
                     this._options.effects.publishState(candidate.id);
                 }
                 return;
+            case 'setModel':
+                await this._applyIdleSessionControl(tab, async () => {
+                    await tab.session.setModel(intent.provider, intent.modelId);
+                    this._options.effects.modelsChanged();
+                });
+                return;
+            case 'setThinkingLevel':
+                await this._applyIdleSessionControl(tab, () => {
+                    tab.session.setThinkingLevel(intent.level);
+                });
+                return;
+            case 'setTodoEnabled':
+                await this._applyActiveControl(
+                    tab,
+                    () => this.setActiveTodoEnabled(intent.enabled),
+                );
+                return;
+            case 'setSubagentsEnabled':
+                await this._applyActiveControl(
+                    tab,
+                    () => this.setActiveSubagentsEnabled(intent.enabled),
+                );
+                return;
+            case 'setPlanModeEnabled':
+                await this._applyActiveControl(
+                    tab,
+                    () => this.setActivePlanModeEnabled(intent.enabled),
+                );
+                return;
+            case 'setFileUndoViewEnabled':
+                await this._applyActiveControl(
+                    tab,
+                    () => this.setActiveFileUndoViewEnabled(intent.enabled),
+                    false,
+                );
+                return;
+            case 'setToolDisabled':
+                await this._applyActiveControl(
+                    tab,
+                    () => this.setActiveToolDisabled(intent.toolName, intent.disabled),
+                );
+                return;
+            case 'setToolsBulk':
+                await this._applyActiveControl(
+                    tab,
+                    () => this.setActiveToolsBulk(intent.disabled),
+                );
+                return;
             case 'toggleFavorite': {
                 const key = `${intent.provider}:${intent.modelId}`;
                 const favorites = new Set(this._options.preferences.getFavorites());
@@ -608,5 +656,27 @@ export class ChatHost<TTab extends ChatHostTab> {
                 this.switchTab(intent.tabId);
                 return;
         }
+    }
+
+    private async _applyIdleSessionControl(
+        sourceTab: TTab,
+        update: () => void | Promise<void>,
+    ): Promise<void> {
+        if (sourceTab.id !== this.activeTabId || this._idleActiveTab() !== sourceTab) {
+            throw new Error('The active chat is busy or unavailable.');
+        }
+        await update();
+        this._options.effects.publishState(sourceTab.id);
+    }
+
+    private async _applyActiveControl(
+        sourceTab: TTab,
+        update: () => Promise<boolean>,
+        publish = true,
+    ): Promise<void> {
+        if (sourceTab.id !== this.activeTabId || !await update()) {
+            throw new Error('The active chat is busy or unavailable.');
+        }
+        if (publish) this._options.effects.publishState(sourceTab.id);
     }
 }

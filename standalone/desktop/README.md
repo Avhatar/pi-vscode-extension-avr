@@ -2,7 +2,9 @@
 
 Production Electron host for the standalone Pi Code client. It composes the same portable chat backend used by the VS Code extension and communicates with a sandboxed browser renderer through validated Electron IPC.
 
-The current renderer is a transport shell for Phase 4 validation. It opens on an in-application workspace welcome screen, starts the shared Agent Host only after trust approval, and confirms that the host connects and recovers. It does not yet expose the functional chat interface planned for Phase 5.
+The renderer provides a responsive phosphor-terminal interface with real isolated chat tabs, a compact transcript and live thinking/tool activity, prompt queue/steer/stop controls, session history, changed-file previews, model/thinking/cache status, and a slide-out operational panel for Plan Mode, File Undo View, ToDo, subagent visibility, and per-chat tool selection. The shared Agent Host still starts only after canonical workspace trust approval. Renderer reload reconnects to the existing host and restores an authoritative snapshot without replaying prompts or tools.
+
+Credential entry, attachments, workspace mentions, native diff opening, OS notification effects, direct ToDo editing, and subagent lifecycle/worktree actions remain later renderer slices. The packaged renderer uses the OFL-licensed VT323 font. Locally supplied Monofonto files are excluded from generated bundles until a desktop-app embedding license is documented.
 
 ## Requirements
 
@@ -26,7 +28,13 @@ npm run desktop -- --cwd "X:\Projects\example"
 
 Add `--devtools` to open detached Chromium developer tools.
 
-Every launch creates an independent OS process with one workspace window. Launch the executable again, or use **New Window**, to work on another project without sharing a failure boundary. Canonical workspace trust is remembered in shared app data after explicit approval. Each workspace window will contain multiple isolated chat tabs when the functional renderer is enabled.
+Every launch creates an independent OS process with one workspace window. Launch the executable again, or use **New Window**, to work on another project without sharing a failure boundary. Canonical workspace trust is remembered in shared app data after explicit approval. Each workspace window owns multiple isolated chat tabs.
+
+In the prompt composer, **Enter** sends while idle and queues while the agent is running, **Ctrl+Enter** steers the active turn, **Shift+Enter** inserts a newline, and **Escape** stops active work. The CRT control cycles LOW, MED, and HIGH intensity and persists locally for that desktop profile.
+
+The control panel is snapshot-authoritative: model, thinking, Plan Mode, File Undo View, ToDo, subagent, and tool-selection mutations are rejected while the active tab is busy rather than being applied optimistically. Queued prompts retain the active Plan Mode decoration when they are dispatched after settlement.
+
+When File Undo View is enabled, a compact changed-files bar appears above the composer. **Undo** restores the last user turn checkpoint, **Redo** reapplies the suspended checkpoint, and file rows scroll to the corresponding inline diff. Native diff-editor opening remains a later desktop slice. **Play Sound** controls local CRT interaction feedback and the authoritative turn-completion cue emitted only after `agent_settled`; OS popup notifications remain explicitly unavailable.
 
 `npm run desktop` always rebuilds the desktop bundles before launch.
 
@@ -42,7 +50,19 @@ The command runs desktop tests, typechecking, and a fresh build before packaging
 release\Pi-Code-Desktop-Portable-0.1.0.exe
 ```
 
-The executable is portable and does not install the application. It is not code-signed, so Windows SmartScreen may report an unknown publisher. First startup can take several seconds while the portable Electron runtime is extracted.
+The executable is portable and does not install the application. It is not code-signed, so Windows SmartScreen may report an unknown publisher. Each portable launch extracts its Electron runtime before the window appears and can take tens of seconds on slower disks; this is separate from Agent Host connection time.
+
+Run the packaged two-workspace acceptance smoke with:
+
+```powershell
+npm run smoke:portable
+```
+
+The smoke approves two fresh canonical workspaces, verifies independent process ownership, gracefully closes one without terminating the other, relaunches a trusted path without another prompt, and checks process cleanup. Native trust dialogs are detected by their top-level window title rather than `Get-Process.MainWindowTitle`, which may continue reporting the renderer title for Electron secondary dialogs.
+
+## Packaged font boundary
+
+The production bundle uses `renderer/assets/VT323-Regular.ttf` and ships its OFL text. `build.mjs` deliberately excludes every Monofonto path, and `verify:bundle` fails if Monofonto appears in generated output or if VT323/license assets are missing. Because `standalone/**` is excluded from the VSIX, neither desktop font enters the extension package.
 
 ## Security boundary
 

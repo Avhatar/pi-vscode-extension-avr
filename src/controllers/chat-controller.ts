@@ -634,7 +634,7 @@ export class ChatController implements vscode.Disposable {
                         codexModelId,
                     );
                 },
-                notifyTurnCompletion: (completion) => {
+                notifyTurnCompletion: (_tab, completion) => {
                     this._turnNotifier.notify(completion, this.getTurnNotificationSettings());
                 },
                 emitAgentEvent: (tabId, event) => {
@@ -1150,6 +1150,7 @@ export class ChatController implements vscode.Disposable {
 
     private _dispatchNextQueuedMessage(tab: TabState): Promise<void> {
         return this._chatService.dispatchNextQueued(tab, {
+            decoratePrompt: (text) => decorateDirectPrompt(text, this._isPlanModeEnabledFor(tab)),
             augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
             compact: (instructions) => tab.session.compact(instructions),
             prompt: (text, onAgentStart) => {

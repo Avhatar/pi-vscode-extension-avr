@@ -96,6 +96,19 @@ export const AgentClientMessageSchema = Type.Union([
     }, StrictObject),
     Type.Object({ type: Type.Literal('cancelQueue') }, StrictObject),
     Type.Object({ type: Type.Literal('setCacheMode'), mode: CacheModeSchema }, StrictObject),
+    Type.Object({ type: Type.Literal('setTodoEnabled'), enabled: Type.Boolean() }, StrictObject),
+    Type.Object({ type: Type.Literal('setSubagentsEnabled'), enabled: Type.Boolean() }, StrictObject),
+    Type.Object({ type: Type.Literal('setPlanModeEnabled'), enabled: Type.Boolean() }, StrictObject),
+    Type.Object({ type: Type.Literal('setFileUndoViewEnabled'), enabled: Type.Boolean() }, StrictObject),
+    Type.Object({
+        type: Type.Literal('setToolDisabled'),
+        toolName: NonEmptyString,
+        disabled: Type.Boolean(),
+    }, StrictObject),
+    Type.Object({
+        type: Type.Literal('setToolsBulk'),
+        disabled: Type.Array(NonEmptyString),
+    }, StrictObject),
 ]);
 
 export const PlatformClientMessageSchema = Type.Union([
@@ -192,6 +205,79 @@ const PendingToolInfoSchema = Type.Object({
     startTime: Type.Number(),
     args: Type.Optional(Type.Unknown()),
 }, StrictObject);
+const TaskStatusSchema = Type.Union([
+    Type.Literal('pending'),
+    Type.Literal('in_progress'),
+    Type.Literal('completed'),
+    Type.Literal('deleted'),
+]);
+const TaskInfoSchema = Type.Object({
+    id: Type.Number(),
+    subject: Type.String(),
+    description: Type.Optional(Type.String()),
+    activeForm: Type.Optional(Type.String()),
+    status: TaskStatusSchema,
+    blockedBy: Type.Optional(Type.Array(Type.Number())),
+}, StrictObject);
+const TodoSnapshotSchema = Type.Object({
+    tasks: Type.Array(TaskInfoSchema),
+    nextId: Type.Number(),
+}, StrictObject);
+const RegisteredToolInfoSchema = Type.Object({
+    name: Type.String(),
+    description: Type.Optional(Type.String()),
+    source: Type.Optional(Type.String()),
+    hasGuidelines: Type.Optional(Type.Boolean()),
+}, StrictObject);
+const ToolSelectionSnapshotSchema = Type.Object({
+    registered: Type.Array(RegisteredToolInfoSchema),
+    disabled: Type.Array(Type.String()),
+    toggleDisabled: Type.Boolean(),
+}, StrictObject);
+const SubagentStatusSchema = Type.Union([
+    Type.Literal('queued'),
+    Type.Literal('starting'),
+    Type.Literal('running'),
+    Type.Literal('waiting_for_permission'),
+    Type.Literal('retrying'),
+    Type.Literal('completed'),
+    Type.Literal('failed'),
+    Type.Literal('cancelled'),
+]);
+const SubagentRunSchema = Type.Object({
+    agentId: Type.String(),
+    name: Type.String(),
+    task: Type.String(),
+    taskPreview: Type.String(),
+    result: Type.Optional(Type.String()),
+    resultPreview: Type.Optional(Type.String()),
+    status: SubagentStatusSchema,
+    modelLabel: Type.Optional(Type.String()),
+    currentTool: Type.Optional(Type.String()),
+    activity: Type.Optional(Type.String()),
+    elapsedMs: Type.Number(),
+    queueWaitMs: Type.Optional(Type.Number()),
+    turnCount: Type.Number(),
+    error: Type.Optional(Type.String()),
+    canDismiss: Type.Boolean(),
+}, StrictObject);
+const SubagentSnapshotSchema = Type.Object({
+    enabled: Type.Boolean(),
+    toggleDisabled: Type.Boolean(),
+    activeCount: Type.Number(),
+    queuedCount: Type.Number(),
+    runs: Type.Array(SubagentRunSchema),
+    smokeSimulation: Type.Optional(Type.Boolean()),
+}, StrictObject);
+const AgentTabControlsSchema = Type.Object({
+    todos: TodoSnapshotSchema,
+    todoEnabled: Type.Boolean(),
+    todoToggleDisabled: Type.Boolean(),
+    planModeEnabled: Type.Boolean(),
+    planModeToggleDisabled: Type.Boolean(),
+    subagents: SubagentSnapshotSchema,
+    toolSelection: ToolSelectionSnapshotSchema,
+}, StrictObject);
 const SerializedAgentStateSchema = Type.Object({
     messages: Type.Array(Type.Unknown()),
     model: Type.Optional(ModelInfoSchema),
@@ -219,6 +305,7 @@ const SerializedAgentStateSchema = Type.Object({
     cacheMode: Type.Optional(CacheModeSchema),
     cacheEffective: Type.Optional(Type.Union([Type.Literal('short'), Type.Literal('long')])),
     fileUndoViewEnabled: Type.Optional(Type.Boolean()),
+    controls: Type.Optional(AgentTabControlsSchema),
     interruptedTurn: Type.Optional(Type.Object({
         reason: Type.Literal('incomplete_session_tail'),
     }, StrictObject)),
@@ -316,6 +403,16 @@ export const AgentServerMessageSchema = Type.Union([
     }, StrictObject),
     Type.Object({ type: Type.Literal('codexUsageError'), message: Type.String() }, StrictObject),
     Type.Object({
+        type: Type.Literal('turnCompleted'),
+        outcome: Type.Union([
+            Type.Literal('completed'),
+            Type.Literal('failed'),
+            Type.Literal('stopped'),
+            Type.Literal('truncated'),
+        ]),
+        durationMs: Type.Optional(Type.Number({ minimum: 0 })),
+    }, StrictObject),
+    Type.Object({
         type: Type.Literal('error'),
         message: Type.String(),
         severity: Type.Optional(ErrorSeveritySchema),
@@ -343,6 +440,7 @@ const AgentServerMessageTypeSchema = Type.Union([
     Type.Literal('workspaceFileSuggestions'),
     Type.Literal('codexUsage'),
     Type.Literal('codexUsageError'),
+    Type.Literal('turnCompleted'),
     Type.Literal('error'),
 ]);
 
