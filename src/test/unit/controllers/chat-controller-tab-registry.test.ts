@@ -3,6 +3,18 @@ import { ChatController } from '../../../controllers/chat-controller';
 import { ChatService } from '../../../core/chat/chat-service';
 import { TabRegistry } from '../../../core/chat/tab-registry';
 
+// Mock `fs/promises` at module scope so deleteHistorySession's `unlink(...)`
+// call becomes observable without touching the real filesystem. Every other
+// export is left untouched so unrelated imports keep working.
+vi.mock('fs/promises', async () => {
+    const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises');
+    return {
+        ...actual,
+        unlink: vi.fn(async () => undefined),
+    };
+});
+import { unlink as mockedUnlink } from 'fs/promises';
+
 function createRegistry(tabs: any[], activeId?: string): TabRegistry<any> {
     const registry = new TabRegistry<any>();
     for (const tab of tabs) registry.register(tab);
@@ -104,6 +116,90 @@ describe('ChatController tab registry integration', () => {
 
         expect(session.initializeFromPath).toHaveBeenCalledWith('/sessions/restored.jsonl');
         expect(session.dispose).toHaveBeenCalledOnce();
+    });
+
+    it('deleteHistorySession disposes the raw recorder and storage before unlinking', async () => {
+        const order: string[] = [];
+        const existing = {
+            id: 'tab-existing',
+            session: {
+                sessionPath: '/other.jsonl',
+                getSessions: async () => ([{ path: '/target.jsonl' }, { path: '/other.jsonl' }]),
+            },
+        };
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = createRegistry([existing], existing.id);
+        controller._openPanels = new Map();
+        controller._subagentStore = {
+            deleteByParentSessionPath: vi.fn(async () => { order.push('subagent'); }),
+        };
+        controller._rawRecorderRegistry = {
+            dispose: vi.fn(async () => { order.push('rawRecorder'); }),
+            notifyDataCleared: vi.fn(() => { order.push('notifyDataCleared'); }),
+        };
+        controller._rawStorage = {
+            deleteSession: vi.fn(async () => { order.push('rawStorage'); }),
+        };
+        controller._persistTabs = vi.fn(() => { order.push('persist'); });
+        controller._onLauncherStateChanged = { fire: vi.fn(() => { order.push('launcher'); }) };
+        controller.sendStateSync = vi.fn(() => { order.push('sendStateSync'); });
+        controller._hostInstance = {
+            tabs: controller._tabs,
+            chat: {},
+            detachTab: vi.fn(async () => { order.push('detach'); }),
+        };
+        controller._chatService = controller._hostInstance.chat;
+        controller.findTabIdBySessionPath = ChatController.prototype.findTabIdBySessionPath.bind(controller);
+        (mockedUnlink as unknown as ReturnType<typeof vi.fn>).mockClear();
+        (mockedUnlink as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push('unlink'); });
+
+        await controller.deleteHistorySession('/target.jsonl');
+
+        expect(controller._subagentStore.deleteByParentSessionPath).toHaveBeenCalledWith('/target.jsonl');
+        expect(controller._rawRecorderRegistry.dispose).toHaveBeenCalledWith('/target.jsonl');
+        expect(controller._rawStorage.deleteSession).toHaveBeenCalledWith('/target.jsonl');
+        expect(mockedUnlink).toHaveBeenCalledWith('/target.jsonl');
+        expect(order).toEqual([
+            'subagent',
+            'rawRecorder',
+            'rawStorage',
+            'notifyDataCleared',
+            'unlink',
+            'persist',
+            'launcher',
+            'sendStateSync',
+        ]);
+    });
+
+    it('deleteHistorySession still succeeds when RawMode is not wired in', async () => {
+        const existing = {
+            id: 'tab-existing',
+            session: {
+                sessionPath: '/other.jsonl',
+                getSessions: async () => ([{ path: '/target.jsonl' }, { path: '/other.jsonl' }]),
+            },
+        };
+        const controller = Object.create(ChatController.prototype) as any;
+        controller._tabs = createRegistry([existing], existing.id);
+        controller._openPanels = new Map();
+        controller._subagentStore = { deleteByParentSessionPath: vi.fn(async () => undefined) };
+        controller._rawRecorderRegistry = undefined;
+        controller._rawStorage = undefined;
+        controller._persistTabs = vi.fn();
+        controller._onLauncherStateChanged = { fire: vi.fn() };
+        controller.sendStateSync = vi.fn();
+        controller._hostInstance = {
+            tabs: controller._tabs,
+            chat: {},
+            detachTab: vi.fn(async () => undefined),
+        };
+        controller._chatService = controller._hostInstance.chat;
+        controller.findTabIdBySessionPath = ChatController.prototype.findTabIdBySessionPath.bind(controller);
+        (mockedUnlink as unknown as ReturnType<typeof vi.fn>).mockClear();
+        (mockedUnlink as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => undefined);
+
+        await expect(controller.deleteHistorySession('/target.jsonl')).resolves.toBeUndefined();
+        expect(mockedUnlink).toHaveBeenCalledWith('/target.jsonl');
     });
 
     it('registers a restored session path without changing the active tab', async () => {

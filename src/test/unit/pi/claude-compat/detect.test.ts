@@ -185,6 +185,59 @@ describe('detectClaudeInfrastructure', () => {
         expect(result.ruleDirectories).toEqual([path.join(cwd, '.claude', 'rules')]);
     });
 
+    it('treats a CLAUDE.md that only redirects to AGENTS.md as a shim and stays inactive', async () => {
+        const cwd = createWorkspace();
+        writeFile(path.join(cwd, 'AGENTS.md'), '# Project rules\n');
+        const claudeMd = path.join(cwd, 'CLAUDE.md');
+        writeFile(claudeMd, '@AGENTS.md\n');
+
+        const result = await detectClaudeInfrastructure(cwd, {
+            installedPluginsPath: path.join(cwd, 'missing-plugins.json'),
+            findNestedClaudeFiles: async () => [],
+        });
+
+        expect(result.active).toBe(false);
+        expect(result.activationReasons).toEqual([]);
+        expect(result.rootContextFiles).toEqual([]);
+        expect(result.shimContextFiles).toEqual([claudeMd]);
+    });
+
+    it('forces activation for a shim CLAUDE.md when collapseShimContext is false', async () => {
+        const cwd = createWorkspace();
+        writeFile(path.join(cwd, 'AGENTS.md'), '# Project rules\n');
+        const claudeMd = path.join(cwd, 'CLAUDE.md');
+        writeFile(claudeMd, '@AGENTS.md\n');
+
+        const result = await detectClaudeInfrastructure(cwd, {
+            installedPluginsPath: path.join(cwd, 'missing-plugins.json'),
+            collapseShimContext: false,
+            findNestedClaudeFiles: async () => [],
+        });
+
+        expect(result.active).toBe(true);
+        expect(result.activationReasons).toContain('root-context');
+        expect(result.rootContextFiles).toEqual([claudeMd]);
+        expect(result.shimContextFiles).toEqual([]);
+    });
+
+    it('keeps a real CLAUDE.md active while separately filtering a sibling shim in .claude/', async () => {
+        const cwd = createWorkspace();
+        writeFile(path.join(cwd, 'AGENTS.md'), '# Project rules\n');
+        const rootClaude = path.join(cwd, 'CLAUDE.md');
+        writeFile(rootClaude, '# Overrides\n\nExtra guidance beyond AGENTS.md.\n');
+        const shimClaude = path.join(cwd, '.claude', 'CLAUDE.md');
+        writeFile(shimClaude, '@../AGENTS.md\n');
+
+        const result = await detectClaudeInfrastructure(cwd, {
+            installedPluginsPath: path.join(cwd, 'missing-plugins.json'),
+            findNestedClaudeFiles: async () => [],
+        });
+
+        expect(result.active).toBe(true);
+        expect(result.rootContextFiles).toEqual([rootClaude]);
+        expect(result.shimContextFiles).toEqual([shimClaude]);
+    });
+
     it('activates only for project-scoped plugins that contain the workspace', async () => {
         const cwd = createWorkspace();
         const otherProject = createWorkspace('pi-claude-other-project-');

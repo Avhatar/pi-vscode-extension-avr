@@ -32,7 +32,7 @@ describe('Protocol types', () => {
             'setToolDisabled', 'setToolsBulk',
         ] as const;
         const platformClientTypes = ['openFile', 'confirmAction'] as const;
-        const vsCodeClientTypes = ['openDiff', 'openSettings', 'openKeybindings', 'openChangelog'] as const;
+        const vsCodeClientTypes = ['openDiff', 'openSettings', 'openKeybindings', 'openChangelog', 'openRawView'] as const;
         const agentServerTypes = [
             'stateSync', 'agentEvent', 'models', 'modelChanged', 'sessions', 'sessionChanged',
             'fileChange', 'skills', 'workspaceFileSuggestions', 'codexUsage', 'codexUsageError',
@@ -64,7 +64,7 @@ describe('Protocol types', () => {
             ...agentClientTypes,
             ...platformClientTypes,
             ...vsCodeClientTypes,
-        ]).toHaveLength(37);
+        ]).toHaveLength(38);
         expect([
             ...agentServerTypes,
             ...platformServerTypes,

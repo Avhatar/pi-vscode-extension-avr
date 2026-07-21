@@ -18,11 +18,14 @@ import { SettingsPanel } from './providers/settings-panel';
 import { ChatController } from './controllers/chat-controller';
 import { createChatPanel, CHAT_PANEL_VIEW_TYPE } from './providers/chat-panel';
 import { ChatPanelSerializer } from './providers/chat-panel-serializer';
+import { openRawPanel, RawPanelSerializer, RAW_PANEL_VIEW_TYPE, type RawPanelServices } from './providers/raw-panel';
 import { notifyAuthChanged, reloadCredentials } from './pi/auth';
 import { refreshModelRegistry } from './pi/models';
 
 import { DiffManager } from './core/files/diff-manager';
 import { CheckpointManager } from './core/files/checkpoint-manager';
+import { NodeRawStorage } from './adapters/vscode/raw-storage';
+import { RawRecorderRegistry } from './core/raw/raw-recorder';
 import { registerSubagentSmokeCommand } from './pi/subagents/smoke/runner';
 import { SubagentCoordinator } from './pi/subagents/coordinator';
 import { SubagentRunStore } from './pi/subagents/persistence';
@@ -67,9 +70,11 @@ export async function activate(context: vscode.ExtensionContext) {
             { bundledPiPackagePaths: bundledPackagePaths },
             getCodexUsageStore(),
         );
+        const rawStorage = new NodeRawStorage(context.globalStorageUri.fsPath);
+        const rawRecorderRegistry = new RawRecorderRegistry();
         const initialSession = new PiSessionManager(
             sessionLogger, sessionSecrets, subagentCoordinator, subagentStore, writeIsolation, childToolFactories,
-            sessionPorts,
+            sessionPorts, rawStorage, rawRecorderRegistry,
         );
         await initialSession.initialize();
 
@@ -117,6 +122,13 @@ export async function activate(context: vscode.ExtensionContext) {
         context.workspaceState.update('pi-code.tabs', undefined);
 
         const launcherView = new LauncherView(context.extensionUri, controller, context.globalState);
+
+        const rawPanelServices: RawPanelServices = {
+            extensionUri: context.extensionUri,
+            storage: rawStorage,
+            registry: rawRecorderRegistry,
+            resolveDisplayTitle: (sessionPath) => controller.getSessionDisplayTitle(sessionPath),
+        };
 
         context.subscriptions.push(
             controller,
@@ -169,7 +181,12 @@ export async function activate(context: vscode.ExtensionContext) {
             }),
 
             vscode.commands.registerCommand('pi-code.openSettings', () => {
-                SettingsPanel.show(context.extensionUri, context.secrets, externalUrls);
+                SettingsPanel.show(context.extensionUri, context.secrets, externalUrls, {
+                    storage: rawStorage,
+                    registry: rawRecorderRegistry,
+                    onOpenRawView: (sessionPath) => openRawPanel(rawPanelServices, { sessionPath }),
+                    resolveDisplayTitle: (sessionPath) => controller.getSessionDisplayTitle(sessionPath),
+                });
             }),
 
             vscode.commands.registerCommand('pi-code.createTab', async () => {
@@ -181,9 +198,27 @@ export async function activate(context: vscode.ExtensionContext) {
                 vscode.commands.executeCommand('pi-code.chat.focus');
             }),
 
+            vscode.commands.registerCommand('pi-code.openRawView', async (arg?: { sessionPath?: string }) => {
+                const sessionPath = arg?.sessionPath ?? controller.getActiveSessionPath();
+                if (!sessionPath) {
+                    void vscode.window.showInformationMessage(
+                        'Open a Pi Code chat first — Raw View is per-session.',
+                    );
+                    return;
+                }
+                openRawPanel(rawPanelServices, {
+                    sessionPath,
+                    displayTitle: controller.getSessionDisplayTitle(sessionPath),
+                });
+            }),
+
             vscode.window.registerWebviewPanelSerializer(
                 CHAT_PANEL_VIEW_TYPE,
                 new ChatPanelSerializer(controller, context.extensionUri),
+            ),
+            vscode.window.registerWebviewPanelSerializer(
+                RAW_PANEL_VIEW_TYPE,
+                new RawPanelSerializer(rawPanelServices),
             ),
         );
 

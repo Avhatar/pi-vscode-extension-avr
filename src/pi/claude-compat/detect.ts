@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { isExcludedClaudeDiscoveryPath } from './discovery';
+import { isClaudeMdShim } from './shim';
 import type {
     ClaudeActivationReason,
     ClaudeInfrastructure,
@@ -20,6 +21,14 @@ interface DetectClaudeInfrastructureOptions {
     collectNestedClaudeFiles?: boolean;
     collectNestedClaudeSkillFiles?: boolean;
     installedPluginsPath?: string;
+    /**
+     * When true (default), a root Claude context file that only redirects at the
+     * workspace AGENTS.md is recorded as a shim and does not activate the bridge.
+     * Pi already loads AGENTS.md natively; re-injecting it through the compat
+     * boundary would be pure duplication. Set false to force activation for
+     * every Claude context file, matching the pre-shim-collapse behaviour.
+     */
+    collapseShimContext?: boolean;
 }
 
 interface InstalledPluginEntry {
@@ -152,25 +161,28 @@ export async function detectClaudeInfrastructure(
 
     const activationReasons: ClaudeActivationReason[] = [];
     const rootContextFiles: string[] = [];
+    const shimContextFiles: string[] = [];
     const nestedContextFiles: string[] = [];
     const nestedSkillFiles: string[] = [];
     const skillDirectories: string[] = [];
     const commandDirectories: string[] = [];
     const agentDirectories: string[] = [];
     const ruleDirectories: string[] = [];
+    const collapseShimContext = options.collapseShimContext ?? true;
 
-    if (isFile(rootContext)) {
-        rootContextFiles.push(rootContext);
-        addReason(activationReasons, 'root-context');
-    }
-    if (isFile(rootLocalContext)) {
-        rootContextFiles.push(rootLocalContext);
-        addReason(activationReasons, 'root-local-context');
-    }
-    if (isFile(dotClaudeContext)) {
-        rootContextFiles.push(dotClaudeContext);
-        addReason(activationReasons, 'dot-claude-context');
-    }
+    const recordRootContext = (filePath: string, reason: ClaudeActivationReason): void => {
+        if (!isFile(filePath)) return;
+        if (collapseShimContext && isClaudeMdShim(filePath, workspaceRoot)) {
+            shimContextFiles.push(filePath);
+            return;
+        }
+        rootContextFiles.push(filePath);
+        addReason(activationReasons, reason);
+    };
+
+    recordRootContext(rootContext, 'root-context');
+    recordRootContext(rootLocalContext, 'root-local-context');
+    recordRootContext(dotClaudeContext, 'dot-claude-context');
     if (containsSkill(skillsDir)) {
         skillDirectories.push(skillsDir);
         addReason(activationReasons, 'project-skills');
@@ -248,6 +260,7 @@ export async function detectClaudeInfrastructure(
         active: activationReasons.length > 0,
         activationReasons,
         rootContextFiles,
+        shimContextFiles,
         nestedContextFiles,
         nestedSkillFiles,
         skillDirectories,

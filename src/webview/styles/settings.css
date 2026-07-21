@@ -537,3 +537,100 @@ body {
     color: var(--muted);
     opacity: 0.7;
 }
+
+/* ── Raw Mode block ── */
+.raw-aggregate {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px;
+    background: var(--vscode-textBlockQuote-background, rgba(255,255,255,0.03));
+    border-radius: 4px;
+    margin-bottom: 12px;
+    font-size: 12px;
+}
+.raw-aggregate-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.raw-agg-label {
+    color: var(--muted);
+    min-width: 130px;
+}
+.raw-agg-path {
+    font-size: 11px;
+    padding: 2px 6px;
+    background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.15));
+    border-radius: 3px;
+    word-break: break-all;
+    flex: 1;
+    min-width: 200px;
+}
+.raw-sessions-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+.raw-sessions-table th,
+.raw-sessions-table td {
+    padding: 6px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.08));
+    vertical-align: top;
+}
+.raw-sessions-table th.num,
+.raw-sessions-table td.num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.raw-sessions-table th {
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+.raw-row-title {
+    font-weight: 500;
+}
+.raw-row-path {
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 10px;
+    color: var(--muted);
+    word-break: break-all;
+    margin-top: 2px;
+}
+.raw-orphan {
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    font-weight: 500;
+}
+.raw-muted {
+    color: var(--muted);
+    font-style: italic;
+}
+.raw-row-actions {
+    display: flex;
+    gap: 6px;
+    white-space: nowrap;
+    align-items: center;
+}
+.raw-clear-all {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--vscode-panel-border, rgba(255,255,255,0.1));
+}
+.setting-btn.danger {
+    background: transparent;
+    color: var(--vscode-errorForeground, #f14c4c);
+    border: 1px solid var(--vscode-errorForeground, #f14c4c);
+}
+.setting-btn.danger:hover {
+    background: rgba(241,76,76,0.12);
+}

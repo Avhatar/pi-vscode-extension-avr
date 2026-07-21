@@ -5,6 +5,8 @@ import type { Logger } from '../core/ports/logger';
 import type { SecretStore, SessionRuntimePorts } from '../core/ports/session-platform';
 import type { ChatPlatformPorts, FileMentionsPort, StateStore } from '../core/ports/chat-platform';
 import type { FileChangePlatformPorts } from '../core/ports/file-state';
+import type { RawStoragePort } from '../core/ports/raw-storage';
+import type { RawRecorderRegistry } from '../core/raw/raw-recorder';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
 import { ChatService, countUserTurns } from '../core/chat/chat-service';
@@ -144,6 +146,8 @@ export class ChatController implements vscode.Disposable {
     private readonly _sessionLogger: Logger;
     private readonly _sessionSecrets: SecretStore | undefined;
     private readonly _sessionPorts: SessionRuntimePorts;
+    private readonly _rawStorage: RawStoragePort | undefined;
+    private readonly _rawRecorderRegistry: RawRecorderRegistry | undefined;
     private readonly _workspaceState: StateStore;
     private readonly _globalState: StateStore;
     private readonly _fileChangePorts: FileChangePlatformPorts;
@@ -217,6 +221,8 @@ export class ChatController implements vscode.Disposable {
         this._sessionLogger = initialSession.logger;
         this._sessionSecrets = initialSession.secrets;
         this._sessionPorts = initialSession.ports;
+        this._rawStorage = initialSession.rawStorage;
+        this._rawRecorderRegistry = initialSession.rawRecorderRegistry;
         this._workspaceState = chatPorts.state.workspace;
         this._globalState = chatPorts.state.global;
         this._fileMentions = chatPorts.fileMentions;
@@ -441,6 +447,19 @@ export class ChatController implements vscode.Disposable {
         return this._activeTabId;
     }
 
+    /** Session file backing the active chat panel, if any. Used by RawMode commands. */
+    getActiveSessionPath(): string | undefined {
+        return this._tabs.get(this._activeTabId)?.session.sessionPath;
+    }
+
+    /** Best-effort human-readable label for a session file. Returns tab name when open. */
+    getSessionDisplayTitle(sessionPath: string): string | undefined {
+        for (const tab of this._tabs.values()) {
+            if (tab.session.sessionPath === sessionPath) return tab.name;
+        }
+        return undefined;
+    }
+
     /** Lookup an existing tab whose session was loaded from `sessionPath`. */
     findTabIdBySessionPath(sessionPath: string): string | undefined {
         if (!sessionPath) return undefined;
@@ -478,6 +497,14 @@ export class ChatController implements vscode.Disposable {
         if (loadedTabId) await this._host.detachTab(loadedTabId);
 
         await this._subagentStore.deleteByParentSessionPath(sessionPath);
+        // Close any live RawMode recorder for this path before nuking the
+        // JSONL file, otherwise a straggling append would race the delete
+        // and resurrect an empty file on disk.
+        await this._rawRecorderRegistry?.dispose(sessionPath);
+        await this._rawStorage?.deleteSession(sessionPath);
+        // Panels bound to this session watch the registry's `onDataCleared`
+        // hook and close themselves.
+        this._rawRecorderRegistry?.notifyDataCleared(sessionPath);
         await unlink(sessionPath);
         this._persistTabs();
         this._onLauncherStateChanged.fire();
@@ -493,6 +520,8 @@ export class ChatController implements vscode.Disposable {
             this._writeIsolation,
             this._childToolFactories,
             this._sessionPorts,
+            this._rawStorage,
+            this._rawRecorderRegistry,
         );
     }
 
@@ -1398,6 +1427,19 @@ export class ChatController implements vscode.Disposable {
                         vscode.Uri.joinPath(this._context.extensionUri, 'CHANGELOG.md'),
                     );
                     break;
+                case 'openRawView': {
+                    // Target the tab whose panel sent the message so a click on
+                    // the button always opens Raw for that specific chat, even
+                    // when the launcher's `active tab` is elsewhere.
+                    const sessionPath = targetId
+                        ? this._tabs.get(targetId)?.session.sessionPath
+                        : this.getActiveSessionPath();
+                    await vscode.commands.executeCommand(
+                        'pi-code.openRawView',
+                        sessionPath ? { sessionPath } : undefined,
+                    );
+                    break;
+                }
                 default: {
                     const result = await this._host.dispatch(msg, targetId);
                     if (!result.ok) return result;

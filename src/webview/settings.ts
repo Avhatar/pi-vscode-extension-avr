@@ -1,4 +1,4 @@
-import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo, OAuthFlowState } from '../shared/protocol';
+import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo, OAuthFlowState, RawStorageStats } from '../shared/protocol';
 import { API_KEY_PROVIDERS } from '../shared/providers';
 
 declare function acquireVsCodeApi(): {
@@ -11,6 +11,7 @@ const vscode = acquireVsCodeApi();
 
 let currentSettings: SettingsData | null = null;
 let loadedSkills: SkillInfo[] = [];
+let rawStats: RawStorageStats | null = null;
 const oauthFlowStates = new Map<string, OAuthFlowState>();
 
 window.addEventListener('message', (event) => {
@@ -38,6 +39,13 @@ window.addEventListener('message', (event) => {
             } else if (msg.state.kind === 'error') {
                 showToast(msg.state.message, 'error');
             }
+            break;
+        case 'rawMode.stats':
+            rawStats = msg.stats;
+            renderRawModeSection();
+            break;
+        case 'rawMode.error':
+            showToast(`Raw Mode: ${msg.message}`, 'error');
             break;
         case 'error':
             showToast(msg.message, 'error');
@@ -139,6 +147,10 @@ function render(data: SettingsData): void {
             `Opacity of the glow around user messages.`),
     ]));
 
+    const rawSection = buildSection('Raw Mode', [buildRawPlaceholder()]);
+    rawSection.id = 'raw-mode-section';
+    container.appendChild(rawSection);
+
     container.appendChild(buildSection('Keyboard Shortcuts', [
         buildShortcutsInfo(),
     ]));
@@ -147,6 +159,139 @@ function render(data: SettingsData): void {
     bindEvents();
     renderSkillsSection();
     renderOAuthSection();
+    renderRawModeSection();
+    vscode.postMessage({ type: 'rawMode.getStats' });
+}
+
+function buildRawPlaceholder(): HTMLElement {
+    const p = el('p', 'setting-description');
+    p.textContent = 'Loading RawMode statistics…';
+    return p;
+}
+
+function renderRawModeSection(): void {
+    const section = document.getElementById('raw-mode-section');
+    if (!section) return;
+    // Preserve the section heading; wipe everything else.
+    const heading = section.querySelector('.section-title');
+    section.innerHTML = '';
+    if (heading) section.appendChild(heading);
+
+    const intro = el('p', 'setting-description');
+    intro.textContent = 'RawMode records every event and provider payload the agent exchanges with the model. Persistence is always on. Nothing is redacted — including auth headers. Data is cleaned up automatically when the corresponding chat is deleted from history.';
+    section.appendChild(intro);
+
+    if (!rawStats) {
+        const loading = el('p', 'setting-description');
+        loading.textContent = 'Loading…';
+        section.appendChild(loading);
+        return;
+    }
+
+    const aggregate = el('div', 'raw-aggregate');
+    aggregate.innerHTML = `
+        <div class="raw-aggregate-row"><span class="raw-agg-label">Sessions recorded:</span> <strong>${rawStats.sessions.length}</strong></div>
+        <div class="raw-aggregate-row"><span class="raw-agg-label">Total entries:</span> <strong>${rawStats.totalEntries.toLocaleString()}</strong></div>
+        <div class="raw-aggregate-row"><span class="raw-agg-label">Disk usage:</span> <strong>${formatBytes(rawStats.totalSizeBytes)}</strong></div>
+        <div class="raw-aggregate-row"><span class="raw-agg-label">Storage folder:</span> <code class="raw-agg-path">${escHtml(rawStats.storageDir)}</code>
+            <button type="button" class="setting-btn secondary" id="btn-raw-reveal">Reveal</button>
+            <button type="button" class="setting-btn secondary" id="btn-raw-refresh">Refresh</button>
+        </div>
+    `;
+    section.appendChild(aggregate);
+
+    if (rawStats.sessions.length === 0) {
+        const empty = el('p', 'setting-description');
+        empty.textContent = 'No sessions recorded yet. Send a message in a Pi Code chat to populate this list.';
+        section.appendChild(empty);
+    } else {
+        const table = el('table', 'raw-sessions-table') as HTMLTableElement;
+        table.innerHTML = `
+            <thead>
+                <tr>
+                    <th>Chat</th>
+                    <th class="num">Entries</th>
+                    <th class="num">Size</th>
+                    <th>Last activity</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+        `;
+        const tbody = document.createElement('tbody');
+        for (const s of rawStats.sessions) {
+            const tr = document.createElement('tr');
+            const title = s.displayTitle ?? basename(s.sessionPath);
+            tr.innerHTML = `
+                <td>
+                    <div class="raw-row-title">${escHtml(title)}</div>
+                    <div class="raw-row-path">${escHtml(s.sessionPath)}${s.orphaned ? ' <span class="raw-orphan">(orphan)</span>' : ''}</div>
+                </td>
+                <td class="num">${s.entryCount.toLocaleString()}</td>
+                <td class="num">${formatBytes(s.sizeBytes)}</td>
+                <td>${s.lastEntryAtMs ? escHtml(new Date(s.lastEntryAtMs).toLocaleString()) : '—'}</td>
+                <td class="raw-row-actions">
+                    ${s.orphaned
+                        ? '<span class="raw-muted">deleted</span>'
+                        : `<button type="button" class="setting-btn secondary" data-raw-open="${escAttr(s.sessionPath)}">Open Raw</button>`}
+                    <button type="button" class="setting-btn danger" data-raw-clear="${escAttr(s.sessionPath)}">Delete</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        section.appendChild(table);
+    }
+
+    const clearAllRow = el('div', 'raw-clear-all');
+    clearAllRow.innerHTML = `
+        <button type="button" class="setting-btn danger" id="btn-raw-clear-all">Clear All Raw Data</button>
+        <span class="setting-description">Deletes every RawMode recording. Cannot be undone.</span>
+    `;
+    section.appendChild(clearAllRow);
+
+    document.getElementById('btn-raw-reveal')?.addEventListener('click', () => {
+        vscode.postMessage({ type: 'rawMode.revealStorage' });
+    });
+    document.getElementById('btn-raw-refresh')?.addEventListener('click', () => {
+        vscode.postMessage({ type: 'rawMode.getStats' });
+    });
+    document.getElementById('btn-raw-clear-all')?.addEventListener('click', () => {
+        // Native confirm() works inside VS Code webviews and gives a clear
+        // undo-warning without requiring a custom dialog.
+        // eslint-disable-next-line no-alert
+        if (typeof confirm === 'function' && !confirm('Delete all RawMode recordings? This cannot be undone.')) return;
+        vscode.postMessage({ type: 'rawMode.clearAll' });
+    });
+    section.querySelectorAll<HTMLButtonElement>('[data-raw-open]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const sessionPath = btn.getAttribute('data-raw-open') ?? '';
+            if (sessionPath) vscode.postMessage({ type: 'rawMode.openView', sessionPath });
+        });
+    });
+    section.querySelectorAll<HTMLButtonElement>('[data-raw-clear]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const sessionPath = btn.getAttribute('data-raw-clear') ?? '';
+            if (!sessionPath) return;
+            // eslint-disable-next-line no-alert
+            if (typeof confirm === 'function' && !confirm(`Delete RawMode recording for:\n${sessionPath}`)) return;
+            vscode.postMessage({ type: 'rawMode.clearSession', sessionPath });
+        });
+    });
+}
+
+function formatBytes(bytes: number): string {
+    if (!bytes || bytes < 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(2)} MB`;
+    return `${(mb / 1024).toFixed(2)} GB`;
+}
+
+function basename(p: string): string {
+    const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+    return idx >= 0 ? p.slice(idx + 1) : p;
 }
 
 function buildSection(title: string, children: HTMLElement[]): HTMLElement {

@@ -1,0 +1,337 @@
+:root {
+    color-scheme: var(--vscode-color-scheme, light dark);
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: var(--vscode-editor-font-size, 13px);
+    color: var(--vscode-editor-foreground);
+    background: var(--vscode-editor-background);
+}
+
+#app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.raw-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+/* ── Header ── */
+.raw-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--vscode-panel-border, #333);
+    background: var(--vscode-editorWidget-background, transparent);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.raw-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.raw-badge {
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.raw-title-text {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.raw-orphan-badge {
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    font-size: 11px;
+}
+
+.raw-counters {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.raw-counter { font-weight: 500; }
+.raw-counter-sep { opacity: 0.5; }
+.raw-counter-muted { opacity: 0.65; }
+
+.raw-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.raw-mode-toggle {
+    display: inline-flex;
+    border: 1px solid var(--vscode-panel-border, #444);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.raw-mode-btn {
+    background: transparent;
+    color: var(--vscode-foreground);
+    border: none;
+    padding: 4px 10px;
+    font: inherit;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+}
+
+.raw-mode-btn.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.raw-mode-btn:hover:not(.active) {
+    background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.06));
+}
+
+.raw-btn {
+    background: var(--vscode-button-secondaryBackground, transparent);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-panel-border, #444);
+    padding: 4px 10px;
+    border-radius: 3px;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.raw-btn.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: var(--vscode-focusBorder);
+}
+
+.raw-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.06)));
+}
+
+/* ── Content ── */
+.raw-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.raw-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+}
+
+.raw-load-older {
+    align-self: center;
+    background: transparent;
+    color: var(--vscode-textLink-foreground);
+    border: 1px dashed var(--vscode-panel-border);
+    padding: 4px 12px;
+    border-radius: 3px;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+/* ── Turn group ── */
+.raw-turn {
+    border: 1px solid var(--vscode-panel-border, #333);
+    border-radius: 4px;
+    background: var(--vscode-editorWidget-background, transparent);
+}
+
+.raw-turn-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.03));
+    border-radius: 4px 4px 0 0;
+}
+
+.raw-turn-header:hover {
+    background: var(--vscode-list-activeSelectionBackground, rgba(0,120,215,0.15));
+}
+
+.raw-turn-chevron {
+    width: 12px;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+}
+
+.raw-turn-label {
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.raw-turn-meta {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.raw-meta-chip {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    padding: 1px 6px;
+    border-radius: 2px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    opacity: 0.9;
+}
+
+.raw-meta-chip.retry { background: var(--vscode-editorWarning-foreground); color: var(--vscode-editor-background); }
+.raw-meta-chip.compact { background: var(--vscode-editorInfo-foreground); color: var(--vscode-editor-background); }
+.raw-meta-chip.provider { background: var(--vscode-textLink-foreground); color: var(--vscode-editor-background); }
+
+.raw-turn-body {
+    padding: 4px 8px 8px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* ── Entry rows ── */
+.raw-entry {
+    border-radius: 3px;
+}
+
+.raw-entry.indented {
+    padding-left: 8px;
+}
+
+.raw-entry-summary {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 3px 6px;
+    cursor: pointer;
+    border-radius: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.raw-entry-summary:hover {
+    background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.03));
+}
+
+.raw-kind {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 1px 5px;
+    border-radius: 2px;
+    background: var(--vscode-textBlockQuote-background, rgba(255,255,255,0.04));
+    color: var(--vscode-foreground);
+    flex-shrink: 0;
+}
+
+/* Kind-specific colors — keep muted for readability */
+.raw-kind.kind-before_provider_payload { background: rgba(48, 108, 176, 0.4); }
+.raw-kind.kind-after_provider_response { background: rgba(45, 122, 82, 0.4); }
+.raw-kind.kind-stream_chunk { background: rgba(122, 122, 122, 0.3); }
+.raw-kind.kind-tool_call { background: rgba(170, 100, 40, 0.4); }
+.raw-kind.kind-tool_result { background: rgba(150, 90, 40, 0.4); }
+.raw-kind.kind-turn_start,
+.raw-kind.kind-turn_end { background: rgba(170, 140, 40, 0.4); }
+.raw-kind.kind-context { background: rgba(120, 60, 140, 0.4); }
+.raw-kind.kind-auto_retry_start,
+.raw-kind.kind-auto_retry_end { background: rgba(190, 80, 80, 0.4); }
+.raw-kind.kind-compaction_start,
+.raw-kind.kind-compaction_end { background: rgba(190, 130, 40, 0.4); }
+.raw-kind.kind-recorder_meta { background: rgba(60, 60, 60, 0.5); font-style: italic; }
+
+.raw-seq {
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.7;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.raw-time {
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    flex-shrink: 0;
+    opacity: 0.75;
+}
+
+.raw-preview {
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.raw-entry-json {
+    margin: 4px 0 6px 24px;
+    padding: 8px 10px;
+    background: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.15));
+    border-radius: 3px;
+    font-size: 11px;
+    line-height: 1.4;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+/* ── Status bar ── */
+.raw-status {
+    padding: 4px 12px;
+    border-top: 1px solid var(--vscode-panel-border, #333);
+    background: var(--vscode-statusBar-background, transparent);
+    color: var(--vscode-statusBar-foreground, var(--vscode-foreground));
+    font-size: 11px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    min-height: 22px;
+}
+
+.raw-status-muted {
+    opacity: 0.7;
+}
+
+.raw-status-line {
+    color: var(--vscode-editorInfo-foreground, var(--vscode-foreground));
+}

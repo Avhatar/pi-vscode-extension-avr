@@ -130,6 +130,7 @@ export const VsCodeClientMessageSchema = Type.Union([
     Type.Object({ type: Type.Literal('openSettings') }, StrictObject),
     Type.Object({ type: Type.Literal('openKeybindings') }, StrictObject),
     Type.Object({ type: Type.Literal('openChangelog') }, StrictObject),
+    Type.Object({ type: Type.Literal('openRawView') }, StrictObject),
 ]);
 
 export const ClientMessageSchema = Type.Union([

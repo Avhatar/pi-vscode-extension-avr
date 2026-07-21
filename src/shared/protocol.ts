@@ -1,6 +1,12 @@
 import type { AgentClientMessage, AgentServerMessage, SkillInfo } from './agent-protocol';
 import type { PlatformClientMessage, PlatformServerMessage } from './platform-protocol';
 import type { VsCodeClientMessage, VsCodeServerMessage } from './vscode-protocol';
+import type {
+    RawClientMessage,
+    RawServerMessage,
+    RawModeSettingsClientMessage,
+    RawModeSettingsServerMessage,
+} from './raw-protocol';
 
 export type {
     AgentClientMessage,
@@ -29,6 +35,20 @@ export type {
 } from './agent-protocol';
 export type { PlatformClientMessage, PlatformServerMessage } from './platform-protocol';
 export type { VsCodeClientMessage, VsCodeServerMessage } from './vscode-protocol';
+export type {
+    RawClientMessage,
+    RawServerMessage,
+    RawEntry,
+    RawEntryKind,
+    RawHarnessEventKind,
+    RawSessionOnlyEventKind,
+    RawRecorderMetaPayload,
+    RawSessionSummary,
+    RawStorageStats,
+    RawModeSettingsClientMessage,
+    RawModeSettingsServerMessage,
+} from './raw-protocol';
+export { RAW_HARNESS_EVENT_KINDS, RAW_SESSION_ONLY_EVENT_KINDS } from './raw-protocol';
 
 export interface OAuthProviderInfo {
     id: string;
@@ -304,7 +324,8 @@ export type SettingsClientMessage =
     | { type: 'oauthCancel'; providerId: string }
     | { type: 'oauthSelect'; providerId: string; optionId: string }
     | { type: 'oauthSubmitInput'; providerId: string; value: string }
-    | { type: 'oauthOpenUrl'; url: string };
+    | { type: 'oauthOpenUrl'; url: string }
+    | RawModeSettingsClientMessage;
 
 // Extension -> Webview messages. Keep this compatibility union stable while
 // transports migrate to the portable, platform, and VS Code partitions.
@@ -316,4 +337,5 @@ export type SettingsServerMessage =
     | { type: 'settingChanged'; key: string; value: any }
     | { type: 'skills'; skills: SkillInfo[] }
     | { type: 'oauthState'; providerId: string; state: OAuthFlowState }
-    | { type: 'error'; message: string };
+    | { type: 'error'; message: string }
+    | RawModeSettingsServerMessage;

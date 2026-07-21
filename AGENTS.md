@@ -78,6 +78,7 @@ The Pi SDK packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-agen
 - **SecretStorage for secrets**: API keys are stored via `vscode.SecretStorage`, never in `settings.json` or plaintext.
 - **Message queuing**: While streaming, user messages are queued in the tab runtime and auto-dispatched as new prompts on `agent_settled`. Do not dispatch from `agent_end`: the SDK still reports the session as busy until settlement, so a normal prompt will be rejected and lost. Steering (mid-stream injection) is a separate path via `AgentSession.steer()`.
 - **Skills / slash commands**: Skills are loaded from the Pi SDK and surfaced in the webview via a `getSkills` message. The webview renders a slash-command menu triggered by `/` in the input.
+- **RawMode**: Per-chat developer view of every event and provider payload the agent exchanges with the model. Storage is keyed by Pi `sessionPath` (the stable identity used across window reloads), not by tabId. Data lives in append-only JSONL under `context.globalStorageUri.fsPath/raw/<sha256>.jsonl`, and cleanup piggy-backs on `deleteHistorySession` (same call site as `_subagentStore.deleteByParentSessionPath`). Recording is unconditional and unbounded — no redaction, no retention policy; only user-initiated Clear removes data. Two capture channels feed the recorder: the inline Pi extension (`pi.on(...)` for harness-level events including `before_provider_payload`, `after_provider_response`, `context`) and `EventRouter.onAll(...)` for `AgentSession`-only events (`entry_appended`, `queue_update`, `compaction_*`, `auto_retry_*`, `thinking_level_changed`). `onPayload`/`onResponse` on `createAgentSession` options capture the raw streaming chunks. The two channels are recorded verbatim without dedup — the collated view groups them visually.
 
 ## Cross-Harness Agent Resources
 
@@ -231,6 +232,13 @@ Pi extensions (npm packages keyed `pi-package`, e.g. `pi-web-access`) ship **ins
 | `src/providers/chat-panel.ts` | Editor-area `WebviewPanel` per chat |
 | `src/providers/chat-panel-serializer.ts` | Restores chat panels across `Reload Window` |
 | `src/providers/settings-panel.ts` | WebviewPanel for the settings page |
+| `src/providers/raw-panel.ts` | WebviewPanel + serializer for RawMode; opens Beside via `pi-code.openRawView` and survives Reload Window keyed by `sessionPath` |
+| `src/core/raw/` | Portable RawMode ring buffer, recorder, and process-wide registry |
+| `src/core/ports/raw-storage.ts` | Portable RawMode storage port (append JSONL, readRange, list, deleteSession, clearAll) |
+| `src/adapters/vscode/raw-storage.ts` | Node adapter — writes `globalStorageUri/raw/<sha256(sessionPath).jsonl>` plus a small manifest.json and per-file meta sidecars |
+| `src/pi/raw-recorder-extension.ts` | Inline Pi extension that mirrors every `pi.on(...)` event into the recorder |
+| `src/webview/raw.ts` | RawMode webview UI (Timeline / Firehose views) |
+| `src/webview/styles/raw.css` | RawMode webview styles |
 | `src/core/files/` | Portable file-change tracking and checkpoint rollback/redo state machines |
 | `src/core/ports/file-state.ts` | Portable synchronous filesystem and diff-presentation contracts |
 | `src/adapters/vscode/workspace-file-state.ts` | VS Code workspace path and Node filesystem adapter |

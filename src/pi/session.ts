@@ -16,6 +16,10 @@ import {
     hasIncompleteTurnTail,
 } from '../shared/interrupted-turn';
 import { EventRouter } from './events';
+import { createRawRecorderExtension } from './raw-recorder-extension';
+import { RawRecorder, RawRecorderRegistry } from '../core/raw/raw-recorder';
+import type { RawStoragePort } from '../core/ports/raw-storage';
+import { RAW_SESSION_ONLY_EVENT_KINDS } from '../shared/raw-protocol';
 import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
 import { getModelRegistry, getAvailableModels, findModel, refreshModelRegistry, disposeModelRegistry } from './models';
 import { createCodexMonitorExtension } from './codex-monitor';
@@ -24,6 +28,7 @@ import { createClaudeContextExtension } from './claude-compat/context-extension'
 import { getRootClaudeFiles } from './claude-compat/context';
 import { retainNativePiContextFiles } from './claude-compat/boundary';
 import { detectClaudeInfrastructure } from './claude-compat/detect';
+import type { ClaudeInfrastructure } from './claude-compat/types';
 import { CLAUDE_NESTED_SEARCH_EXCLUDE } from './claude-compat/discovery';
 import { indexClaudeRules } from './claude-compat/rules';
 import { indexClaudeResources } from './claude-compat/resources';
@@ -86,6 +91,9 @@ export class PiSessionManager {
     private _shutdownRequested = false;
     private _turnLifecycleOpen = false;
 
+    private _currentRawRecorder: RawRecorder | undefined;
+    private readonly _rawSessionOnlyEventKinds: Set<string> = new Set(RAW_SESSION_ONLY_EVENT_KINDS);
+
     constructor(
         outputChannel: Logger,
         secrets?: SecretStore,
@@ -94,6 +102,8 @@ export class PiSessionManager {
         private readonly _writeIsolation?: WriteIsolationManager,
         private readonly _childToolFactories?: ChildToolFactoryRegistry,
         private readonly _ports: SessionRuntimePorts = DEFAULT_SESSION_RUNTIME_PORTS,
+        private readonly _rawStorage?: RawStoragePort,
+        private readonly _rawRecorderRegistry?: RawRecorderRegistry,
     ) {
         this._outputChannel = outputChannel;
         this._secrets = secrets;
@@ -103,6 +113,15 @@ export class PiSessionManager {
         );
         this._backgroundNotificationUnsubscribe = this.events.onAll((event) => {
             if (event.type === 'agent_end') this._flushBackgroundSubagentNotifications();
+            const recorder = this._currentRawRecorder;
+            if (recorder && this._rawSessionOnlyEventKinds.has(event.type)) {
+                // Session-listener-only kinds are relayed through the shared
+                // EventRouter so nothing is lost when ExtensionAPI does not
+                // emit them. Overlapping harness kinds arrive separately from
+                // pi.on(...) inside the inline extension and are intentionally
+                // not deduplicated — RawMode records verbatim.
+                recorder.record(event.type, event);
+            }
         });
     }
 
@@ -116,6 +135,16 @@ export class PiSessionManager {
 
     get secrets(): SecretStore | undefined {
         return this._secrets;
+    }
+
+    /** Shared JSONL storage for RawMode. Undefined when the host does not enable RawMode. */
+    get rawStorage(): RawStoragePort | undefined {
+        return this._rawStorage;
+    }
+
+    /** Process-wide RawMode recorder registry. Undefined when RawMode is disabled. */
+    get rawRecorderRegistry(): RawRecorderRegistry | undefined {
+        return this._rawRecorderRegistry;
     }
 
     async reloadCredentials(): Promise<void> {
@@ -299,8 +328,10 @@ export class PiSessionManager {
         }
         let sessionLock: SessionLockHandle | undefined;
         let candidateSession: AgentSession | undefined;
+        let candidateRawRecorder: RawRecorder | undefined;
         try {
             let sessionManager;
+            let concreteSessionPath: string;
             if (kind === 'initial' || kind === 'new') {
                 sessionManager = SM.create(cwd);
                 const createdSessionPath = sessionManager.getSessionFile();
@@ -308,16 +339,23 @@ export class PiSessionManager {
                     throw new Error('Writable Pi session did not provide a session file path.');
                 }
                 sessionLock = await this._ports.sessionLocks.acquire(createdSessionPath);
+                concreteSessionPath = createdSessionPath;
             } else {
                 // SessionManager.open() may migrate and rewrite an older session, so
                 // existing sessions must be locked before the SDK opens them.
                 sessionLock = await this._ports.sessionLocks.acquire(sessionPath!);
                 sessionManager = SM.open(sessionPath!, undefined);
+                concreteSessionPath = sessionPath!;
             }
             const allowedTools = kind === 'load'
                 ? []
                 : this._ports.settings.get('allowedTools', []);
-            const resourceLoader = await this._buildResourceLoader(cwd);
+            // Retire any previous recorder before creating a new one; the
+            // previous session file will keep its persisted JSONL and can be
+            // resumed later via storage.getNextSeq() when reopened.
+            await this._retireCurrentRawRecorder();
+            candidateRawRecorder = await this._createRawRecorderFor(concreteSessionPath);
+            const resourceLoader = await this._buildResourceLoader(cwd, candidateRawRecorder);
             authStorage ??= await getAuthStorage(this._secrets);
 
             const opts: any = {
@@ -330,10 +368,21 @@ export class PiSessionManager {
             if (allowedTools.length > 0) {
                 opts.tools = allowedTools;
             }
+            if (candidateRawRecorder) {
+                // Raw stream chunks + final response go through SimpleStreamOptions,
+                // not through pi.on(...), so they are captured here instead of in
+                // the inline Pi extension factory.
+                const recorder = candidateRawRecorder;
+                opts.onPayload = (chunk: unknown) => recorder.record('stream_chunk', chunk);
+                opts.onResponse = (response: unknown) => recorder.record('stream_response', response);
+            }
 
             const { session, modelFallbackMessage } = await createAgentSession(opts);
             candidateSession = session;
             await this._bindExtensions(session);
+            if (candidateRawRecorder) {
+                this._currentRawRecorder = candidateRawRecorder;
+            }
             return { session, sessionManager, sessionLock, cwd, modelFallbackMessage };
         } catch (error) {
             try {
@@ -346,7 +395,51 @@ export class PiSessionManager {
             } catch {
                 // Preserve the creation error; a surviving sidecar remains safely locked.
             }
+            if (candidateRawRecorder) {
+                try {
+                    this._rawRecorderRegistry?.rebind(candidateRawRecorder.sessionPath, candidateRawRecorder);
+                    await this._rawRecorderRegistry?.dispose(candidateRawRecorder.sessionPath);
+                    if (!this._rawRecorderRegistry) {
+                        await candidateRawRecorder.close();
+                    }
+                } catch {
+                    // Best-effort cleanup; do not shadow the original error.
+                }
+            }
             throw error;
+        }
+    }
+
+    private async _createRawRecorderFor(concreteSessionPath: string): Promise<RawRecorder | undefined> {
+        if (!this._rawStorage) return undefined;
+        const initialSeq = await this._rawStorage.getNextSeq(concreteSessionPath).catch(() => 0);
+        const recorder = new RawRecorder({
+            storage: this._rawStorage,
+            logger: this._outputChannel,
+            sessionPath: concreteSessionPath,
+            initialSeq,
+        });
+        recorder.record('recorder_meta', {
+            kind: 'recorder_start',
+            capturedAtMs: Date.now(),
+        });
+        this._rawRecorderRegistry?.register(recorder);
+        return recorder;
+    }
+
+    private async _retireCurrentRawRecorder(): Promise<void> {
+        const existing = this._currentRawRecorder;
+        if (!existing) return;
+        this._currentRawRecorder = undefined;
+        try {
+            if (this._rawRecorderRegistry) {
+                await this._rawRecorderRegistry.dispose(existing.sessionPath);
+            } else {
+                await existing.close();
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this._outputChannel.appendLine(`Raw recorder close failed: ${message}`);
         }
     }
 
@@ -369,7 +462,7 @@ export class PiSessionManager {
         }
     }
 
-    private async _buildResourceLoader(cwd: string): Promise<ResourceLoader> {
+    private async _buildResourceLoader(cwd: string, rawRecorder?: RawRecorder): Promise<ResourceLoader> {
         const { DefaultResourceLoader, getAgentDir, SettingsManager } = await import('@earendil-works/pi-coding-agent');
         const agentDir = getAgentDir();
         const settingsManager = SettingsManager.create(cwd, agentDir);
@@ -401,22 +494,47 @@ export class PiSessionManager {
         }
         const bundledPackagePaths = [...this._ports.resources.bundledPiPackagePaths];
         const standardSkillPaths = getStandardSkillPaths(cwd);
-        const claudeInfrastructure = await detectClaudeInfrastructure(cwd, {
-            collectNestedClaudeFiles: true,
-            collectNestedClaudeSkillFiles: true,
-            findNestedClaudeFiles: () => this._ports.workspace.findFiles(
-                cwd,
-                '**/{CLAUDE.md,CLAUDE.local.md}',
-                CLAUDE_NESTED_SEARCH_EXCLUDE,
-                1,
-            ),
-            findNestedClaudeSkillFiles: () => this._ports.workspace.findFiles(
-                cwd,
-                '**/.claude/skills/**/SKILL.md',
-                CLAUDE_NESTED_SEARCH_EXCLUDE,
-                500,
-            ),
-        });
+        const claudeCompatEnabled = this._ports.settings.get('claudeCompat.enabled', true);
+        const rawClaudeCompatMode = this._ports.settings.get('claudeCompat.mode', 'auto');
+        const claudeCompatMode: 'auto' | 'on' | 'off' =
+            rawClaudeCompatMode === 'on' || rawClaudeCompatMode === 'off' ? rawClaudeCompatMode : 'auto';
+        const claudeCompatActive = claudeCompatEnabled && claudeCompatMode !== 'off';
+        const claudeInfrastructure = claudeCompatActive
+            ? await detectClaudeInfrastructure(cwd, {
+                collectNestedClaudeFiles: true,
+                collectNestedClaudeSkillFiles: true,
+                collapseShimContext: claudeCompatMode !== 'on',
+                findNestedClaudeFiles: () => this._ports.workspace.findFiles(
+                    cwd,
+                    '**/{CLAUDE.md,CLAUDE.local.md}',
+                    CLAUDE_NESTED_SEARCH_EXCLUDE,
+                    1,
+                ),
+                findNestedClaudeSkillFiles: () => this._ports.workspace.findFiles(
+                    cwd,
+                    '**/.claude/skills/**/SKILL.md',
+                    CLAUDE_NESTED_SEARCH_EXCLUDE,
+                    500,
+                ),
+            })
+            : ({
+                active: false,
+                activationReasons: [],
+                rootContextFiles: [],
+                shimContextFiles: [],
+                nestedContextFiles: [],
+                nestedSkillFiles: [],
+                skillDirectories: [],
+                commandDirectories: [],
+                agentDirectories: [],
+                ruleDirectories: [],
+                pluginInstalls: [],
+            } satisfies ClaudeInfrastructure);
+        if (!claudeCompatEnabled) {
+            this._outputChannel.appendLine('Claude compatibility disabled: pi-code.claudeCompat.enabled=false');
+        } else if (claudeCompatMode === 'off') {
+            this._outputChannel.appendLine('Claude compatibility disabled: pi-code.claudeCompat.mode=off');
+        }
         const availableChildTools = [
             ...CHILD_SAFE_TOOLS,
             ...(this._childToolFactories?.listNames() ?? []),
@@ -451,6 +569,7 @@ export class PiSessionManager {
                     this._ports.codexUsage.updateFromHeaders(headers);
                 },
             }),
+            ...(rawRecorder ? [createRawRecorderExtension(rawRecorder)] : []),
             createTodoExtension(this.todoStore, todoGuidelines),
             ...(lspExtension ? [lspExtension] : []),
             createToolSelectionGuard((gateway, target) => {
@@ -1263,6 +1382,7 @@ export class PiSessionManager {
             const unsubscribeBackground = this._backgroundNotificationUnsubscribe;
             this._backgroundNotificationUnsubscribe = undefined;
             await runCleanup(() => unsubscribeBackground?.());
+            await runCleanup(() => this._retireCurrentRawRecorder());
             await runCleanup(() => this._runtime.dispose());
             await runCleanup(() => this._onSubagentStateChanged.dispose());
             await runCleanup(() => this._onSubagentMutation.dispose());

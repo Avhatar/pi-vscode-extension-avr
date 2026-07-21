@@ -7,6 +7,20 @@ import { OAuthLoginFlow } from '../pi/oauth-login-flow';
 import { refreshModelRegistry } from '../pi/models';
 import { syncClaudeCodeMcpImport } from '../pi/mcp/claude-code-import';
 import type { ExternalUrlService } from '../core/ports/external-url';
+import type { RawStoragePort } from '../core/ports/raw-storage';
+import type { RawRecorderRegistry } from '../core/raw/raw-recorder';
+
+/**
+ * Optional dependencies enabling the RawMode statistics block inside the
+ * settings panel. Left undefined when RawMode is not wired for the host
+ * (e.g. in the standalone desktop app before it grows Raw support).
+ */
+export interface SettingsRawServices {
+    storage: RawStoragePort;
+    registry: RawRecorderRegistry;
+    onOpenRawView: (sessionPath: string) => void;
+    resolveDisplayTitle?: (sessionPath: string) => string | undefined;
+}
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
 
@@ -23,6 +37,7 @@ export class SettingsPanel {
         extensionUri: vscode.Uri,
         secrets: vscode.SecretStorage,
         private readonly _externalUrls: ExternalUrlService,
+        private readonly _rawServices?: SettingsRawServices,
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
@@ -50,6 +65,7 @@ export class SettingsPanel {
         extensionUri: vscode.Uri,
         secrets: vscode.SecretStorage,
         externalUrls: ExternalUrlService,
+        rawServices?: SettingsRawServices,
     ): void {
         if (SettingsPanel._instance) {
             SettingsPanel._instance._panel.reveal(vscode.ViewColumn.One);
@@ -67,7 +83,7 @@ export class SettingsPanel {
             },
         );
 
-        SettingsPanel._instance = new SettingsPanel(panel, extensionUri, secrets, externalUrls);
+        SettingsPanel._instance = new SettingsPanel(panel, extensionUri, secrets, externalUrls, rawServices);
     }
 
     private async _handleMessage(msg: SettingsClientMessage): Promise<void> {
@@ -108,10 +124,99 @@ export class SettingsPanel {
                 case 'oauthOpenUrl':
                     await this._openOAuthUrl(msg.url);
                     break;
+                case 'rawMode.getStats':
+                    await this._sendRawStats();
+                    break;
+                case 'rawMode.clearSession':
+                    await this._clearRawSession(msg.sessionPath);
+                    break;
+                case 'rawMode.clearAll':
+                    await this._clearRawAll();
+                    break;
+                case 'rawMode.revealStorage':
+                    await this._revealRawStorage();
+                    break;
+                case 'rawMode.openView':
+                    this._rawServices?.onOpenRawView(msg.sessionPath);
+                    break;
             }
         } catch (err: any) {
             this._post({ type: 'error', message: err.message ?? String(err) });
             if (msg.type === 'updateSetting') await this._sendSettings();
+        }
+    }
+
+    private async _sendRawStats(): Promise<void> {
+        if (!this._rawServices) {
+            this._post({
+                type: 'rawMode.stats',
+                stats: { sessions: [], totalEntries: 0, totalSizeBytes: 0, storageDir: '' },
+            });
+            return;
+        }
+        try {
+            const summaries = await this._rawServices.storage.list();
+            const resolve = this._rawServices.resolveDisplayTitle;
+            let totalEntries = 0;
+            let totalBytes = 0;
+            for (const s of summaries) {
+                totalEntries += s.entryCount;
+                totalBytes += s.sizeBytes;
+                if (resolve && !s.displayTitle) {
+                    const title = resolve(s.sessionPath);
+                    if (title) s.displayTitle = title;
+                }
+            }
+            this._post({
+                type: 'rawMode.stats',
+                stats: {
+                    sessions: summaries,
+                    totalEntries,
+                    totalSizeBytes: totalBytes,
+                    storageDir: this._rawServices.storage.getStorageDir(),
+                },
+            });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this._post({ type: 'rawMode.error', message });
+        }
+    }
+
+    private async _clearRawSession(sessionPath: string): Promise<void> {
+        if (!this._rawServices) return;
+        try {
+            await this._rawServices.registry.dispose(sessionPath);
+            await this._rawServices.storage.deleteSession(sessionPath);
+            this._rawServices.registry.notifyDataCleared(sessionPath);
+        } finally {
+            await this._sendRawStats();
+        }
+    }
+
+    private async _clearRawAll(): Promise<void> {
+        if (!this._rawServices) return;
+        try {
+            const summaries = await this._rawServices.storage.list();
+            for (const s of summaries) {
+                try { await this._rawServices.registry.dispose(s.sessionPath); } catch { /* ignore */ }
+            }
+            await this._rawServices.storage.clearAll();
+            for (const s of summaries) {
+                this._rawServices.registry.notifyDataCleared(s.sessionPath);
+            }
+        } finally {
+            await this._sendRawStats();
+        }
+    }
+
+    private async _revealRawStorage(): Promise<void> {
+        if (!this._rawServices) return;
+        const dir = this._rawServices.storage.getStorageDir();
+        try {
+            await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(dir));
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this._post({ type: 'rawMode.error', message });
         }
     }
 

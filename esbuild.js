@@ -48,19 +48,32 @@ const launcherWebviewConfig = {
     minify: false,
 };
 
+const rawWebviewConfig = {
+    entryPoints: ['src/webview/raw.ts'],
+    bundle: true,
+    outfile: 'out/webview/raw.js',
+    format: 'iife',
+    platform: 'browser',
+    target: 'es2022',
+    sourcemap: true,
+    minify: false,
+};
+
 async function build() {
     if (isWatch) {
         const extCtx = await esbuild.context(extensionConfig);
         const webCtx = await esbuild.context(webviewConfig);
         const settingsCtx = await esbuild.context(settingsWebviewConfig);
         const launcherCtx = await esbuild.context(launcherWebviewConfig);
-        await Promise.all([extCtx.watch(), webCtx.watch(), settingsCtx.watch(), launcherCtx.watch()]);
+        const rawCtx = await esbuild.context(rawWebviewConfig);
+        await Promise.all([extCtx.watch(), webCtx.watch(), settingsCtx.watch(), launcherCtx.watch(), rawCtx.watch()]);
         console.log('Watching for changes...');
     } else {
         await esbuild.build(extensionConfig);
         await esbuild.build(webviewConfig);
         await esbuild.build(settingsWebviewConfig);
         await esbuild.build(launcherWebviewConfig);
+        await esbuild.build(rawWebviewConfig);
         console.log('Build complete.');
     }
 }

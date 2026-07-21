@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.59.0",
+  "version": "0.60.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -13,7 +13,11 @@
     "AI",
     "Chat"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:pi-code.chat",
+    "onWebviewPanel:pi-code.chatPanel",
+    "onWebviewPanel:pi-code.raw"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -74,6 +78,11 @@
       {
         "command": "pi-code.runSubagentSmokeTest",
         "title": "Pi Code: Run Subagent Smoke Test"
+      },
+      {
+        "command": "pi-code.openRawView",
+        "title": "Pi Code: Open Raw View for Active Chat",
+        "icon": "$(inspect)"
       }
     ],
     "keybindings": [
@@ -228,6 +237,22 @@
           "type": "boolean",
           "default": false,
           "description": "Import user-level Claude Code MCP servers into Pi Code through pi-mcp-adapter. This adds a managed `claude-code` compatibility import to Pi's global MCP config without copying server definitions or credentials. Existing manual imports are preserved. Changes apply to new chat sessions or after Reload Window."
+        },
+        "pi-code.claudeCompat.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch for Claude Code compatibility. When disabled, Pi Code bypasses all Claude bridge logic — no detection, no boundary preamble, no injection of Claude project resources — regardless of the per-workspace mode. Use this if you are a confident driver who never wants Claude-authored resources bridged into any session. Changes apply on new chat sessions or window reload."
+        },
+        "pi-code.claudeCompat.mode": {
+          "type": "string",
+          "enum": ["auto", "on", "off"],
+          "enumDescriptions": [
+            "Detect Claude infrastructure automatically and treat a CLAUDE.md that only redirects to AGENTS.md as a shim (skips duplicate injection because Pi already loads AGENTS.md natively).",
+            "Force activation whenever any Claude context file exists, including shim CLAUDE.md files that alias AGENTS.md. Use this if you rely on Claude-specific import resolution or additional resources beyond AGENTS.md.",
+            "Bypass the Claude bridge for this workspace even when Claude Code resources are present."
+          ],
+          "default": "auto",
+          "description": "Per-workspace Claude Code compatibility mode. Ignored when `pi-code.claudeCompat.enabled` is off. Changes apply on new chat sessions or window reload."
         },
         "pi-code.lsp.enabled": {
           "type": "boolean",

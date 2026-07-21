@@ -21,6 +21,12 @@ export interface ClaudeInfrastructure {
     active: boolean;
     activationReasons: ClaudeActivationReason[];
     rootContextFiles: string[];
+    /**
+     * Root Claude context files that only redirect to a workspace AGENTS.md and
+     * therefore never activate the bridge on their own. Recorded for the status
+     * report so shims remain visible without contributing tokens to the session.
+     */
+    shimContextFiles: string[];
     nestedContextFiles: string[];
     nestedSkillFiles: string[];
     skillDirectories: string[];

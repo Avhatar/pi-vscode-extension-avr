@@ -131,6 +131,7 @@ Alternate Electron-based host that reuses the portable chat core through the sha
 Opt-in surfaces and release plumbing that sit around the main product.
 
 - `lsp-tools` — opt-in Language Server tools (`find_references`, `hover`, and friends) gated by `pi-code.lsp.enabled`.
+- `raw-mode` — per-chat developer view of the full agent-to-model exchange: inline Pi extension over `pi.on(...)`, `onPayload`/`onResponse` stream capture, portable recorder + ring buffer, JSONL storage keyed by `sessionPath`, RawPanel + Settings block, and `deleteHistorySession`-driven cleanup.
 - `packaging-and-release` — VSIX packaging pipeline, prune / restore dance, `.vscodeignore` invariants, and the `deploy:patch|minor|major` scripts.
 
 ---

@@ -8,6 +8,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Added `pi-code.claudeCompat.enabled` master switch (default on) and `pi-code.claudeCompat.mode` (`auto` / `on` / `off`, default `auto`) so users can disable the Claude Code compatibility bridge globally or per workspace.
+- Added a Raw View toolbar button to every chat editor panel, next to the New Chat and History icons, so opening the developer view no longer requires the command palette.
+
+### Changed
+- Stopped injecting the Claude Code compatibility bridge when the only Claude marker in a project is a `CLAUDE.md` that just redirects to `AGENTS.md`. Pi already loads `AGENTS.md` natively, so the redirect no longer duplicates project rules or spends tokens on the compatibility boundary.
+
+### Fixed
+- Fixed restored chat and Raw Mode editor tabs waiting for the Pi Code sidebar to open after Reload Window before they reconnect.
+
+## [0.60.0] - 2026-07-21
+
+### Added
+- Added Raw Mode: an advanced-developer per-chat view of every event and provider payload the agent exchanges with the model. Data is recorded losslessly (system prompt, tool schemas, message history, provider request payload, response headers, streamed chunks, tool calls, tool results, retries, compaction) into an append-only JSONL under the extension's global storage. The RawMode panel opens with the new `Pi Code: Open Raw View for Active Chat` command and lives in an independent, drag-and-droppable editor tab. A dedicated Settings block shows aggregate statistics with per-session usage and Clear actions; data is auto-removed when the corresponding chat is deleted from history. Nothing is redacted — this is a diagnostic tool for developers.
 - Added exclusive writable-session ownership across VS Code and standalone hosts, with typed conflicts and explicit stale-lock recovery safeguards.
 - Added a sandboxed Electron desktop shell that composes the shared chat host through validated, correlated IPC with renderer reload recovery.
 - Added a portable Windows build for testing the production standalone desktop shell without an installer.

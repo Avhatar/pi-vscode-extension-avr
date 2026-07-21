@@ -592,6 +592,14 @@ function buildPanelToolbar(): HTMLElement {
     });
     wrap.appendChild(historyBtn);
 
+    const rawBtn = el('button', 'panel-toolbar-btn');
+    rawBtn.title = 'Open Raw View — every event and provider payload for this chat';
+    rawBtn.innerHTML = `<img class="panel-toolbar-icon-img" src="${iconsBaseUri}/magnifying-glass.png" alt="raw view">`;
+    rawBtn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openRawView' });
+    });
+    wrap.appendChild(rawBtn);
+
     const spacer = el('div', 'panel-toolbar-spacer');
     wrap.appendChild(spacer);
 
