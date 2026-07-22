@@ -97,12 +97,20 @@ smaller than Electron and with far better startup and shader ceiling.
 
 ## Repo strategy
 
+- Standalone code lives in a **separate private repository** at
+  <https://github.com/Avhatar/pi-code-standalone> and is attached to the
+  extension repo as a git submodule at `standalone/` (since 2026-07-23).
+  Public contributors of the VS Code extension see the submodule pointer
+  but can't clone the content; the extension itself builds and runs without
+  the submodule initialized.
 - New code lives in `standalone/desktop-rs/` (Phase 1+).
 - The visual POC lives in `standalone/desktop-rs-poc/` — throwaway.
 - The Electron `standalone/desktop/` directory was **retired on 2026-07-22**
-  and is gone from the working tree. Git history preserves everything for
-  reference. The private assets submodule (fonts, sounds) moved with the
-  retirement to `standalone/desktop-rs-poc/assets/`.
+  and is gone from the working tree. The pi-vscode-extension git history
+  preserves everything for reference. The private assets submodule (fonts,
+  sounds) is now nested inside the standalone repo at
+  `standalone/desktop-rs-poc/assets/` — fetched by
+  `git submodule update --init --recursive standalone`.
 
 ## Decisions log
 
@@ -117,6 +125,8 @@ smaller than Electron and with far better startup and shader ceiling.
 | 2026-07-22 | **PIVOTED from Slint to Bevy** | Discovered during POC Day 5 that `i-slint-renderer-skia-1.17.1/cached_image.rs:103` gates `ImageInner::WGPUTexture` render arm on `unstable-wgpu-29` only, not `unstable-wgpu-28`. Since wgpu 29 is not published to crates.io yet, wgpu textures passed to Slint via `Image::try_from` are silently dropped at draw time — verified with both render-pass output AND documented `queue.write_texture` upload paths. Only CPU-side `SharedPixelBuffer` works, which kills the whole point of GPU shader integration. Bevy has a first-class documented post-process pipeline on wgpu with no feature-flag friction. User has prior Bevy experience which lowers ramp-up cost. Slint Day 1–4 code is preserved in git history for reference. |
 | 2026-07-22 | Bevy 0.19 UI runs after post-process; solved with render-to-texture routing | `bevy_ui_render/lib.rs:267` orders `ui_pass.after(Core2dSystems::PostProcess).before(upscaling)`. Attaching `LensDistortion` / `ChromaticAberration` / `Vignette` directly to the UI camera has zero visible effect because they run against the "world" (empty) before UI draws. Solution: first camera renders UI into an offscreen `Rgba16Float` texture (via `RenderTarget::Image` + `UiTargetCamera`), second camera displays that texture as a fullscreen `Sprite` and carries the post-process components. Post-process now warps the whole UI. Sprite is 1:1 with viewport; main camera clear is pure black so any pixel not covered by the sprite blends cleanly with the vignette fade. |
 | 2026-07-22 | Tube-shape vignette via UI-layer `RadialGradient` (inside capture) | Built-in Bevy `Vignette` runs after barrel warp and stays circular in screen space, so it cannot follow the CRT tube. Placing a `BackgroundGradient` Node inside the UI tree makes the vignette belong to the UI capture — the main camera's barrel warp then bends the ellipse into a tube profile automatically. Stops are tunable in `poc.toml`. A true squircle / rounded-rectangle profile would need a custom UI material with L∞ or Lp distance in WGSL; not planned unless the elliptical fade fails the visual bar. |
+| 2026-07-23 | Custom CRT shader replaces Bevy's `LensDistortion` | Bevy's built-in `LensDistortion` uses `adjust = dot(abs(direction), multiplier)` which is C1-discontinuous on the horizontal/vertical axes — visible kinks appear in warped UI border lines that cross those axes. Own WGSL fragment shader (`src/shaders/crt.wgsl`, embedded via `embedded_asset!`) does the whole CRT pass: pure radial barrel (kink-free), scanlines/sweep driven by warped Y (curve with tube), noise/flicker in screen-space, 4-tap phosphor bleed, 16-tap ring-gather bloom, and a squircle Lp-norm bezel fade for a soft rounded-rectangle tube edge that blends into black instead of terminating on a hard line. |
+| 2026-07-23 | Split standalone into private repo `pi-code-standalone.git` | Standalone was tangling itself into the pi-vscode-extension repo — public contributors saw planning docs and code paths for a project they weren't building. Moved standalone content to a separate **private** repository <https://github.com/Avhatar/pi-code-standalone> and attached it as a git submodule at `standalone/`. Public repo now only shows the submodule pointer; content requires access. Assets (fonts) now a nested submodule inside the standalone repo. Fresh init in the new repo — pi-vscode-extension git history keeps the pre-split content for reference. |
 
 ## Licensing note
 

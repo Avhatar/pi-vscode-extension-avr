@@ -45,40 +45,65 @@ with a `!node_modules/@earendil-works/**` exception -- that strips the
 hoisted transitive deps (`proper-lockfile`, `undici`, `glob`, ...) and
 breaks activation with `Cannot find package 'proper-lockfile'`.
 
-## Standalone Desktop (private assets submodule)
+## Standalone Desktop (private submodule)
 
-The Electron `standalone/desktop/` sub-app was **retired on 2026-07-22** in favour
-of a native Rust + Bevy prototype under
-[`standalone/desktop-rs-poc/`](standalone/desktop-rs-poc/). See
+The standalone desktop app lives in a separate **private** repository at
+<https://github.com/Avhatar/pi-code-standalone> and is attached to this repo
+as a git submodule at [`standalone/`](standalone/). Public contributors can
+develop the VS Code extension without initializing the submodule — a plain
+clone leaves `standalone/` empty and `npm install`, `npm run compile`,
+`npm run test:*`, `npm run package` all work without it.
+
+Inside the standalone repo, renderer assets — fonts, sprites, images, and
+sounds — live in a **nested** private submodule at
+`standalone/desktop-rs-poc/assets/` pointing at the private repository
+<https://github.com/Avhatar/pi-code-standalone-assets>. `--recursive` is
+required to fetch both layers.
+
+The Electron `standalone/desktop/` sub-app was **retired on 2026-07-22** in
+favour of a native Rust + Bevy prototype under
+`standalone/desktop-rs-poc/`. See
 [`dev-notes/migration-overview.md`](dev-notes/migration-overview.md) for the
-decision trail; git history preserves the Electron sources for reference, and
-the wiki articles under
+decision trail; the pi-vscode-extension git history preserves the Electron
+sources for reference, and the wiki articles under
 [`wiki/parts/10-standalone-desktop-host/`](wiki/parts/10-standalone-desktop-host/)
 are marked *(retired)* and kept as a historical snapshot.
 
-Renderer assets — fonts, sprites, images, and sounds — live at
-[standalone/desktop-rs-poc/assets/](standalone/desktop-rs-poc/assets/), which is
-a **git submodule** pointing at the private repository
-<https://github.com/Avhatar/pi-code-standalone-assets>.
-
-**Explicit policy inside this submodule.** The submodule is a private,
-project-local zone that exists precisely so the standalone desktop application
-can use whatever assets it needs without per-file license gating. Any file
-inside [standalone/desktop-rs-poc/assets/](standalone/desktop-rs-poc/assets/) may
-be freely referenced from renderer code and bundled into any desktop artifact
-the Rust host produces. Do not add exclusion filters for individual assets, do
-not add "must not appear" assertions in verify scripts, and do not question or
-annotate license status for files that already exist inside the submodule. The
-single project invariant is the **public/private split**, not per-asset gating.
+**Explicit policy inside the private submodules.** They exist precisely so
+the standalone desktop application can use whatever code and assets it needs
+without polluting the public extension repository or per-file license gating.
+Any file inside `standalone/` (including its nested assets submodule) may be
+freely referenced from renderer code and bundled into any desktop artifact
+the Rust host produces. Do not add exclusion filters, "must not appear"
+assertions, or license annotations for files that already exist inside
+either submodule. The single project invariant is the **public/private
+split**, not per-asset gating.
 
 Consequences for day-to-day work:
 
-- The VS Code extension itself (`npm install`, `npm run compile`, `npm run test:*`, `npm run package`) does **not** need the submodule. Public contributors can work on the extension without any assets access.
-- The Rust POC under [`standalone/desktop-rs-poc/`](standalone/desktop-rs-poc/) loads Monofonto from the submodule at startup and falls back to Bevy's default font when the submodule is not initialized — the shader work does not require the font to be present.
-- Clone with `git clone --recurse-submodules <main-repo>`, or after a plain clone run `git submodule update --init standalone/desktop-rs-poc/assets`.
-- When pulling on an existing checkout that already has the submodule, keep the pointer fresh with `git submodule update --remote standalone/desktop-rs-poc/assets` (only needed when the assets repo has moved).
-- Never commit sprites, fonts, or sounds into the **public** repository. Add or update them inside the private assets repository, then update the pointer in the main repository with a normal commit touching [standalone/desktop-rs-poc/assets](standalone/desktop-rs-poc/assets). Files from the private submodule must never be copied into the VS Code extension VSIX or any other public artifact — `standalone/**` is already excluded from the VSIX by `.vscodeignore`, and that exclusion is the enforcement point.
-- The private submodule is scoped to the standalone desktop renderer. Public assets that legitimately belong to the extension (for example [media/icons/](media/icons/)) stay in the public repository and follow normal open-source hygiene.
+- Public contributors work on the VS Code extension without initializing the
+  submodule — `standalone/` is empty on a plain clone.
+- Maintainers with access: clone with
+  `git clone --recurse-submodules <main-repo>`, or on an existing checkout
+  run `git submodule update --init --recursive standalone`. The `--recursive`
+  is mandatory because the nested assets submodule sits inside the standalone
+  repo.
+- Pull upstream standalone changes with
+  `git submodule update --remote --recursive standalone`; the extension repo
+  then shows a modified `standalone` gitlink that you commit when you want a
+  specific extension release to pair with a specific standalone commit.
+- When you edit files inside the submodule, commit and push from **inside**
+  `standalone/` (that lands on `pi-code-standalone`). Then, in the extension
+  repo, commit the resulting `standalone` gitlink bump so the pairing is
+  recorded.
+- Never copy files out of the private submodules into the public extension
+  repo. Files must never appear in the VS Code extension VSIX or any other
+  public artifact — `standalone/**` is already excluded from the VSIX by
+  `.vscodeignore`, and that exclusion is the enforcement point.
+- The private submodules are scoped to the standalone desktop app. Public
+  assets that legitimately belong to the extension (for example
+  [media/icons/](media/icons/)) stay in the public repository and follow
+  normal open-source hygiene.
 
 ## Architecture
 
