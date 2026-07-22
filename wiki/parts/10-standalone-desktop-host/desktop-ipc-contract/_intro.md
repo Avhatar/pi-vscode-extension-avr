@@ -1,6 +1,11 @@
 # Chapter: desktop-ipc-contract
 
-The standalone desktop app is Electron. The renderer runs the same webview bundle as VS Code (browser IIFE), but the transport underneath is **Electron IPC**, not `vscode.postMessage`. This chapter documents the contract: two channels (agent + shell), typed envelopes, document-id validation, and how the renderer's `AgentConnectionClient` plugs into `contextBridge.exposeInMainWorld('piCode', ...)`.
+> **Retired.** Documents the Electron standalone host's IPC contract. The
+> Electron host was removed from the working tree on 2026-07-22; see
+> [`dev-notes/migration-overview.md`](../../../../dev-notes/migration-overview.md)
+> for context. The article below is preserved as a historical snapshot.
+
+The standalone desktop app was Electron. The renderer ran the same webview bundle as VS Code (browser IIFE), but the transport underneath was **Electron IPC**, not `vscode.postMessage`. This chapter documents the contract: two channels (agent + shell), typed envelopes, document-id validation, and how the renderer's `AgentConnectionClient` plugged into `contextBridge.exposeInMainWorld('piCode', ...)`.
 
 ## Article roster
 

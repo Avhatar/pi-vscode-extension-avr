@@ -47,17 +47,37 @@ breaks activation with `Cannot find package 'proper-lockfile'`.
 
 ## Standalone Desktop (private assets submodule)
 
-The Electron `standalone/desktop/` sub-app is a personal fanart side-project. Its renderer assets — fonts, sprites, images, and sounds — live at [standalone/desktop/renderer/assets/](standalone/desktop/renderer/assets/), which is a **git submodule** pointing at the private repository <https://github.com/Avhatar/pi-code-standalone-assets>.
+The Electron `standalone/desktop/` sub-app was **retired on 2026-07-22** in favour
+of a native Rust + Bevy prototype under
+[`standalone/desktop-rs-poc/`](standalone/desktop-rs-poc/). See
+[`dev-notes/migration-overview.md`](dev-notes/migration-overview.md) for the
+decision trail; git history preserves the Electron sources for reference, and
+the wiki articles under
+[`wiki/parts/10-standalone-desktop-host/`](wiki/parts/10-standalone-desktop-host/)
+are marked *(retired)* and kept as a historical snapshot.
 
-**Explicit policy inside this submodule.** The submodule is a private, project-local zone that exists precisely so the standalone desktop application can use whatever assets it needs without per-file license gating. Any file inside [standalone/desktop/renderer/assets/](standalone/desktop/renderer/assets/) may be freely referenced from renderer code, loaded via `@font-face`/`<img>`/`<audio>`, and bundled into the desktop `dist/` and packaged Electron executable. Do not add exclusion filters for individual assets in [standalone/desktop/build.mjs](standalone/desktop/build.mjs), do not add "must not appear" assertions in the verify script, and do not question or annotate license status for files that already exist inside the submodule. The single project invariant is the **public/private split**, not per-asset gating.
+Renderer assets — fonts, sprites, images, and sounds — live at
+[standalone/desktop-rs-poc/assets/](standalone/desktop-rs-poc/assets/), which is
+a **git submodule** pointing at the private repository
+<https://github.com/Avhatar/pi-code-standalone-assets>.
+
+**Explicit policy inside this submodule.** The submodule is a private,
+project-local zone that exists precisely so the standalone desktop application
+can use whatever assets it needs without per-file license gating. Any file
+inside [standalone/desktop-rs-poc/assets/](standalone/desktop-rs-poc/assets/) may
+be freely referenced from renderer code and bundled into any desktop artifact
+the Rust host produces. Do not add exclusion filters for individual assets, do
+not add "must not appear" assertions in verify scripts, and do not question or
+annotate license status for files that already exist inside the submodule. The
+single project invariant is the **public/private split**, not per-asset gating.
 
 Consequences for day-to-day work:
 
 - The VS Code extension itself (`npm install`, `npm run compile`, `npm run test:*`, `npm run package`) does **not** need the submodule. Public contributors can work on the extension without any assets access.
-- Anything under `standalone/desktop/` that produces a runnable desktop bundle **does** require the submodule to be initialized. [standalone/desktop/build.mjs](standalone/desktop/build.mjs) fails fast with a clear message when the submodule directory is empty.
-- Clone with `git clone --recurse-submodules <main-repo>`, or after a plain clone run `git submodule update --init standalone/desktop/renderer/assets`.
-- When pulling on an existing checkout that already has the submodule, keep the pointer fresh with `git submodule update --remote standalone/desktop/renderer/assets` (only needed when the assets repo has moved).
-- Never commit sprites, fonts, or sounds into the **public** repository. Add or update them inside the private assets repository, then update the pointer in the main repository with a normal commit touching [standalone/desktop/renderer/assets](standalone/desktop/renderer/assets). Files from the private submodule must never be copied into the VS Code extension VSIX or into any other public artifact — `standalone/**` is already excluded from the VSIX by `.vscodeignore`, and that exclusion is the enforcement point.
+- The Rust POC under [`standalone/desktop-rs-poc/`](standalone/desktop-rs-poc/) loads Monofonto from the submodule at startup and falls back to Bevy's default font when the submodule is not initialized — the shader work does not require the font to be present.
+- Clone with `git clone --recurse-submodules <main-repo>`, or after a plain clone run `git submodule update --init standalone/desktop-rs-poc/assets`.
+- When pulling on an existing checkout that already has the submodule, keep the pointer fresh with `git submodule update --remote standalone/desktop-rs-poc/assets` (only needed when the assets repo has moved).
+- Never commit sprites, fonts, or sounds into the **public** repository. Add or update them inside the private assets repository, then update the pointer in the main repository with a normal commit touching [standalone/desktop-rs-poc/assets](standalone/desktop-rs-poc/assets). Files from the private submodule must never be copied into the VS Code extension VSIX or any other public artifact — `standalone/**` is already excluded from the VSIX by `.vscodeignore`, and that exclusion is the enforcement point.
 - The private submodule is scoped to the standalone desktop renderer. Public assets that legitimately belong to the extension (for example [media/icons/](media/icons/)) stay in the public repository and follow normal open-source hygiene.
 
 ## Architecture

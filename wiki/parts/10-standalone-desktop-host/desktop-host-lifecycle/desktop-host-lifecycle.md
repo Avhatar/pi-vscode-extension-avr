@@ -1,5 +1,10 @@
 # desktop-host-lifecycle
 
+> **Retired.** Documents the Electron standalone host removed from the working
+> tree on 2026-07-22. See [`dev-notes/migration-overview.md`](../../../../dev-notes/migration-overview.md)
+> for the decision trail; native Rust + Bevy successor lives in
+> [`standalone/desktop-rs-poc/`](../../../../standalone/desktop-rs-poc/).
+
 ## Stance
 
 Three invariants shape the desktop host. **Process-scoped data isolation.** Every launched process gets its own data directory (`sharedDataRoot/processes/<processIdentity>/session-data`) so two concurrently running desktop apps do not collide on shared state. **Workspace trust before session bind.** The user explicitly grants trust per workspace before `ChatHost.initialize()` runs; untrusted workspaces get a confirm dialog and refuse-on-no. **Deadline-coordinated shutdown.** A single `DesktopShutdownCoordinator` bounded at 5 seconds unwinds activation, runtime shutdown, and cleanup — nothing hangs the quit path forever.

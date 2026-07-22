@@ -1,6 +1,13 @@
 # Chapter: desktop-host-lifecycle
 
-The Electron app in [standalone/desktop/](../../../../standalone/desktop/) is a second host for the portable chat core. It reuses `ChatHost`, `ChatService`, `TabRegistry`, and every port; only the outer scaffolding (Electron `app`, `BrowserWindow`, workspace picker, SafeStorage-backed secret storage) is desktop-specific.
+> **Retired.** The Electron-based standalone desktop host was removed from the
+> working tree on 2026-07-22 in favour of a native Rust + Bevy prototype under
+> [`standalone/desktop-rs-poc/`](../../../../standalone/desktop-rs-poc/).
+> See [`dev-notes/migration-overview.md`](../../../../dev-notes/migration-overview.md)
+> for the decision trail. Articles below describe code that no longer exists
+> in the working tree; they are preserved as a historical snapshot.
+
+The Electron app in `standalone/desktop/` (retired) was a second host for the portable chat core. It reused `ChatHost`, `ChatService`, `TabRegistry`, and every port; only the outer scaffolding (Electron `app`, `BrowserWindow`, workspace picker, SafeStorage-backed secret storage) was desktop-specific.
 
 ## Article roster
 

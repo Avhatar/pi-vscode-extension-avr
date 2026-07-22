@@ -1,5 +1,8 @@
 # desktop-ipc-contract
 
+> **Retired.** Documents the Electron standalone host removed on 2026-07-22.
+> See [`dev-notes/migration-overview.md`](../../../../dev-notes/migration-overview.md).
+
 ## Stance
 
 The desktop's IPC contract is a **shrink-wrap around the shared `AgentConnectionClient`**. Two channels (agent + shell) instead of one; a `documentId` envelope so the main process can invalidate stale requests when a renderer reloads; a `DesktopPreloadApi` shape exposed via `contextBridge` so the renderer has a stable Node-free surface. Everything else — request/response semantics, event stream, envelope validation — reuses [Part II § protocol-runtime](../../02-shared-protocol-and-contracts/protocol-runtime/protocol-runtime.md).
