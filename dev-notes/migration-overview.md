@@ -107,10 +107,10 @@ smaller than Electron and with far better startup and shader ceiling.
 - The visual POC lives in `standalone/desktop-rs-poc/` — throwaway.
 - The Electron `standalone/desktop/` directory was **retired on 2026-07-22**
   and is gone from the working tree. The pi-vscode-extension git history
-  preserves everything for reference. The private assets submodule (fonts,
-  sounds) is now nested inside the standalone repo at
-  `standalone/desktop-rs-poc/assets/` — fetched by
-  `git submodule update --init --recursive standalone`.
+  preserves everything for reference. Renderer assets (fonts, sounds) live
+  directly inside the standalone repo at `standalone/desktop-rs-poc/assets/`
+  — not a nested submodule; the whole standalone repo is already private so
+  a second-layer split is unnecessary.
 
 ## Decisions log
 
@@ -126,7 +126,8 @@ smaller than Electron and with far better startup and shader ceiling.
 | 2026-07-22 | Bevy 0.19 UI runs after post-process; solved with render-to-texture routing | `bevy_ui_render/lib.rs:267` orders `ui_pass.after(Core2dSystems::PostProcess).before(upscaling)`. Attaching `LensDistortion` / `ChromaticAberration` / `Vignette` directly to the UI camera has zero visible effect because they run against the "world" (empty) before UI draws. Solution: first camera renders UI into an offscreen `Rgba16Float` texture (via `RenderTarget::Image` + `UiTargetCamera`), second camera displays that texture as a fullscreen `Sprite` and carries the post-process components. Post-process now warps the whole UI. Sprite is 1:1 with viewport; main camera clear is pure black so any pixel not covered by the sprite blends cleanly with the vignette fade. |
 | 2026-07-22 | Tube-shape vignette via UI-layer `RadialGradient` (inside capture) | Built-in Bevy `Vignette` runs after barrel warp and stays circular in screen space, so it cannot follow the CRT tube. Placing a `BackgroundGradient` Node inside the UI tree makes the vignette belong to the UI capture — the main camera's barrel warp then bends the ellipse into a tube profile automatically. Stops are tunable in `poc.toml`. A true squircle / rounded-rectangle profile would need a custom UI material with L∞ or Lp distance in WGSL; not planned unless the elliptical fade fails the visual bar. |
 | 2026-07-23 | Custom CRT shader replaces Bevy's `LensDistortion` | Bevy's built-in `LensDistortion` uses `adjust = dot(abs(direction), multiplier)` which is C1-discontinuous on the horizontal/vertical axes — visible kinks appear in warped UI border lines that cross those axes. Own WGSL fragment shader (`src/shaders/crt.wgsl`, embedded via `embedded_asset!`) does the whole CRT pass: pure radial barrel (kink-free), scanlines/sweep driven by warped Y (curve with tube), noise/flicker in screen-space, 4-tap phosphor bleed, 16-tap ring-gather bloom, and a squircle Lp-norm bezel fade for a soft rounded-rectangle tube edge that blends into black instead of terminating on a hard line. |
-| 2026-07-23 | Split standalone into private repo `pi-code-standalone.git` | Standalone was tangling itself into the pi-vscode-extension repo — public contributors saw planning docs and code paths for a project they weren't building. Moved standalone content to a separate **private** repository <https://github.com/Avhatar/pi-code-standalone> and attached it as a git submodule at `standalone/`. Public repo now only shows the submodule pointer; content requires access. Assets (fonts) now a nested submodule inside the standalone repo. Fresh init in the new repo — pi-vscode-extension git history keeps the pre-split content for reference. |
+| 2026-07-23 | Split standalone into private repo `pi-code-standalone.git` | Standalone was tangling itself into the pi-vscode-extension repo — public contributors saw planning docs and code paths for a project they weren't building. Moved standalone content to a separate **private** repository <https://github.com/Avhatar/pi-code-standalone> and attached it as a git submodule at `standalone/`. Public repo now only shows the submodule pointer; content requires access. Fresh init in the new repo — pi-vscode-extension git history keeps the pre-split content for reference. |
+| 2026-07-23 | Inlined assets into `pi-code-standalone`; dropped nested `pi-code-standalone-assets` submodule | Once the whole standalone repo became private, the second-layer split was pure friction — two repos to keep in sync, `--recursive` required on every clone/pull, an extra SHA pointer to bump per asset change. The public/private boundary is already at the standalone-repo edge; a nested submodule adds nothing. Copied fonts/sounds in as regular files, deleted the nested submodule, `.gitmodules` inside `pi-code-standalone` now gone. The `pi-code-standalone-assets` repo becomes vestigial and can be archived. |
 
 ## Licensing note
 

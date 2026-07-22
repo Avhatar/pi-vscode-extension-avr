@@ -54,11 +54,11 @@ develop the VS Code extension without initializing the submodule — a plain
 clone leaves `standalone/` empty and `npm install`, `npm run compile`,
 `npm run test:*`, `npm run package` all work without it.
 
-Inside the standalone repo, renderer assets — fonts, sprites, images, and
-sounds — live in a **nested** private submodule at
-`standalone/desktop-rs-poc/assets/` pointing at the private repository
-<https://github.com/Avhatar/pi-code-standalone-assets>. `--recursive` is
-required to fetch both layers.
+Renderer assets — fonts, sprites, images, and sounds — live directly inside
+the standalone repo (at `standalone/desktop-rs-poc/assets/`), not as a
+nested submodule. The whole standalone repo is already private, so the
+public/private split is handled at the standalone-repo boundary and there is
+no benefit to a further nested split.
 
 The Electron `standalone/desktop/` sub-app was **retired on 2026-07-22** in
 favour of a native Rust + Bevy prototype under
@@ -69,15 +69,14 @@ sources for reference, and the wiki articles under
 [`wiki/parts/10-standalone-desktop-host/`](wiki/parts/10-standalone-desktop-host/)
 are marked *(retired)* and kept as a historical snapshot.
 
-**Explicit policy inside the private submodules.** They exist precisely so
+**Explicit policy inside the private submodule.** It exists precisely so
 the standalone desktop application can use whatever code and assets it needs
 without polluting the public extension repository or per-file license gating.
-Any file inside `standalone/` (including its nested assets submodule) may be
-freely referenced from renderer code and bundled into any desktop artifact
-the Rust host produces. Do not add exclusion filters, "must not appear"
-assertions, or license annotations for files that already exist inside
-either submodule. The single project invariant is the **public/private
-split**, not per-asset gating.
+Any file inside `standalone/` may be freely referenced from renderer code
+and bundled into any desktop artifact the Rust host produces. Do not add
+exclusion filters, "must not appear" assertions, or license annotations for
+files that already exist inside the submodule. The single project invariant
+is the **public/private split**, not per-asset gating.
 
 Consequences for day-to-day work:
 
@@ -85,22 +84,20 @@ Consequences for day-to-day work:
   submodule — `standalone/` is empty on a plain clone.
 - Maintainers with access: clone with
   `git clone --recurse-submodules <main-repo>`, or on an existing checkout
-  run `git submodule update --init --recursive standalone`. The `--recursive`
-  is mandatory because the nested assets submodule sits inside the standalone
-  repo.
+  run `git submodule update --init standalone`.
 - Pull upstream standalone changes with
-  `git submodule update --remote --recursive standalone`; the extension repo
-  then shows a modified `standalone` gitlink that you commit when you want a
-  specific extension release to pair with a specific standalone commit.
+  `git submodule update --remote standalone`; the extension repo then shows
+  a modified `standalone` gitlink that you commit when you want a specific
+  extension release to pair with a specific standalone commit.
 - When you edit files inside the submodule, commit and push from **inside**
   `standalone/` (that lands on `pi-code-standalone`). Then, in the extension
   repo, commit the resulting `standalone` gitlink bump so the pairing is
   recorded.
-- Never copy files out of the private submodules into the public extension
+- Never copy files out of the private submodule into the public extension
   repo. Files must never appear in the VS Code extension VSIX or any other
   public artifact — `standalone/**` is already excluded from the VSIX by
   `.vscodeignore`, and that exclusion is the enforcement point.
-- The private submodules are scoped to the standalone desktop app. Public
+- The private submodule is scoped to the standalone desktop app. Public
   assets that legitimately belong to the extension (for example
   [media/icons/](media/icons/)) stay in the public repository and follow
   normal open-source hygiene.
