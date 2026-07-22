@@ -9,16 +9,22 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+use bevy::asset::{Asset, embedded_asset};
 use bevy::camera::RenderTarget;
 use bevy::image::ImageSampler;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::AutoFocus;
-use bevy::post_process::effect_stack::{ChromaticAberration, LensDistortion, Vignette};
+use bevy::math::primitives::Rectangle;
+use bevy::post_process::effect_stack::{ChromaticAberration, Vignette};
 use bevy::prelude::*;
+use bevy::reflect::TypePath;
 use bevy::render::render_resource::{
-    Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    AsBindGroup, Extent3d, ShaderType, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages,
 };
+use bevy::shader::ShaderRef;
+use bevy::sprite_render::{Material2d, Material2dPlugin, MeshMaterial2d};
 use bevy::text::{EditableText, FontSize, FontSource, TextCursorStyle};
 use bevy::ui::{
     BackgroundGradient, ColorStop, Gradient, RadialGradient, RadialGradientShape, UiPosition,
@@ -102,10 +108,21 @@ struct PocSettings {
     /// 0.5 = default Bevy (obvious), 0.8 = fisheye.
     barrel_intensity: f32,
     /// Zoom applied to compensate for barrel-warp cropping the edges.
-    /// 1.0 = no zoom (visible black corners at high intensity),
-    /// 1.15 = tight fit for barrel_intensity around 0.2.
+    /// Bevy's LensDistortion shader clamps out-of-bounds UVs to the texture
+    /// edge, so with `scale = 1.0` any warped sample that lands past the
+    /// texture border shows the edge pixel repeated — this is what makes
+    /// long horizontal/vertical UI border lines appear to "extend to
+    /// infinity" along the top/bottom/left/right of the screen. Set to
+    /// ~1.1 to leave a safety margin around `barrel_intensity ~ 0.2`.
     barrel_scale: f32,
-    /// Extra curvature ramp at the very edges (0.0 = none, 0.5 = strong).
+    /// Weight of the quartic (r⁴) term in the barrel polynomial. Bevy
+    /// default is 0.0 (pure r² curvature — the classic CRT tube shape).
+    /// Positive values pinch corners harder than midpoints. Sane range
+    /// 0.0–0.5. Above ~1.0 the polynomial derivative can flip sign, which
+    /// produces visible KINKS in warped straight UI borders — a curved
+    /// line bends one way then the other with a hard angle at the
+    /// inflection point. If you see a corner-shaped artifact in a border
+    /// that should be a smooth arc, this is the knob to lower.
     barrel_edge_curvature: f32,
     /// Chromatic aberration R/G/B split as fraction of window size.
     /// 0.0 = off, 0.01 = subtle, 0.03 = strong VHS look.
@@ -136,6 +153,55 @@ struct PocSettings {
     /// tube_extent_x. Different X and Y let you shape the ellipse to match
     /// the aspect of your CRT tube.
     tube_extent_y: f32,
+    /// Number of scanlines top-to-bottom across the viewport. 200 = ~4 px per
+    /// line at 820 px height (feels like CRT). 400 = fine, 100 = coarse
+    /// arcade look, 0 = off (the shader also short-circuits at intensity 0).
+    scanline_density: f32,
+    /// How dark the trough of the scanline is. 0.0 = invisible, 0.15 =
+    /// terminal-subtle, 0.4 = aggressive arcade, 1.0 = fully black between
+    /// lines (basically raster-line demo mode).
+    scanline_intensity: f32,
+    /// Sweep-line speed. Multiplied against time inside `fract(...)`, so this
+    /// is the frequency in Hz. 0.15 = one full top-to-bottom pass every ~6.7 s.
+    sweep_speed: f32,
+    /// Peak added brightness of the sweep band. 0.0 = off, 0.1 = subtle,
+    /// 0.4 = obvious phosphor pulse.
+    sweep_intensity: f32,
+    /// Gaussian standard deviation of the sweep band in UV units (0–1 across
+    /// the height). 0.02 = razor-thin, 0.08 = wide soft band, 0.2 = whole-screen
+    /// wash.
+    sweep_width: f32,
+    /// Per-pixel animated noise amplitude. 0.0 = off, 0.02 = TV static hint,
+    /// 0.1 = heavy grain that starts to obscure text.
+    noise_intensity: f32,
+    /// Phosphor bleed — how strongly neighbour pixels leak into the current
+    /// one. 0.0 = crisp, 0.3 = soft phosphor, 1.0 = smeary. Cheap 4-tap cross,
+    /// not a real bloom.
+    phosphor_bleed: f32,
+    /// AC-hum flicker amplitude. Whole-screen brightness wobble via
+    /// mixed-frequency sines. 0.0 = off, 0.5 = subtle, 2.0 = obvious pulse.
+    flicker_intensity: f32,
+    /// Width of the bezel fade band in normalized-squircle units. The band
+    /// is centred on the squircle=1.0 contour, so `bezel_softness = 0.1`
+    /// fades from 0.9 to 1.1. 0.0 → hard edge (no fade), 0.3 → very soft
+    /// glass rim. Governs how the CRT tube blends into the surrounding
+    /// black — you want this large enough that the mesh boundary is
+    /// invisible.
+    bezel_softness: f32,
+    /// Lp-norm exponent for the bezel shape. 2.0 = pure ellipse
+    /// (aspect-scaled), 6.0 = rounded rectangle (approximates a real CRT
+    /// front glass), 20+ = near-rectangular window. Higher values move the
+    /// tube corners closer to the actual mesh corners.
+    bezel_shape: f32,
+    /// Glyph-level phosphor glow around bright pixels. 16-tap ring gather
+    /// approximating a Gaussian. 0.0 = off, 0.3 = terminal warmth, 0.8 =
+    /// obvious halo, 1.5+ = saturated bright zones. Costs ~16 extra texture
+    /// samples per fragment — cheap on modern GPUs.
+    bloom_intensity: f32,
+    /// Bloom base radius in pixels. Inner ring taps at this distance, outer
+    /// ring at 2.5×. 3 = tight text halo, 6 = classic CRT bloom, 12+ = heavy
+    /// diffusion (readability drops).
+    bloom_radius: f32,
 }
 
 impl Default for PocSettings {
@@ -159,6 +225,24 @@ impl Default for PocSettings {
             tube_edge_darkness: 1.0,
             tube_extent_x: 65.0,
             tube_extent_y: 70.0,
+            // CRT effect defaults — read as a working terminal at rest.
+            scanline_density: 200.0,
+            scanline_intensity: 0.18,
+            sweep_speed: 0.15,
+            sweep_intensity: 0.12,
+            sweep_width: 0.06,
+            noise_intensity: 0.025,
+            phosphor_bleed: 0.35,
+            flicker_intensity: 0.6,
+            // Soft rounded-rectangle bezel that blends the tube into the
+            // surrounding black. Shape 6 approximates a Trinitron / classic
+            // arcade CRT front glass.
+            bezel_softness: 0.15,
+            bezel_shape: 6.0,
+            // Subtle text halo — enough to feel like phosphor glow without
+            // making the type mushy.
+            bloom_intensity: 0.4,
+            bloom_radius: 5.0,
         }
     }
 }
@@ -168,6 +252,73 @@ struct SettingsFile {
     path: PathBuf,
     last_modified: Option<SystemTime>,
 }
+
+// -- Custom CRT screen material ---------------------------------------------
+// A `Material2d` on the fullscreen quad that displays the UI capture. The
+// fragment shader (embedded from `src/shaders/crt.wgsl`) samples the UI
+// texture, layers scanlines, sweep, noise, phosphor bleed and flicker on top,
+// then hands the result to the main camera's post-process stack (barrel warp,
+// chromatic aberration, vignette). Curving happens after this material runs,
+// so the scanlines bend to follow the tube for free.
+//
+// Layout matches the WGSL struct exactly. WGSL `struct` fields are packed
+// per std140-like rules — trailing padding keeps the whole thing 16-byte
+// aligned across every platform's uniform buffer requirements.
+
+#[derive(ShaderType, Clone, Copy, Debug, Default)]
+struct CrtShaderParams {
+    time: f32,
+    scanline_density: f32,
+    scanline_intensity: f32,
+    sweep_speed: f32,
+    sweep_intensity: f32,
+    sweep_width: f32,
+    noise_intensity: f32,
+    phosphor_bleed: f32,
+    flicker_intensity: f32,
+    barrel_intensity: f32,
+    barrel_scale: f32,
+    barrel_edge_curvature: f32,
+    bezel_softness: f32,
+    bezel_shape: f32,
+    bloom_intensity: f32,
+    bloom_radius: f32,
+}
+
+#[derive(Asset, AsBindGroup, TypePath, Clone)]
+struct CrtScreenMaterial {
+    #[texture(0)]
+    #[sampler(1)]
+    ui_texture: Handle<Image>,
+    #[uniform(2)]
+    params: CrtShaderParams,
+}
+
+impl Material2d for CrtScreenMaterial {
+    fn fragment_shader() -> ShaderRef {
+        // `embedded_asset!` in `CrtMaterialPlugin::build` registers this
+        // path; the crate name uses underscores in the URL.
+        "embedded://pi_code_desktop_poc/shaders/crt.wgsl".into()
+    }
+}
+
+struct CrtMaterialPlugin;
+
+impl Plugin for CrtMaterialPlugin {
+    fn build(&self, app: &mut App) {
+        // Ship the shader source inside the binary rather than reading it from
+        // a file at runtime — keeps `cargo run` self-contained and doesn't
+        // require polluting the private assets submodule with code.
+        embedded_asset!(app, "shaders/crt.wgsl");
+        app.add_plugins(Material2dPlugin::<CrtScreenMaterial>::default());
+    }
+}
+
+/// Marker for the fullscreen mesh entity that carries the CRT material, so
+/// the update system can find the material handle without querying every
+/// `Mesh2d` in the world.
+#[derive(Component)]
+struct CrtScreenMesh;
 
 fn main() {
     App::new()
@@ -179,6 +330,7 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(CrtMaterialPlugin)
         .insert_resource(ClearColor(INK))
         .insert_resource(FeedState {
             rows: initial_feed(),
@@ -193,6 +345,7 @@ fn main() {
                 apply_settings_to_composer,
                 apply_settings_to_camera,
                 apply_settings_to_tube_vignette,
+                update_crt_material,
             ),
         )
         .run();
@@ -202,6 +355,8 @@ fn setup(
     mut commands: Commands,
     mut fonts: ResMut<Assets<Font>>,
     mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut crt_materials: ResMut<Assets<CrtScreenMaterial>>,
 ) {
     // -- Render-to-texture pipeline --
     // Bevy 0.19 runs UI *after* Core2d post-process (see bevy_ui_render:267),
@@ -253,13 +408,17 @@ fn setup(
         ))
         .id();
 
-    // Main camera: renders a fullscreen Sprite showing the UI target, then the
-    // post-process stack (barrel warp / chromatic / vignette) runs on this
-    // camera's output. Order 0 = default, runs after UI camera.
+    // Main camera: renders a fullscreen mesh with the custom CRT material,
+    // then Bevy's post-process stack (ChromaticAberration, Vignette) runs on
+    // this camera's output. Barrel warp is NOT here — we do it inside the
+    // CRT shader instead, because Bevy's LensDistortion uses an
+    // anisotropic `dot(abs(direction), multiplier)` formulation that is
+    // C1-discontinuous on the horizontal/vertical axes and produces visible
+    // kinks in any UI border line that crosses them.
     //
-    // Clear color is pure BLACK so any pixel not covered by the sprite (e.g.
-    // corner areas after barrel warp squeezes content inward) blends with the
-    // vignette's fade-to-black without a visible transition seam.
+    // Clear color is pure BLACK so any pixel not covered by the mesh (should
+    // be none — mesh is 1:1 with viewport) reads as clean background. The
+    // shader's bezel fade takes care of a soft roll-off at the mesh edges.
     commands.spawn((
         Camera2d,
         Camera {
@@ -268,23 +427,28 @@ fn setup(
             ..default()
         },
         CrtCamera,
-        LensDistortion::default(),
         ChromaticAberration::default(),
         Vignette::default(),
     ));
 
-    // Sprite that shows the UI render target 1:1 with the viewport. The main
-    // camera's clear color is pure black, so anywhere barrel warp pulls the
-    // sprite content inward, the exposed pixels are already black — vignette
-    // then just deepens that black at the corners, no visible seam between
-    // UI, sprite edge, and background.
+    // Fullscreen quad textured with the UI capture, but rendered through the
+    // custom CRT `Material2d` instead of a plain `Sprite`. The shader samples
+    // the UI texture, layers scanlines / sweep / noise / phosphor bleed on
+    // top, then hands its output to the main camera's post-process stack.
+    // Barrel warp bends everything (including the scanlines) into the CRT
+    // tube profile automatically.
+    //
+    // Rectangle mesh is centred at (0,0) with size 1280×820; Bevy's default
+    // Camera2d ortho projection is 1 world unit = 1 pixel, so this exactly
+    // fills the viewport without any Transform scaling gymnastics.
     commands.spawn((
-        Sprite {
-            image: ui_target_handle,
-            custom_size: Some(Vec2::new(1280.0, 820.0)),
-            ..default()
-        },
+        Mesh2d(meshes.add(Rectangle::new(1280.0, 820.0))),
+        MeshMaterial2d(crt_materials.add(CrtScreenMaterial {
+            ui_texture: ui_target_handle,
+            params: CrtShaderParams::default(),
+        })),
         Transform::from_xyz(0.0, 0.0, 0.0),
+        CrtScreenMesh,
     ));
 
     let font = load_monofonto(&mut fonts);
@@ -921,22 +1085,49 @@ fn apply_settings_to_composer(
 
 fn apply_settings_to_camera(
     settings: Res<PocSettings>,
-    mut camera_query: Query<
-        (&mut LensDistortion, &mut ChromaticAberration, &mut Vignette),
-        With<CrtCamera>,
-    >,
+    mut camera_query: Query<(&mut ChromaticAberration, &mut Vignette), With<CrtCamera>>,
 ) {
     if !settings.is_changed() {
         return;
     }
-    for (mut lens, mut chrom, mut vig) in &mut camera_query {
-        lens.intensity = settings.barrel_intensity;
-        lens.scale = settings.barrel_scale;
-        lens.edge_curvature = settings.barrel_edge_curvature;
+    for (mut chrom, mut vig) in &mut camera_query {
         chrom.intensity = settings.chromatic_intensity;
         vig.intensity = settings.vignette_intensity;
         vig.radius = settings.vignette_radius;
         vig.smoothness = settings.vignette_smoothness;
+    }
+}
+
+/// Refresh the CRT shader uniforms. Runs every frame because `time` is one
+/// of the inputs — the sweep and noise animate off it. Settings values are
+/// copied unconditionally rather than gated by `Res<PocSettings>::is_changed`
+/// so a mid-run TOML edit propagates on the very next tick without waiting
+/// for the next parameter to change.
+fn update_crt_material(
+    time: Res<Time>,
+    settings: Res<PocSettings>,
+    mut materials: ResMut<Assets<CrtScreenMaterial>>,
+    query: Query<&MeshMaterial2d<CrtScreenMaterial>, With<CrtScreenMesh>>,
+) {
+    for handle_wrapper in &query {
+        if let Some(mut material) = materials.get_mut(&handle_wrapper.0) {
+            material.params.time = time.elapsed_secs();
+            material.params.scanline_density = settings.scanline_density.max(0.0);
+            material.params.scanline_intensity = settings.scanline_intensity.clamp(0.0, 1.0);
+            material.params.sweep_speed = settings.sweep_speed;
+            material.params.sweep_intensity = settings.sweep_intensity.max(0.0);
+            material.params.sweep_width = settings.sweep_width.max(0.0);
+            material.params.noise_intensity = settings.noise_intensity.max(0.0);
+            material.params.phosphor_bleed = settings.phosphor_bleed.max(0.0);
+            material.params.flicker_intensity = settings.flicker_intensity.max(0.0);
+            material.params.barrel_intensity = settings.barrel_intensity;
+            material.params.barrel_scale = settings.barrel_scale.max(0.001);
+            material.params.barrel_edge_curvature = settings.barrel_edge_curvature;
+            material.params.bezel_softness = settings.bezel_softness.max(0.001);
+            material.params.bezel_shape = settings.bezel_shape.max(1.0);
+            material.params.bloom_intensity = settings.bloom_intensity.max(0.0);
+            material.params.bloom_radius = settings.bloom_radius.max(0.001);
+        }
     }
 }
 

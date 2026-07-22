@@ -6,14 +6,23 @@
 # 300 = fast, 500 = terminal default, 1000 = slow.
 cursor_blink_ms = 1000
 
-# --- CRT: barrel warp ---
+# --- CRT: barrel warp (custom shader, C1-continuous everywhere) ---
+# Now runs inside our CRT shader with a pure radial polynomial — no more
+# kinks on the horizontal/vertical axes (Bevy's built-in LensDistortion had
+# a C1-discontinuous adjust term there). Out-of-bounds samples return black
+# instead of clamping to edge, so no "lines to infinity" either.
+#
 # Curvature strength. 0.0 = flat, 0.3 = subtle, 0.5 = obvious, 0.8 = fisheye.
 barrel_intensity = 0.1
-# Zoom to compensate for barrel-warp cropping the edges. 1.0 shows black
-# corners at high intensity; 1.15 stays tight around barrel_intensity ~ 0.2.
+# Scales the sampling coordinate. 1.0 = no scale (out-of-bounds pixels go
+# black via the shader's soft bezel). 1.1–1.2 zooms in slightly so the tube
+# corners crop to interior UI content instead of the source-texture edge.
 barrel_scale = 1.0
-# Extra ramp at the far edges (0.0 = linear falloff, 0.5 = strong).
-barrel_edge_curvature = 10.0
+# Weight of the r⁴ term: k2 = intensity² × edge_curvature. Same convention
+# as Bevy's LensDistortion. 0.0 = pure r² tube (recommended). 1.0 = subtle
+# corner pinch. Our formula is smooth at every value, so this is a purely
+# aesthetic knob — no kinks at any reasonable setting.
+barrel_edge_curvature = 1.0
 
 # --- CRT: chromatic aberration ---
 # R/G/B split as a fraction of window width.
@@ -25,8 +34,8 @@ chromatic_intensity = 0.002
 # tube-follow. Blend with the tube-vignette below or set intensity = 0 to use
 # only the tube vignette.
 vignette_intensity = 1.0
-vignette_radius = 0.9
-vignette_smoothness = 3.0
+vignette_radius = 1.2
+vignette_smoothness = 4.0
 
 # --- CRT: tube-shape vignette (INSIDE UI capture, warps with barrel) ---
 # Radial gradient painted on a UI Node before barrel warp runs. Because it
@@ -37,8 +46,8 @@ vignette_smoothness = 3.0
 # shape the tube. 50/50 = ellipse just touches midpoints of edges. 65/70 =
 # tighter ellipse, corners already fully black. 120/120 = ellipse extends
 # past the window, no visible fade at all.
-tube_extent_x = 90.0
-tube_extent_y = 95.0
+tube_extent_x = 65.0
+tube_extent_y = 90.0
 # Fraction of the ellipse radius that stays fully clear before fade starts.
 # 0.0 = fade starts at centre. 0.6 = plateau covers 60% of the ellipse.
 # 0.9 = plateau to almost the edge, only a thin fade ring.
@@ -46,3 +55,56 @@ tube_center_extent = 0.6
 # Alpha at the outermost stop. 0.0 = off (invisible). 1.0 = fully opaque
 # black past the ellipse boundary.
 tube_edge_darkness = 1.0
+
+# --- CRT: scanlines (curved by outer barrel warp automatically) ---
+# Number of horizontal scanlines top-to-bottom across the viewport.
+# 100 = coarse arcade look. 200 = ~4 px per line at 820 h (terminal). 400 = fine.
+scanline_density = 200.0
+# Trough darkness. 0.0 = invisible, 0.18 = terminal-subtle, 0.4 = aggressive.
+scanline_intensity = 0.28
+
+# --- CRT: sweep line ---
+# Frequency in Hz. 0.15 = one full top-to-bottom pass every ~6.7 s.
+sweep_speed = 0.15
+# Peak added brightness. 0.0 = off, 0.12 = subtle, 0.4 = obvious pulse.
+sweep_intensity = 0.003
+# Band width (gaussian sigma in UV units 0..1). 0.02 = razor, 0.08 = wide soft.
+sweep_width = 0.08
+
+# --- CRT: animated noise ---
+# Per-pixel grain amplitude. 0.0 = off, 0.025 = TV static hint, 0.1 = heavy.
+noise_intensity = 0.0007
+
+# --- CRT: phosphor bleed (character-fringe, 1.5px cross) ---
+# 4-tap cross soft-glow. 0.0 = crisp, 0.35 = soft phosphor, 1.0 = smeary.
+phosphor_bleed = 0.35
+
+# --- CRT: bloom (glyph-level phosphor halo) ---
+# The classic CRT text glow — bright pixels bleed a soft halo outward.
+# Two-ring 16-tap Gaussian approximation. Because black pixels contribute
+# zero to an additive sum, the halo only shows around actual text/borders.
+#
+# 0.0 = off, 0.4 = subtle text warmth, 0.8 = obvious phosphor glow,
+# 1.5+ = bright-zones saturate.
+bloom_intensity = 0.5
+# Base radius in pixels. Inner ring taps at this distance, outer at 2.5×.
+# 3 = tight halo, 5 = terminal-natural, 10 = heavy diffusion.
+bloom_radius = 0.3
+
+# --- CRT: AC-hum flicker ---
+# Whole-screen brightness wobble. 0.0 = off, 0.6 = subtle, 2.0 = obvious.
+flicker_intensity = 0.6
+
+# --- CRT: bezel (soft tube-shaped edge that blends into the background) ---
+# The physical rounded glass rim of the CRT. Applied last so scanlines,
+# sweep, noise and every other effect fade with the tube instead of the
+# mesh terminating on a hard line. This is what makes the UI actually
+# blend into black instead of ending at a knife-cut border.
+#
+# Width of the fade band around the squircle=1.0 contour. 0.0 = hard edge,
+# 0.15 = soft glass rim, 0.3 = very generous fade (much of the corners lost).
+bezel_softness = 0.6
+# Lp-norm exponent for the tube shape. 2.0 = pure ellipse. 6.0 = rounded
+# rectangle like a real CRT tube. 20+ = near-rectangular window with just
+# corner smoothing. Higher = tube corners closer to viewport corners.
+bezel_shape = 6.0
