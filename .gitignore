@@ -8,7 +8,11 @@ nul
 
 user-reply.txt
 
-# Local feature plans, implementation notes, and development backlogs
+# Local feature plans, implementation notes, and development backlogs.
+# The `.dev-notes/` name (dot-prefixed) is the sole convention — a bare
+# `dev-notes/` folder should never exist anywhere. Pattern with no leading
+# slash matches at any depth, so it also catches `.dev-notes/` inside
+# submodules if they don't have their own gitignore for it.
 .dev-notes/
 
 # Local credentials and machine-specific configuration
