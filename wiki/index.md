@@ -13,7 +13,7 @@ Recommended top-down walk:
 5. **Part VII — safety and reversibility.** Invariants that keep the system from corrupting user work: change tracking, checkpoints, and exclusive session ownership.
 6. **Part VIII — message flow discipline.** Behaviors visible in a live streaming chat: queuing, steering, Plan Mode, per-chat ToDo.
 7. **Part IX — subagents.** Named and ad-hoc children dispatched from the parent conversation, with git-worktree write isolation.
-8. **Part X — standalone desktop host** *(retired 2026-07-22)*. Historical snapshot of the Electron-based alternate host; the code has been removed in favour of a native Rust + Bevy prototype under [`standalone/desktop-rs-poc/`](../standalone/desktop-rs-poc/). See [`dev-notes/migration-overview.md`](../dev-notes/migration-overview.md).
+8. **Part X — standalone desktop host** *(retired 2026-07-22)*. Historical snapshot of the Electron-based alternate host; the code has been removed in favour of a native Rust + Bevy prototype that now lives in the private [`pi-code-standalone`](https://github.com/Avhatar/pi-code-standalone) repo, attached as a submodule at [`standalone/`](../standalone/). See [`dev-notes/migration-overview.md`](../dev-notes/migration-overview.md).
 9. **Part XI — auxiliary systems.** Opt-in LSP tools and the packaging / release pipeline.
 
 Each chapter starts with `_intro.md` framing what cluster of articles it owns and listing the article roster; individual articles carry the `Stance / Role / Keywords / Lifecycle edges / See also` schema.
@@ -119,7 +119,7 @@ Named and ad-hoc child agents dispatched from the parent conversation, with work
 
 ## Part X — Standalone desktop host *(retired 2026-07-22)*
 
-Historical snapshot of the Electron-based alternate host that reused the portable chat core. The Electron implementation was removed from the working tree in favour of a native Rust + Bevy migration prototype under [`standalone/desktop-rs-poc/`](../standalone/desktop-rs-poc/); see [`dev-notes/migration-overview.md`](../dev-notes/migration-overview.md) for the decision trail. Articles are kept as reference for what the retired system looked like.
+Historical snapshot of the Electron-based alternate host that reused the portable chat core. The Electron implementation was removed from the working tree in favour of a native Rust + Bevy migration prototype in the private [`pi-code-standalone`](https://github.com/Avhatar/pi-code-standalone) repo, attached as a submodule at [`standalone/`](../standalone/); see [`dev-notes/migration-overview.md`](../dev-notes/migration-overview.md) for the decision trail. Articles are kept as reference for what the retired system looked like.
 
 - `desktop-ipc-contract` — the typed IPC contract between the desktop main process, preload bridge, and renderer.
 - `desktop-host-lifecycle` — the headless `ChatHost` wiring in `standalone/desktop`, session storage on disk, and lifecycle differences from the VS Code host.

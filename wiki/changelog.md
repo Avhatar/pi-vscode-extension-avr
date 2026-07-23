@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-07-23 — Standalone-repo split reflected in TOC framing
+
+- **Code:** Split standalone into a separate private repo <https://github.com/Avhatar/pi-code-standalone> attached as a submodule at `standalone/` (commit `09434c3`); then inlined the fonts/assets into that submodule and dropped the nested `pi-code-standalone-assets` layer (commit `ec5df86`). CRT-shader work (commit `fc8edd1`) lives entirely inside the submodule and does not surface in the extension-runtime wiki.
+- **Wiki:** `index.md` — updated the two `Part X — standalone desktop host *(retired)*` framing paragraphs (Reading-order §8 and Part X section header) to describe standalone as a private submodule rather than an in-tree `standalone/desktop-rs-poc/` directory. No Part X article body edits (they remain the intentional Electron historical snapshot). Validators pass with `[E] ERROR: none`; `compute-used-by.py` reported 0 updates (no `Depends on` graph changes).
+- **Escalations:** none — Stance-sentence revision per Step 2 rubric row 4. Follow-up: Part X `desktop-*` articles still cite `standalone/desktop/src/...` file paths for the retired Electron implementation — those code links have been broken since the Electron retirement on 2026-07-22 and remain broken by design (historical snapshot). No action planned.
+
 ## 2026-07-22 — Parts VI–XI bootstrap authoring + Parts I–V backfill
 
 - **Code:** No code changes — this pass continues wiki bootstrap from where the 2026-07-21 entry stopped.
