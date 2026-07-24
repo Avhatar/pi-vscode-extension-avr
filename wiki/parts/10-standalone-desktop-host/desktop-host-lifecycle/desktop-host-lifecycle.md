@@ -1,9 +1,7 @@
 # desktop-host-lifecycle
 
 > **Retired.** Documents the Electron standalone host removed from the working
-> tree on 2026-07-22. See [`dev-notes/migration-overview.md`](../../../../dev-notes/migration-overview.md)
-> for the decision trail; native Rust + Bevy successor lives in
-> [`standalone/desktop-rs-poc/`](../../../../standalone/desktop-rs-poc/).
+> tree on 2026-07-22.
 
 ## Stance
 

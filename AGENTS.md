@@ -54,18 +54,17 @@ develop the VS Code extension without initializing the submodule — a plain
 clone leaves `standalone/` empty and `npm install`, `npm run compile`,
 `npm run test:*`, `npm run package` all work without it.
 
-Renderer assets — fonts, sprites, images, and sounds — live directly inside
-the standalone repo (at `standalone/desktop-rs-poc/assets/`), not as a
-nested submodule. The whole standalone repo is already private, so the
-public/private split is handled at the standalone-repo boundary and there is
-no benefit to a further nested split.
+Everything about the standalone app — its language, layout, dependencies,
+assets, roadmap, and development notes — lives inside the private submodule.
+The public extension repository intentionally documents none of that; the
+public/private split is the whole point of the submodule and duplicating
+internals here would leak private context and require constant re-syncing.
+Maintainers working on the standalone app should read the docs inside
+`standalone/` after initializing the submodule.
 
-The Electron `standalone/desktop/` sub-app was **retired on 2026-07-22** in
-favour of a native Rust + Bevy prototype under
-`standalone/desktop-rs-poc/`. See
-[`dev-notes/migration-overview.md`](dev-notes/migration-overview.md) for the
-decision trail; the pi-vscode-extension git history preserves the Electron
-sources for reference, and the wiki articles under
+The Electron `standalone/desktop/` sub-app was **retired on 2026-07-22**.
+The pi-vscode-extension git history preserves the Electron sources for
+reference, and the wiki articles under
 [`wiki/parts/10-standalone-desktop-host/`](wiki/parts/10-standalone-desktop-host/)
 are marked *(retired)* and kept as a historical snapshot.
 
