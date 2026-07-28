@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChatController } from '../../../controllers/chat-controller';
 import { ChatService } from '../../../core/chat/chat-service';
 import { TabRegistry } from '../../../core/chat/tab-registry';
+import { NOOP_PERF_LOGGER } from '../../../core/ports/perf-logger';
 
 // Mock `fs/promises` at module scope so deleteHistorySession's `unlink(...)`
 // call becomes observable without touching the real filesystem. Every other
@@ -106,6 +107,8 @@ describe('ChatController tab registry integration', () => {
             dispose: vi.fn(async () => undefined),
         };
         const controller = Object.create(ChatController.prototype) as any;
+        controller._perf = NOOP_PERF_LOGGER;
+        controller._tabPerfCounter = 0;
         controller._createSessionManager = vi.fn(() => session);
         controller._createFileChangeManagers = vi.fn(() => { throw new Error('diff failed'); });
 
@@ -247,6 +250,8 @@ describe('ChatController tab registry integration', () => {
             ]),
         };
         const controller = Object.create(ChatController.prototype) as any;
+        controller._perf = NOOP_PERF_LOGGER;
+        controller._tabPerfCounter = 0;
         controller._tabs = createRegistry([existing], existing.id);
         controller._createSessionManager = vi.fn(() => session);
         controller._createFileChangeManagers = vi.fn(() => ({

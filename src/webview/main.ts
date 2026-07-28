@@ -274,6 +274,7 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'stateSync':
             applyStateSync(msg.state);
+            hideInitialLoadingOverlay();
             break;
         case 'agentEvent':
             handleAgentEvent(msg.event);
@@ -5249,6 +5250,23 @@ function bindScrollListener(): void {
 }
 
 // ── Init ──
+
+/**
+ * Fades out the full-viewport loading overlay defined in the HTML template
+ * (see `chat-panel.ts → buildInitialLoadingOverlay`). Called once, on the
+ * first `stateSync` from the extension host. If a state never arrives (bad
+ * transport), the overlay stays put — that is the correct signal.
+ */
+let initialLoadingHidden = false;
+function hideInitialLoadingOverlay(): void {
+    if (initialLoadingHidden) return;
+    initialLoadingHidden = true;
+    const overlay = document.getElementById('initial-loading');
+    if (!overlay) return;
+    overlay.classList.add('hiding');
+    setTimeout(() => overlay.remove(), 250);
+}
+
 render();
 
 async function initializeAgentConnection(): Promise<void> {

@@ -147,6 +147,16 @@ function render(data: SettingsData): void {
             `Opacity of the glow around user messages.`),
     ]));
 
+    container.appendChild(buildSection('Performance', [
+        buildToggle('prewarm.full', 'Full prewarm on startup', data.prewarmFull,
+            'By default, only the Pi SDK is warmed up when VS Code starts — the first click on Pi Code still takes a moment to bring up the agent session. Turn this on to run the entire session bring-up (SDK, auth, model registry, resource loader) at VS Code startup, so the first click is nearly instant. Trade-off: Reload Window becomes ~3 seconds longer, extra ~50 MB of memory is held, and one model-metadata network request runs on every window start — even in windows where you never touch Pi Code.'),
+    ]));
+
+    container.appendChild(buildSection('Diagnostics', [
+        buildToggle('perf.enabled', 'Performance timing log', data.perfEnabled,
+            'Record activation, Pi session bring-up, and per-tab creation timings to a JSONL file under the extension\'s global storage. The absolute path is printed to the Pi Code output channel on activation. Off by default; toggle on, reload the window, reproduce the slow path, then share the log for analysis.'),
+    ]));
+
     const rawSection = buildSection('Raw Mode', [buildRawPlaceholder()]);
     rawSection.id = 'raw-mode-section';
     container.appendChild(rawSection);

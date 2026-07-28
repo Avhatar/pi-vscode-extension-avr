@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "VS Code UI for the Pi coding agent",
-  "version": "0.61.1",
+  "version": "0.64.0",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -14,7 +14,7 @@
     "Chat"
   ],
   "activationEvents": [
-    "onView:pi-code.chat",
+    "onStartupFinished",
     "onWebviewPanel:pi-code.chatPanel",
     "onWebviewPanel:pi-code.raw"
   ],
@@ -262,6 +262,16 @@
           "type": "boolean",
           "default": false,
           "description": "Expose Language Server tools (find_references, document_symbols, goto_definition, hover, find_implementations, type_definition, workspace_symbols, call_hierarchy_incoming, call_hierarchy_outgoing) to the agent. When disabled (default), the tools are not registered and add nothing to the system prompt — the agent works with grep / read / etc. as usual. Enable for projects where semantic accuracy is worth the extra system-prompt footprint (e.g. large Unity / Rust / TS codebases with name collisions). Tools require a language extension to be installed for each file's language (e.g. C# Dev Kit, rust-analyzer, Pylance). Changes apply on new sessions or window reload."
+        },
+        "pi-code.perf.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Record activation, Pi session bring-up, and per-tab timings to a JSONL file under the extension's global storage (`<globalStorage>/perf/<timestamp>-<runId>.jsonl`). The absolute path is printed to the Pi Code output channel on activation so the file can be located and shared. Diagnostic only — off by default; toggle it on, reload the window, reproduce the slow path, then share the resulting file."
+        },
+        "pi-code.prewarm.full": {
+          "type": "boolean",
+          "default": false,
+          "description": "Perform the full Pi session bring-up (SDK import, auth, model registry, resource loader) at VS Code startup instead of on the first click. Opening the Pi Code sidebar and the first chat tab become nearly instant. Trade-off: window reload takes ~3 seconds longer, extra ~50 MB of memory is held, and one model-metadata network request runs at startup — even in windows where you never use Pi Code."
         },
         "pi-code.todo.promptGuidelines": {
           "type": "string",

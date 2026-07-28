@@ -80,6 +80,17 @@ export const window = {
     async showWarningMessage(): Promise<undefined> {
         return undefined;
     },
+    withProgress<T>(_options: unknown, task: (progress?: unknown, token?: unknown) => Thenable<T>): Thenable<T> {
+        // Tests do not exercise the progress UI; run the task inline so the
+        // wrapped operation still returns its promise.
+        return task();
+    },
+};
+
+export const ProgressLocation = {
+    SourceControl: 1,
+    Window: 10,
+    Notification: 15,
 };
 
 export class EventEmitter<T> {

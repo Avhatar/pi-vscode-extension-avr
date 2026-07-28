@@ -7,6 +7,33 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-07-28
+
+### Changed
+- Codex model catalog metadata is now cached persistently across window reloads under global storage, with a 24-hour freshness window and stale-while-revalidate semantics. Opening a new chat tab no longer waits 300–1300 ms on the `chatgpt.com/backend-api/codex/models` endpoint after the first cold start; subsequent starts apply the last-known catalog immediately while a background refresh keeps it current.
+
+### Added
+- Added a full-viewport loading overlay to chat editor panels that stays visible until the first state message arrives from the extension host, so the user never sees a blank editor tab during panel restoration across a window reload or while the Pi session is being brought up.
+- Creating a new chat or opening a session from history now shows a "Preparing new Pi Code chat…" (or "Restoring Pi Code chat…") progress indicator in the VS Code status bar while the agent session initializes, instead of appearing to freeze for a few seconds before the panel opens.
+
+## [0.63.0] - 2026-07-28
+
+### Changed
+- The extension now activates in the background at VS Code startup (`onStartupFinished`) and warms up the Pi SDK module cache, so the first click on the Pi Code sidebar no longer pays the ~1-second dynamic-import cost. The agent session itself is still created lazily on the first interaction.
+
+### Added
+- Added a **Performance** section to the Pi Code Settings panel with a **Full prewarm on startup** toggle (`pi-code.prewarm.full`, default off). Enable it to run the entire session bring-up (SDK, auth, model registry, resource loader) eagerly at VS Code startup so the first Pi Code click is nearly instant — at the cost of ~3 seconds longer Reload Window, extra memory, and a model-metadata network request on every window start.
+
+## [0.62.1] - 2026-07-27
+
+### Added
+- Added a **Diagnostics** section to the Pi Code Settings panel with a **Performance timing log** toggle, surfacing the previously VS-Code-only `pi-code.perf.enabled` setting inside the extension's own settings UI.
+
+## [0.62.0] - 2026-07-27
+
+### Added
+- Added `pi-code.perf.enabled` diagnostic setting (default off). When on, activation, Pi session bring-up, and per-tab creation timings are recorded to a JSONL file under the extension's global storage (`<globalStorage>/perf/<timestamp>-<runId>.jsonl`); the full path is printed to the Pi Code output channel on activation.
+
 ## [0.61.1] - 2026-07-21
 
 ### Fixed

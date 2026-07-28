@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { unlink } from 'fs/promises';
 import { PiSessionManager } from '../pi/session';
 import type { Logger } from '../core/ports/logger';
+import { NOOP_PERF_LOGGER, type PerfLogger } from '../core/ports/perf-logger';
 import type { SecretStore, SessionRuntimePorts } from '../core/ports/session-platform';
 import type { ChatPlatformPorts, FileMentionsPort, StateStore } from '../core/ports/chat-platform';
 import type { FileChangePlatformPorts } from '../core/ports/file-state';
@@ -148,6 +149,8 @@ export class ChatController implements vscode.Disposable {
     private readonly _sessionPorts: SessionRuntimePorts;
     private readonly _rawStorage: RawStoragePort | undefined;
     private readonly _rawRecorderRegistry: RawRecorderRegistry | undefined;
+    private readonly _perf: PerfLogger;
+    private _tabPerfCounter = 0;
     private readonly _workspaceState: StateStore;
     private readonly _globalState: StateStore;
     private readonly _fileChangePorts: FileChangePlatformPorts;
@@ -215,6 +218,7 @@ export class ChatController implements vscode.Disposable {
         private readonly _writeIsolation: WriteIsolationManager,
         private readonly _childToolFactories: ChildToolFactoryRegistry,
         chatPorts: ChatPlatformPorts,
+        perf: PerfLogger = NOOP_PERF_LOGGER,
     ) {
         this._context = context;
         this._outputChannel = outputChannel;
@@ -223,6 +227,7 @@ export class ChatController implements vscode.Disposable {
         this._sessionPorts = initialSession.ports;
         this._rawStorage = initialSession.rawStorage;
         this._rawRecorderRegistry = initialSession.rawRecorderRegistry;
+        this._perf = perf;
         this._workspaceState = chatPorts.state.workspace;
         this._globalState = chatPorts.state.global;
         this._fileMentions = chatPorts.fileMentions;
@@ -512,7 +517,7 @@ export class ChatController implements vscode.Disposable {
         if (this._activeTabId) this.sendStateSync(this._activeTabId);
     }
 
-    private _createSessionManager(): PiSessionManager {
+    private _createSessionManager(perf: PerfLogger = this._perf): PiSessionManager {
         return new PiSessionManager(
             this._sessionLogger,
             this._sessionSecrets,
@@ -523,6 +528,7 @@ export class ChatController implements vscode.Disposable {
             this._sessionPorts,
             this._rawStorage,
             this._rawRecorderRegistry,
+            perf,
         );
     }
 
@@ -676,25 +682,37 @@ export class ChatController implements vscode.Disposable {
     }
 
     private async _createTabState(request: ChatHostTabRequest): Promise<TabState> {
-        const session = this._createSessionManager();
+        const tabPerfId = `tab-pending-${++this._tabPerfCounter}`;
+        const tabPerf = this._perf.child({ tabId: tabPerfId, tabRequestKind: request.kind });
+        return tabPerf.time('tab.createTabState', () => this._createTabStateInner(request, tabPerf), { kind: request.kind });
+    }
+
+    private async _createTabStateInner(request: ChatHostTabRequest, tabPerf: PerfLogger): Promise<TabState> {
+        const session = this._createSessionManager(tabPerf);
         let checkpoint: CheckpointManager | undefined;
         let diff: DiffManager | undefined;
         let tab: TabState | undefined;
         try {
-            if (request.kind === 'new') await session.initialize();
-            else await session.initializeFromPath(request.sessionPath);
+            if (request.kind === 'new') {
+                await tabPerf.time('tab.session.initialize', () => session.initialize());
+            } else {
+                await tabPerf.time('tab.session.initializeFromPath', () => session.initializeFromPath(request.sessionPath));
+            }
 
-            ({ checkpoint, diff } = this._createFileChangeManagers(session));
-            tab = new TabRuntime({
+            ({ checkpoint, diff } = tabPerf.timeSync(
+                'tab.fileChangeManagers.create',
+                () => this._createFileChangeManagers(session),
+            ));
+            tab = tabPerf.timeSync('tab.runtime.construct', () => new TabRuntime({
                 id: nextTabId(),
                 session,
-                diffManager: diff,
-                checkpointManager: checkpoint,
+                diffManager: diff!,
+                checkpointManager: checkpoint!,
                 projectToolDefault: request.kind === 'new'
                     ? this._getProjectToolSelectionDefault()
                     : undefined,
                 initialTurnCounter: countUserTurns(session.getMessages()),
-            });
+            }));
             if (request.kind === 'sessionPath' && request.name) tab.name = request.name;
             return tab;
         } catch (error) {
@@ -715,12 +733,29 @@ export class ChatController implements vscode.Disposable {
      * is not currently represented by any tab.
      */
     async createTabFromSessionPath(sessionPath: string): Promise<string> {
-        return this._host.createTabFromSessionPath(sessionPath);
+        return vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Window,
+                title: 'Restoring Pi Code chat…',
+            },
+            () => this._host.createTabFromSessionPath(sessionPath),
+        );
     }
 
     /** Public: create a new agent tab. */
     async createTab(): Promise<string> {
-        return this._host.createTab();
+        // Wrap the wait in a VS Code progress notification so the user sees a
+        // "Preparing new Pi Code chat…" spinner in the status bar while the
+        // agent session is being brought up. Without this, clicking "New
+        // chat" produced up to ~3 seconds of dead-air — the editor panel
+        // itself only opens after `_host.createTab()` resolves.
+        return vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Window,
+                title: 'Preparing new Pi Code chat…',
+            },
+            () => this._host.createTab(),
+        );
     }
 
     /** Public: tell the active sidebar view to show the session history list. */
@@ -1615,7 +1650,7 @@ export class ChatController implements vscode.Disposable {
     }
 
     private async _createTab(): Promise<string> {
-        return this._host.createTab();
+        return this.createTab();
     }
 
     private async _closeTab(tabId: string): Promise<void> {

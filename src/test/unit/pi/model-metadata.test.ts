@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { isContextUsageEstimated } from '../../../pi/context-usage';
 import {
     applyCodexCatalogMetadata,
@@ -6,8 +6,17 @@ import {
     parseCodexModelCatalog,
     refreshModelMetadata,
 } from '../../../pi/model-metadata';
+import {
+    _resetCodexCatalogCacheForTests,
+    getCachedCodexCatalog,
+    setCachedCodexCatalog,
+} from '../../../pi/codex-catalog-cache';
 
 describe('provider model metadata', () => {
+    beforeEach(() => {
+        _resetCodexCatalogCacheForTests();
+    });
+
     it('uses the published direct OpenAI API window without hardcoding Codex', () => {
         const models = ['sol', 'terra', 'luna'].flatMap(variant => [
             model('openai-codex', `gpt-5.6-${variant}`, 372_000),
@@ -90,6 +99,58 @@ describe('provider model metadata', () => {
     it('rejects model payloads without usable context metadata', () => {
         expect(() => parseCodexModelCatalog(null)).toThrow('not an object');
         expect(() => parseCodexModelCatalog({ models: [] })).toThrow('no context metadata');
+    });
+
+    it('reuses the persisted Codex catalog without hitting the network', async () => {
+        const token = jwt({
+            'https://api.openai.com/auth': { chatgpt_account_id: 'account-cache' },
+        });
+        const authStorage = { getApiKey: vi.fn().mockResolvedValue(token) };
+        const fetchImpl = vi.fn();
+        setCachedCodexCatalog('account-cache', [{ slug: 'gpt-5.6-sol', contextWindow: 272_000 }]);
+        const models = [model('openai-codex', 'gpt-5.6-sol', 372_000)];
+
+        expect(await refreshModelMetadata(
+            { getAll: () => models } as any,
+            authStorage as any,
+            undefined,
+            fetchImpl as any,
+        )).toBe(1);
+        expect(models[0].contextWindow).toBe(272_000);
+        expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('serves stale Codex catalog immediately and refreshes it in the background', async () => {
+        const token = jwt({
+            'https://api.openai.com/auth': { chatgpt_account_id: 'account-stale' },
+        });
+        const authStorage = { getApiKey: vi.fn().mockResolvedValue(token) };
+        const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+            models: [{ slug: 'gpt-5.6-sol', context_window: 300_000 }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+        // Seed a very old entry so the freshness check treats it as stale.
+        setCachedCodexCatalog('account-stale', [{ slug: 'gpt-5.6-sol', contextWindow: 272_000 }]);
+        const seeded = getCachedCodexCatalog('account-stale');
+        if (seeded) seeded.capturedAt = Date.now() - (48 * 60 * 60_000);
+        const models = [model('openai-codex', 'gpt-5.6-sol', 372_000)];
+
+        // refreshModelMetadata resolves synchronously with the stale value.
+        await refreshModelMetadata(
+            { getAll: () => models } as any,
+            authStorage as any,
+            undefined,
+            fetchImpl as any,
+        );
+        expect(models[0].contextWindow).toBe(272_000);
+
+        // Yield so the background revalidation completes and mutates the model.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(models[0].contextWindow).toBe(300_000);
+        const refreshed = getCachedCodexCatalog('account-stale');
+        expect(refreshed?.models[0].contextWindow).toBe(300_000);
     });
 });
 

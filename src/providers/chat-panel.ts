@@ -147,6 +147,7 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
     <title>Pi Code</title>
 </head>
 <body data-mode="panel">
+    ${buildInitialLoadingOverlay('Restoring chat…')}
     <div id="app"
          data-icons-uri="${iconsUri}"
          data-mode="panel"
@@ -155,6 +156,32 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
 </body>
 </html>`;
     }
+}
+
+/**
+ * HTML fragment for the full-viewport loading overlay shown while the
+ * webview waits for its first `stateSync`. Rendered before the main.js
+ * bundle even loads, so the user never sees a blank editor tab while the
+ * Pi session bring-up is in flight. Removed by `main.ts` once the initial
+ * agent state arrives.
+ */
+export function buildInitialLoadingOverlay(label: string): string {
+    return `<div id="initial-loading" role="status" aria-live="polite">
+        <div class="initial-loading-card">
+            <div class="initial-loading-spinner" aria-hidden="true"></div>
+            <div class="initial-loading-label">${escapeHtml(label)}</div>
+            <div class="initial-loading-sublabel">Preparing the Pi agent…</div>
+        </div>
+    </div>`;
+}
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 /**

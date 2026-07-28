@@ -2607,3 +2607,61 @@ body[data-mode="panel"] .input-container {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* Full-viewport loading overlay shown from the moment the webview HTML is
+   parsed until the first stateSync arrives from the extension host. Hides
+   the "blank editor tab" period during a) Pi session bring-up and b) panel
+   restoration across a window reload. Removed by main.ts on first state
+   sync. Sits above the app content so it works whether the skeleton has
+   rendered yet or not. */
+#initial-loading {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--vscode-editor-background);
+    z-index: 9999;
+    opacity: 1;
+    transition: opacity 180ms ease-out;
+    pointer-events: none;
+}
+
+#initial-loading.hiding {
+    opacity: 0;
+}
+
+.initial-loading-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 24px 40px;
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-font-family);
+}
+
+.initial-loading-spinner {
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
+    border-top-color: var(--vscode-focusBorder, #007acc);
+    border-radius: 50%;
+    animation: initialLoadingSpin 900ms linear infinite;
+}
+
+.initial-loading-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--vscode-foreground);
+}
+
+.initial-loading-sublabel {
+    font-size: 12px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.75;
+}
+
+@keyframes initialLoadingSpin {
+    to { transform: rotate(360deg); }
+}

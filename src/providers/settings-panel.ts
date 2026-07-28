@@ -261,6 +261,8 @@ export class SettingsPanel {
             subagentsMaxConcurrentPerChat: config.get<number>('subagents.maxConcurrentPerChat', 2),
             mcpImportClaudeCode: config.get<boolean>('mcp.importClaudeCode', false),
             lspEnabled: config.get<boolean>('lsp.enabled', false),
+            perfEnabled: config.get<boolean>('perf.enabled', false),
+            prewarmFull: config.get<boolean>('prewarm.full', false),
             userMessageGlowColor: config.get<string>('userMessageGlowColor', '#00aaff'),
             userMessageGlowOpacity: config.get<number>('userMessageGlowOpacity', 40),
             oauthProviders,

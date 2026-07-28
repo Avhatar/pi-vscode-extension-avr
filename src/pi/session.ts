@@ -1,6 +1,7 @@
 import * as process from 'node:process';
 import type { AgentSession, AgentSessionEvent, ModelRegistry, ResourceLoader } from '@earendil-works/pi-coding-agent';
 import type { Logger } from '../core/ports/logger';
+import { NOOP_PERF_LOGGER, type PerfLogger } from '../core/ports/perf-logger';
 import {
     DEFAULT_SESSION_RUNTIME_PORTS,
     type SecretStore,
@@ -104,6 +105,7 @@ export class PiSessionManager {
         private readonly _ports: SessionRuntimePorts = DEFAULT_SESSION_RUNTIME_PORTS,
         private readonly _rawStorage?: RawStoragePort,
         private readonly _rawRecorderRegistry?: RawRecorderRegistry,
+        private readonly _perf: PerfLogger = NOOP_PERF_LOGGER,
     ) {
         this._outputChannel = outputChannel;
         this._secrets = secrets;
@@ -127,6 +129,10 @@ export class PiSessionManager {
 
     get logger(): Logger {
         return this._outputChannel;
+    }
+
+    get perf(): PerfLogger {
+        return this._perf;
     }
 
     get ports(): SessionRuntimePorts {
@@ -176,16 +182,16 @@ export class PiSessionManager {
     }
 
     async initialize(): Promise<void> {
-        return this._runLifecycleTransition(async () => {
+        return this._perf.time('session.initialize', async () => this._runLifecycleTransition(async () => {
             this._outputChannel.appendLine('Initializing Pi session...');
             const state = await this._runtime.start(() => this._createSessionRuntime('initial'));
             await this._completeCandidateActivation(async () => {
-                await this._activateSessionRuntime(state);
+                await this._perf.time('session.activateRuntime', () => this._activateSessionRuntime(state));
 
                 if (state.modelFallbackMessage) {
                     this._outputChannel.appendLine(`Model fallback: ${state.modelFallbackMessage}`);
                 }
-                await this._applyDefaultSettings(state.session);
+                await this._perf.time('session.applyDefaultSettings', () => this._applyDefaultSettings(state.session));
             });
 
             // Initial todo visibility is decided by the controller from the
@@ -200,7 +206,7 @@ export class PiSessionManager {
             this._outputChannel.appendLine(
                 `Pi session initialized. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
             );
-        });
+        }));
     }
 
     /**
@@ -305,7 +311,17 @@ export class PiSessionManager {
         kind: SessionCreationKind,
         sessionPath?: string,
     ): Promise<CreatedSessionRuntime> {
-        const { createAgentSession, SessionManager: SM } = await import('@earendil-works/pi-coding-agent');
+        return this._perf.time('session.createRuntime', () => this._createSessionRuntimeInner(kind, sessionPath), { kind });
+    }
+
+    private async _createSessionRuntimeInner(
+        kind: SessionCreationKind,
+        sessionPath?: string,
+    ): Promise<CreatedSessionRuntime> {
+        const { createAgentSession, SessionManager: SM } = await this._perf.time(
+            'session.createRuntime.sdkImport',
+            () => import('@earendil-works/pi-coding-agent'),
+        );
         const cwd = this._getCwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
@@ -315,12 +331,21 @@ export class PiSessionManager {
 
         let authStorage;
         if (kind === 'initial' || kind === 'restore') {
-            authStorage = await getAuthStorage(this._secrets);
-            this._modelRegistry = await getModelRegistry(
-                (message) => this._outputChannel.appendLine(message),
+            authStorage = await this._perf.time(
+                'session.createRuntime.getAuthStorage',
+                () => getAuthStorage(this._secrets),
+            );
+            this._modelRegistry = await this._perf.time(
+                'session.createRuntime.getModelRegistry',
+                () => getModelRegistry(
+                    (message) => this._outputChannel.appendLine(message),
+                ),
             );
         } else {
-            await refreshModelRegistry((message) => this._outputChannel.appendLine(message));
+            await this._perf.time(
+                'session.createRuntime.refreshModelRegistry',
+                () => refreshModelRegistry((message) => this._outputChannel.appendLine(message)),
+            );
         }
 
         if ((kind === 'restore' || kind === 'load') && !sessionPath) {
@@ -333,18 +358,27 @@ export class PiSessionManager {
             let sessionManager;
             let concreteSessionPath: string;
             if (kind === 'initial' || kind === 'new') {
-                sessionManager = SM.create(cwd);
+                sessionManager = this._perf.timeSync('session.createRuntime.sessionManager.create', () => SM.create(cwd));
                 const createdSessionPath = sessionManager.getSessionFile();
                 if (!createdSessionPath) {
                     throw new Error('Writable Pi session did not provide a session file path.');
                 }
-                sessionLock = await this._ports.sessionLocks.acquire(createdSessionPath);
+                sessionLock = await this._perf.time(
+                    'session.createRuntime.sessionLock.acquire',
+                    () => this._ports.sessionLocks.acquire(createdSessionPath),
+                );
                 concreteSessionPath = createdSessionPath;
             } else {
                 // SessionManager.open() may migrate and rewrite an older session, so
                 // existing sessions must be locked before the SDK opens them.
-                sessionLock = await this._ports.sessionLocks.acquire(sessionPath!);
-                sessionManager = SM.open(sessionPath!, undefined);
+                sessionLock = await this._perf.time(
+                    'session.createRuntime.sessionLock.acquire',
+                    () => this._ports.sessionLocks.acquire(sessionPath!),
+                );
+                sessionManager = this._perf.timeSync(
+                    'session.createRuntime.sessionManager.open',
+                    () => SM.open(sessionPath!, undefined),
+                );
                 concreteSessionPath = sessionPath!;
             }
             const allowedTools = kind === 'load'
@@ -353,10 +387,19 @@ export class PiSessionManager {
             // Retire any previous recorder before creating a new one; the
             // previous session file will keep its persisted JSONL and can be
             // resumed later via storage.getNextSeq() when reopened.
-            await this._retireCurrentRawRecorder();
-            candidateRawRecorder = await this._createRawRecorderFor(concreteSessionPath);
-            const resourceLoader = await this._buildResourceLoader(cwd, candidateRawRecorder);
-            authStorage ??= await getAuthStorage(this._secrets);
+            await this._perf.time('session.createRuntime.retireRawRecorder', () => this._retireCurrentRawRecorder());
+            candidateRawRecorder = await this._perf.time(
+                'session.createRuntime.createRawRecorder',
+                () => this._createRawRecorderFor(concreteSessionPath),
+            );
+            const resourceLoader = await this._perf.time(
+                'session.createRuntime.buildResourceLoader',
+                () => this._buildResourceLoader(cwd, candidateRawRecorder),
+            );
+            authStorage ??= await this._perf.time(
+                'session.createRuntime.getAuthStorage',
+                () => getAuthStorage(this._secrets),
+            );
 
             const opts: any = {
                 cwd,
@@ -377,9 +420,12 @@ export class PiSessionManager {
                 opts.onResponse = (response: unknown) => recorder.record('stream_response', response);
             }
 
-            const { session, modelFallbackMessage } = await createAgentSession(opts);
+            const { session, modelFallbackMessage } = await this._perf.time(
+                'session.createRuntime.createAgentSession',
+                () => createAgentSession(opts),
+            );
             candidateSession = session;
-            await this._bindExtensions(session);
+            await this._perf.time('session.createRuntime.bindExtensions', () => this._bindExtensions(session));
             if (candidateRawRecorder) {
                 this._currentRawRecorder = candidateRawRecorder;
             }
@@ -500,7 +546,7 @@ export class PiSessionManager {
             rawClaudeCompatMode === 'on' || rawClaudeCompatMode === 'off' ? rawClaudeCompatMode : 'auto';
         const claudeCompatActive = claudeCompatEnabled && claudeCompatMode !== 'off';
         const claudeInfrastructure = claudeCompatActive
-            ? await detectClaudeInfrastructure(cwd, {
+            ? await this._perf.time('session.buildResourceLoader.detectClaudeInfrastructure', () => detectClaudeInfrastructure(cwd, {
                 collectNestedClaudeFiles: true,
                 collectNestedClaudeSkillFiles: true,
                 collapseShimContext: claudeCompatMode !== 'on',
@@ -516,7 +562,7 @@ export class PiSessionManager {
                     CLAUDE_NESTED_SEARCH_EXCLUDE,
                     500,
                 ),
-            })
+            }))
             : ({
                 active: false,
                 activationReasons: [],
@@ -540,14 +586,17 @@ export class PiSessionManager {
             ...(this._childToolFactories?.listNames() ?? []),
         ];
         const claudeAgents = claudeInfrastructure.active
-            ? await indexClaudeAgents({
+            ? await this._perf.time('session.buildResourceLoader.indexClaudeAgents', () => indexClaudeAgents({
                 cwd,
                 workspaceTrusted: this._ports.workspace.isTrusted(),
                 availableChildTools,
                 projectAgentDirectories: claudeInfrastructure.agentDirectories,
-            })
+            }))
             : { definitions: [], diagnostics: [] };
-        const packageAgents = await indexPackageAgents(bundledPackagePaths);
+        const packageAgents = await this._perf.time(
+            'session.buildResourceLoader.indexPackageAgents',
+            () => indexPackageAgents(bundledPackagePaths),
+        );
         const subagentRegistry = new AgentRegistry({
             cwd,
             workspaceTrusted: this._ports.workspace.isTrusted(),
@@ -555,7 +604,10 @@ export class PiSessionManager {
             claudeDefinitions: claudeAgents.definitions,
             additionalDiagnostics: [...packageAgents.diagnostics, ...claudeAgents.diagnostics],
         });
-        const subagentRegistrySnapshot = await subagentRegistry.reload();
+        const subagentRegistrySnapshot = await this._perf.time(
+            'session.buildResourceLoader.subagentRegistry.reload',
+            () => subagentRegistry.reload(),
+        );
         for (const diagnostic of subagentRegistrySnapshot.diagnostics) {
             this._outputChannel.appendLine(
                 `[subagent definition] severity=${diagnostic.severity} code=${diagnostic.code} ` +
@@ -622,7 +674,11 @@ export class PiSessionManager {
                 agentsFiles: retainNativePiContextFiles(base.agentsFiles),
             }),
         });
-        await loader.reload();
+        await this._perf.time(
+            'session.buildResourceLoader.loader.reload',
+            () => loader.reload(),
+            { bundledPackages: bundledPackagePaths.length, additionalSkills: standardSkillPaths.length },
+        );
         if (bundledPackagePaths.length > 0) {
             this._outputChannel.appendLine(
                 `Bundled Pi packages registered: ${bundledPackagePaths.length} (${bundledPackagePaths.map((p) => p.split(/[\\/]/).pop()).join(', ')})`,
@@ -772,21 +828,21 @@ export class PiSessionManager {
     }
 
     async initializeFromPath(sessionPath: string): Promise<void> {
-        return this._runLifecycleTransition(async () => {
+        return this._perf.time('session.initializeFromPath', async () => this._runLifecycleTransition(async () => {
             this._outputChannel.appendLine(`Restoring session from ${sessionPath}...`);
             const state = await this._runtime.start(
                 () => this._createSessionRuntime('restore', sessionPath),
             );
             await this._completeCandidateActivation(async () => {
-                await this._activateSessionRuntime(state);
-                await this._applyDefaultSettings(state.session);
+                await this._perf.time('session.activateRuntime', () => this._activateSessionRuntime(state));
+                await this._perf.time('session.applyDefaultSettings', () => this._applyDefaultSettings(state.session));
             });
 
             const model = state.session.model;
             this._outputChannel.appendLine(
                 `Session restored. Model: ${model ? `${getProviderId(model)}/${model.id}` : 'none'}`
             );
-        });
+        }));
     }
 
     async getSessions(): Promise<SessionInfo[]> {

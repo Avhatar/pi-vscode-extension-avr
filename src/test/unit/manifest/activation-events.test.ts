@@ -18,9 +18,13 @@ describe('extension manifest activation events', () => {
         ]));
     });
 
-    it('activates when the launcher view is opened', () => {
+    it('activates at VS Code startup so the launcher view is ready before the first click', () => {
+        // `onStartupFinished` supersedes the older `onView:pi-code.chat` event
+        // (VS Code auto-generates the view event from `contributes.views`, and
+        // startup activation guarantees the launcher provider is registered
+        // before the user can even click the sidebar icon).
         const activationEvents = readManifest().activationEvents ?? [];
 
-        expect(activationEvents).toContain('onView:pi-code.chat');
+        expect(activationEvents).toContain('onStartupFinished');
     });
 });
