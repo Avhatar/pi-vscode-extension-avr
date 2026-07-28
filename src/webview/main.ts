@@ -10,7 +10,7 @@ import {
 } from './vscode-agent-connection';
 import { mergeStateMessages } from './interrupted-turn-notice';
 import { shouldShowFileUndoView } from './file-undo-view';
-import { prepareUserMessageContent } from './user-message-content';
+import { createAttachmentOnlyPromptText, prepareUserMessageContent } from './user-message-content';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: unknown): void;
@@ -2154,7 +2154,7 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
         }
         const rawText = extractText(msg);
         const images = extractImages(msg);
-        const { cleanText, fileNames } = prepareUserMessageContent(rawText);
+        const { cleanText, fileNames } = prepareUserMessageContent(rawText, images.length);
         const { skillName, userText } = parseSkillFromUserMessage(cleanText);
         if (skillName) {
             const badge = el('span', 'skill-badge');
@@ -4536,20 +4536,10 @@ function sendMessage(): void {
         showError('The current model does not support images. Select an image-capable model before sending image attachments.');
         return;
     }
-    let text: string;
-    if (typedText) {
-        text = typedText;
-    } else if (images?.length && files?.length) {
-        text = 'Please inspect the attached images and files.';
-    } else if (images && images.length > 1) {
-        text = 'Please inspect the attached images.';
-    } else if (images) {
-        text = 'Please inspect the attached image.';
-    } else if (files && files.length > 1) {
-        text = `Please inspect the attached files: ${files.map(f => f.name).join(', ')}.`;
-    } else {
-        text = `Please inspect the attached file: ${files![0].name}.`;
-    }
+    const text = typedText || createAttachmentOnlyPromptText(
+        images?.length ?? 0,
+        files?.map(file => file.name) ?? [],
+    );
     input.value = '';
     input.style.height = 'auto';
     updateInputHighlights(input);

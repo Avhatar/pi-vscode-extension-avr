@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.65.2] - 2026-07-28
+
+### Fixed
+- Attachment-only messages now show just their attachment chips or previews instead of exposing Pi Code's internal inspection instruction in the chat.
+
 ## [0.65.1] - 2026-07-28
 
 ### Fixed
