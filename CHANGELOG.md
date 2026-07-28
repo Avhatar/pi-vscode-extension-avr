@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.65.1] - 2026-07-28
+
+### Fixed
+- Fixed the Raw View toolbar icon remaining visible after Raw Mode recording was disabled.
+
+## [0.65.0] - 2026-07-28
+
+### Added
+- Added a Raw Mode recording toggle in Pi Code Settings, disabled by default; turning it off immediately stops unredacted event and provider-payload capture and hides the Raw View toolbar icon while preserving existing recordings for review or deletion.
+
+### Fixed
+- Fixed the per-session and Clear All Raw Data buttons being blocked by unsupported browser confirmation dialogs inside VS Code webviews.
+
 ## [0.64.0] - 2026-07-28
 
 ### Changed

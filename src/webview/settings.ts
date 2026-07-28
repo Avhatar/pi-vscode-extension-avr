@@ -187,9 +187,27 @@ function renderRawModeSection(): void {
     section.innerHTML = '';
     if (heading) section.appendChild(heading);
 
+    const enabled = currentSettings?.rawModeEnabled ?? false;
+    const toggle = buildToggle(
+        'rawMode.enabled',
+        'Enable Raw Mode recording',
+        enabled,
+        'Record every event and provider payload exchanged with the model. Disabled by default. Changes apply immediately to active and future chats.',
+    );
+    section.appendChild(toggle);
+
     const intro = el('p', 'setting-description');
-    intro.textContent = 'RawMode records every event and provider payload the agent exchanges with the model. Persistence is always on. Nothing is redacted — including auth headers. Data is cleaned up automatically when the corresponding chat is deleted from history.';
+    intro.textContent = enabled
+        ? 'Recording is active. Nothing is redacted — including auth headers. Existing data is removed automatically when the corresponding chat is deleted from history.'
+        : 'Recording is off. Existing Raw Mode data remains available below until you delete it.';
     section.appendChild(intro);
+
+    toggle.querySelector<HTMLInputElement>('input[data-key="rawMode.enabled"]')?.addEventListener('change', (event) => {
+        const checked = (event.currentTarget as HTMLInputElement).checked;
+        if (currentSettings) currentSettings.rawModeEnabled = checked;
+        vscode.postMessage({ type: 'updateSetting', key: 'rawMode.enabled', value: checked });
+        renderRawModeSection();
+    });
 
     if (!rawStats) {
         const loading = el('p', 'setting-description');
@@ -266,11 +284,10 @@ function renderRawModeSection(): void {
         vscode.postMessage({ type: 'rawMode.getStats' });
     });
     document.getElementById('btn-raw-clear-all')?.addEventListener('click', () => {
-        // Native confirm() works inside VS Code webviews and gives a clear
-        // undo-warning without requiring a custom dialog.
-        // eslint-disable-next-line no-alert
-        if (typeof confirm === 'function' && !confirm('Delete all RawMode recordings? This cannot be undone.')) return;
-        vscode.postMessage({ type: 'rawMode.clearAll' });
+        showRawDeleteConfirmation(
+            'Delete all Raw Mode recordings? This cannot be undone.',
+            () => vscode.postMessage({ type: 'rawMode.clearAll' }),
+        );
     });
     section.querySelectorAll<HTMLButtonElement>('[data-raw-open]').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -282,11 +299,46 @@ function renderRawModeSection(): void {
         btn.addEventListener('click', () => {
             const sessionPath = btn.getAttribute('data-raw-clear') ?? '';
             if (!sessionPath) return;
-            // eslint-disable-next-line no-alert
-            if (typeof confirm === 'function' && !confirm(`Delete RawMode recording for:\n${sessionPath}`)) return;
-            vscode.postMessage({ type: 'rawMode.clearSession', sessionPath });
+            showRawDeleteConfirmation(
+                `Delete the Raw Mode recording for ${basename(sessionPath)}? This cannot be undone.`,
+                () => vscode.postMessage({ type: 'rawMode.clearSession', sessionPath }),
+            );
         });
     });
+}
+
+function showRawDeleteConfirmation(message: string, onConfirm: () => void): void {
+    const section = document.getElementById('raw-mode-section');
+    if (!section) return;
+
+    document.getElementById('raw-delete-confirmation')?.remove();
+    const confirmation = el('div', 'raw-delete-confirmation');
+    confirmation.id = 'raw-delete-confirmation';
+    confirmation.setAttribute('role', 'alertdialog');
+    confirmation.setAttribute('aria-labelledby', 'raw-delete-confirmation-message');
+
+    const text = el('span', 'setting-description');
+    text.id = 'raw-delete-confirmation-message';
+    text.textContent = message;
+    confirmation.appendChild(text);
+
+    const actions = el('div', 'raw-delete-confirmation-actions');
+    const confirmButton = el('button', 'setting-btn danger') as HTMLButtonElement;
+    confirmButton.type = 'button';
+    confirmButton.textContent = 'Delete';
+    confirmButton.addEventListener('click', () => {
+        confirmation.remove();
+        onConfirm();
+    });
+    const cancelButton = el('button', 'setting-btn secondary') as HTMLButtonElement;
+    cancelButton.type = 'button';
+    cancelButton.textContent = 'Cancel';
+    cancelButton.addEventListener('click', () => confirmation.remove());
+    actions.append(confirmButton, cancelButton);
+    confirmation.appendChild(actions);
+    section.appendChild(confirmation);
+    confirmButton.focus();
+    confirmation.scrollIntoView({ block: 'nearest' });
 }
 
 function formatBytes(bytes: number): string {

@@ -626,6 +626,24 @@ body {
     padding-top: 8px;
     border-top: 1px dashed var(--vscode-panel-border, rgba(255,255,255,0.1));
 }
+.raw-delete-confirmation {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+    background: var(--vscode-inputValidation-errorBackground, var(--vscode-editor-background));
+}
+.raw-delete-confirmation .setting-description {
+    margin: 0;
+}
+.raw-delete-confirmation-actions {
+    display: flex;
+    gap: 8px;
+}
 .setting-btn.danger {
     background: transparent;
     color: var(--vscode-errorForeground, #f14c4c);

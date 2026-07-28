@@ -51,6 +51,7 @@ export class RawRecorder {
     private _sessionPath: string;
     private _nextSeq: number;
     private _closed = false;
+    private _capturePaused = false;
     private _writeChain: Promise<void> = Promise.resolve();
     /** Buffer of raw JSONL lines pending flush to a concrete session path. */
     private _pendingLines: Array<{ entry: RawEntry; line: string }> = [];
@@ -100,9 +101,9 @@ export class RawRecorder {
      * disk order matches call order even if adapters are async.
      */
     record(kind: RawEntryKind, payload: unknown): RawEntry {
-        if (this._closed) {
-            // Silently drop after close. Callers dispose recorders at session
-            // shutdown, so any late event is expected to be discarded.
+        if (this._closed || this._capturePaused) {
+            // Silently drop after close or during an explicit data-clear
+            // boundary. Pausing prevents an append from racing deletion.
             return {
                 seq: -1,
                 timestampMs: this._now(),
@@ -183,6 +184,52 @@ export class RawRecorder {
                 void line;
             }
         }
+    }
+
+    /**
+     * Delete this recorder's persisted stream without closing the live
+     * recorder. Capture pauses before draining queued writes, then resumes at
+     * sequence zero after deletion so an active chat can start a fresh stream.
+     */
+    async clearPersistedData(): Promise<void> {
+        if (this._closed) {
+            await this._storage.deleteSession(this._sessionPath);
+            return;
+        }
+        this._pauseCaptureForDataClear();
+        try {
+            await this._flushWritesForDataClear();
+            await this._storage.deleteSession(this._sessionPath);
+            this._resetAfterDataClear();
+        } finally {
+            this._resumeCaptureAfterDataClear();
+        }
+    }
+
+    /** Registry-only coordination for an atomic clear across live recorders. */
+    _pauseCaptureForDataClear(): void {
+        this._capturePaused = true;
+    }
+
+    /** Registry-only coordination for an atomic clear across live recorders. */
+    async _flushWritesForDataClear(): Promise<void> {
+        try {
+            await this._writeChain;
+        } catch {
+            // Storage errors are already surfaced as recorder metadata.
+        }
+    }
+
+    /** Registry-only coordination for an atomic clear across live recorders. */
+    _resetAfterDataClear(): void {
+        this._buffer.clear();
+        this._pendingLines = [];
+        this._nextSeq = 0;
+    }
+
+    /** Registry-only coordination for an atomic clear across live recorders. */
+    _resumeCaptureAfterDataClear(): void {
+        if (!this._closed) this._capturePaused = false;
     }
 
     /**
@@ -272,6 +319,7 @@ export class RawRecorderRegistry {
     private readonly _byPath = new Map<string, RawRecorder>();
     private readonly _mountListeners = new Set<(recorder: RawRecorder) => void>();
     private readonly _dataClearedListeners = new Set<(sessionPath: string) => void>();
+    private _dataClearChain: Promise<void> = Promise.resolve();
 
     get(sessionPath: string): RawRecorder | undefined {
         return this._byPath.get(sessionPath);
@@ -313,6 +361,43 @@ export class RawRecorderRegistry {
         if (!recorder) return;
         this._byPath.delete(sessionPath);
         await recorder.close();
+    }
+
+    /** Delete one stream without disposing its active recorder. */
+    clearSessionData(storage: RawStoragePort, sessionPath: string): Promise<void> {
+        return this._enqueueDataClear(async () => {
+            const recorder = this.get(sessionPath);
+            if (recorder) {
+                await recorder.clearPersistedData();
+            } else {
+                await storage.deleteSession(sessionPath);
+            }
+        });
+    }
+
+    /**
+     * Atomically clear all Raw Mode storage while keeping every live recorder
+     * mounted. Capture is paused across the whole registry so no append can
+     * race the directory removal; each recorder resumes from sequence zero.
+     */
+    clearAllData(storage: RawStoragePort): Promise<void> {
+        return this._enqueueDataClear(async () => {
+            const recorders = this.all();
+            for (const recorder of recorders) recorder._pauseCaptureForDataClear();
+            try {
+                await Promise.all(recorders.map((recorder) => recorder._flushWritesForDataClear()));
+                await storage.clearAll();
+                for (const recorder of recorders) recorder._resetAfterDataClear();
+            } finally {
+                for (const recorder of recorders) recorder._resumeCaptureAfterDataClear();
+            }
+        });
+    }
+
+    private _enqueueDataClear(operation: () => Promise<void>): Promise<void> {
+        const run = this._dataClearChain.then(operation, operation);
+        this._dataClearChain = run.catch(() => undefined);
+        return run;
     }
 
     onMount(listener: (recorder: RawRecorder) => void): () => void {

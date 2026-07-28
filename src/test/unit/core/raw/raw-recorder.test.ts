@@ -170,6 +170,20 @@ describe('RawRecorder', () => {
         expect((parsed.payload as any).rawmodeSerializationError).toBeTypeOf('string');
     });
 
+    it('clears persisted data without closing the active recorder', async () => {
+        const rec = new RawRecorder({ storage, now: clock.now, sessionPath: '/s.jsonl' });
+        rec.record('agent_start', { before: true });
+        await rec.clearPersistedData();
+
+        expect(storage.lines.has('/s.jsonl')).toBe(false);
+        const resumed = rec.record('turn_start', { after: true });
+        await rec.close();
+
+        expect(resumed.seq).toBe(0);
+        expect((storage.lines.get('/s.jsonl') ?? []).map(line => JSON.parse(line).kind))
+            .toEqual(['turn_start']);
+    });
+
     it('entriesSince skips already-seen entries', () => {
         const rec = new RawRecorder({ storage, now: clock.now, sessionPath: '/s.jsonl' });
         const e1 = rec.record('agent_start', {});
@@ -193,6 +207,46 @@ describe('RawRecorderRegistry', () => {
         expect(registry.get('/final.jsonl')).toBe(rec);
         await registry.dispose('/final.jsonl');
         expect(registry.get('/final.jsonl')).toBeUndefined();
+    });
+
+    it('clears all persisted data while keeping live recorders registered', async () => {
+        const registry = new RawRecorderRegistry();
+        const storage = new MemoryStorage();
+        const first = new RawRecorder({ storage, sessionPath: '/first.jsonl' });
+        const second = new RawRecorder({ storage, sessionPath: '/second.jsonl' });
+        registry.register(first);
+        registry.register(second);
+        first.record('agent_start', {});
+        second.record('agent_start', {});
+
+        await registry.clearAllData(storage);
+        expect(storage.lines.size).toBe(0);
+        expect(registry.get('/first.jsonl')).toBe(first);
+        expect(registry.get('/second.jsonl')).toBe(second);
+
+        expect(first.record('turn_start', {}).seq).toBe(0);
+        expect(second.record('turn_start', {}).seq).toBe(0);
+        await first.close();
+        await second.close();
+    });
+
+    it('serializes overlapping per-session and clear-all requests', async () => {
+        const registry = new RawRecorderRegistry();
+        const storage = new MemoryStorage();
+        const rec = new RawRecorder({ storage, sessionPath: '/first.jsonl' });
+        registry.register(rec);
+        rec.record('agent_start', {});
+
+        await Promise.all([
+            registry.clearAllData(storage),
+            registry.clearSessionData(storage, '/first.jsonl'),
+        ]);
+
+        expect(registry.get('/first.jsonl')).toBe(rec);
+        expect(rec.record('turn_start', {}).seq).toBe(0);
+        await rec.close();
+        expect((storage.lines.get('/first.jsonl') ?? []).map(line => JSON.parse(line).seq))
+            .toEqual([0]);
     });
 
     it('fires mount listeners on register', () => {

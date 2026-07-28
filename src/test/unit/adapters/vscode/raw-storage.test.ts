@@ -66,6 +66,13 @@ describe('NodeRawStorage', () => {
         expect(res.hasMore).toBe(false);
     });
 
+    it('read-only lookup does not create Raw Mode storage when no recording exists', async () => {
+        const sess = await makeSessionFile(sessionsDir, 'disabled.jsonl');
+
+        expect(await storage.getNextSeq(sess)).toBe(0);
+        await expect(fs.access(storage.getStorageDir())).rejects.toBeTruthy();
+    });
+
     it('getNextSeq returns 0 for empty, and last+1 after appends', async () => {
         const sess = await makeSessionFile(sessionsDir, 'c.jsonl');
         expect(await storage.getNextSeq(sess)).toBe(0);

@@ -28,6 +28,7 @@ export interface SessionSettingValues {
     'todo.promptGuidelines': string | undefined;
     'lsp.enabled': boolean;
     'mcp.importClaudeCode': boolean;
+    'rawMode.enabled': boolean;
     thinkingLevel: string;
     defaultModel: string;
     'subagents.defaultModel': string;

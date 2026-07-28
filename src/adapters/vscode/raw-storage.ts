@@ -145,9 +145,14 @@ export class NodeRawStorage implements RawStoragePort {
         if (meta && meta.lastSeq !== undefined) {
             return meta.lastSeq + 1;
         }
-        // Fall back to scanning the file; also refresh the meta cache while
-        // we are at it so subsequent calls are O(1).
-        const summary = await this._summarize(hash, this._manifest.entries[hash]?.sessionPath ?? sessionPath);
+        // Fall back to scanning the file without writing a sidecar. Session
+        // startup calls this even when recording is disabled, so sequence
+        // lookup must remain read-only.
+        const summary = await this._summarize(
+            hash,
+            this._manifest.entries[hash]?.sessionPath ?? sessionPath,
+            false,
+        );
         return (summary?.lastSeq ?? -1) + 1;
     }
 
@@ -242,7 +247,6 @@ export class NodeRawStorage implements RawStoragePort {
     }
 
     private async _loadManifest(): Promise<void> {
-        await this._ensureRootExists();
         try {
             const buf = await fs.readFile(this._manifestFile, 'utf8');
             const parsed = JSON.parse(buf) as Manifest;
@@ -253,8 +257,10 @@ export class NodeRawStorage implements RawStoragePort {
         } catch {
             // First-time init or corrupted manifest; start fresh.
         }
+        // Read-only operations must not create Raw Mode storage. The first
+        // append/register call persists this empty manifest when recording is
+        // actually enabled and produces data.
         this._manifest = { version: 1, entries: {} };
-        await this._writeManifest();
     }
 
     private async _registerSession(sessionPath: string): Promise<ManifestEntry> {
@@ -319,6 +325,7 @@ export class NodeRawStorage implements RawStoragePort {
     private async _summarize(
         hash: string,
         sessionPath: string,
+        cacheResult: boolean = true,
     ): Promise<(MetaSidecar & { entryCount: number }) | undefined> {
         const filePath = this._filePathForHash(hash);
         let stat;
@@ -350,7 +357,7 @@ export class NodeRawStorage implements RawStoragePort {
             lastEntryAtMs,
             lastSeq,
         };
-        await this._writeMeta(meta);
+        if (cacheResult) await this._writeMeta(meta);
         // Reference sessionPath to keep signature symmetric with future use.
         void sessionPath;
         return meta;

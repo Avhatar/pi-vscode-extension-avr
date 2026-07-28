@@ -420,9 +420,13 @@ export const AgentServerMessageSchema = Type.Union([
     }, StrictObject),
 ]);
 
-export const VsCodeServerMessageSchema = Type.Object({
-    type: Type.Literal('ready'),
-}, StrictObject);
+export const VsCodeServerMessageSchema = Type.Union([
+    Type.Object({ type: Type.Literal('ready') }, StrictObject),
+    Type.Object({
+        type: Type.Literal('rawModeEnabled'),
+        enabled: Type.Boolean(),
+    }, StrictObject),
+]);
 
 export const ServerMessageSchema = Type.Union([
     AgentServerMessageSchema,
@@ -448,6 +452,7 @@ const AgentServerMessageTypeSchema = Type.Union([
 const ServerMessageTypeSchema = Type.Union([
     AgentServerMessageTypeSchema,
     Type.Literal('ready'),
+    Type.Literal('rawModeEnabled'),
 ]);
 
 export const AgentServerEventEnvelopeSchema = Type.Object({

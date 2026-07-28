@@ -185,8 +185,10 @@ export class SettingsPanel {
     private async _clearRawSession(sessionPath: string): Promise<void> {
         if (!this._rawServices) return;
         try {
-            await this._rawServices.registry.dispose(sessionPath);
-            await this._rawServices.storage.deleteSession(sessionPath);
+            await this._rawServices.registry.clearSessionData(
+                this._rawServices.storage,
+                sessionPath,
+            );
             this._rawServices.registry.notifyDataCleared(sessionPath);
         } finally {
             await this._sendRawStats();
@@ -197,12 +199,13 @@ export class SettingsPanel {
         if (!this._rawServices) return;
         try {
             const summaries = await this._rawServices.storage.list();
-            for (const s of summaries) {
-                try { await this._rawServices.registry.dispose(s.sessionPath); } catch { /* ignore */ }
-            }
-            await this._rawServices.storage.clearAll();
-            for (const s of summaries) {
-                this._rawServices.registry.notifyDataCleared(s.sessionPath);
+            const clearedPaths = new Set([
+                ...summaries.map((summary) => summary.sessionPath),
+                ...this._rawServices.registry.all().map((recorder) => recorder.sessionPath),
+            ]);
+            await this._rawServices.registry.clearAllData(this._rawServices.storage);
+            for (const sessionPath of clearedPaths) {
+                this._rawServices.registry.notifyDataCleared(sessionPath);
             }
         } finally {
             await this._sendRawStats();
@@ -261,6 +264,7 @@ export class SettingsPanel {
             subagentsMaxConcurrentPerChat: config.get<number>('subagents.maxConcurrentPerChat', 2),
             mcpImportClaudeCode: config.get<boolean>('mcp.importClaudeCode', false),
             lspEnabled: config.get<boolean>('lsp.enabled', false),
+            rawModeEnabled: config.get<boolean>('rawMode.enabled', false),
             perfEnabled: config.get<boolean>('perf.enabled', false),
             prewarmFull: config.get<boolean>('prewarm.full', false),
             userMessageGlowColor: config.get<string>('userMessageGlowColor', '#00aaff'),

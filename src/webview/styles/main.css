@@ -102,6 +102,9 @@ body[data-mode="panel"] .tab-strip,
     align-items: center;
     gap: 4px;
 }
+.panel-toolbar .panel-toolbar-btn[hidden] {
+    display: none;
+}
 .panel-toolbar .panel-toolbar-btn:hover {
     background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08));
 }

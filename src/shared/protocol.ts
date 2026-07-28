@@ -76,6 +76,7 @@ export interface SettingsData {
     subagentsMaxConcurrentPerChat: number;
     mcpImportClaudeCode: boolean;
     lspEnabled: boolean;
+    rawModeEnabled: boolean;
     perfEnabled: boolean;
     prewarmFull: boolean;
     userMessageGlowColor: string;

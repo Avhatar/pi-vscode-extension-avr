@@ -39,7 +39,7 @@ describe('Protocol types', () => {
             'turnCompleted', 'error',
         ] as const;
         const platformServerTypes = [] as const;
-        const vsCodeServerTypes = ['ready'] as const;
+        const vsCodeServerTypes = ['ready', 'rawModeEnabled'] as const;
 
         type AgentClientTypes = Expect<Equal<typeof agentClientTypes[number], AgentClientMessage['type']>>;
         type PlatformClientTypes = Expect<Equal<typeof platformClientTypes[number], PlatformClientMessage['type']>>;
@@ -69,7 +69,7 @@ describe('Protocol types', () => {
             ...agentServerTypes,
             ...platformServerTypes,
             ...vsCodeServerTypes,
-        ]).toHaveLength(14);
+        ]).toHaveLength(15);
     });
 
     it('client messages serialize correctly', () => {
@@ -106,6 +106,7 @@ describe('Protocol types', () => {
 
         const messages: ServerMessage[] = [
             { type: 'ready' },
+            { type: 'rawModeEnabled', enabled: false },
             { type: 'stateSync', state },
             { type: 'error', message: 'something went wrong' },
             { type: 'models', models: [{ provider: 'ollama', id: 'test', name: 'Test' }] },

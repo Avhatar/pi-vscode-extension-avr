@@ -4,8 +4,8 @@ import type { RawRecorder } from '../core/raw/raw-recorder';
 
 /**
  * Inline Pi extension that mirrors every event exposed via {@link ExtensionAPI}
- * into the shared {@link RawRecorder}. The recorder captures everything: system
- * prompts, tool schemas, message history, provider request payload, provider
+ * into the shared {@link RawRecorder} while its capture gate is enabled. It
+ * captures system prompts, tool schemas, message history, provider request payload, provider
  * response headers, streamed chunks, tool calls/results — verbatim, in the
  * order events fire.
  *
@@ -14,11 +14,14 @@ import type { RawRecorder } from '../core/raw/raw-recorder';
  * rewritten). If Pi later adds a new event kind, expand
  * {@link RAW_HARNESS_EVENT_KINDS} rather than editing this factory.
  */
-export function createRawRecorderExtension(recorder: RawRecorder): (pi: ExtensionAPI) => void {
+export function createRawRecorderExtension(
+    recorder: RawRecorder,
+    shouldRecord: () => boolean = () => true,
+): (pi: ExtensionAPI) => void {
     return (pi) => {
         for (const kind of RAW_HARNESS_EVENT_KINDS) {
             const handler = (event: unknown) => {
-                recorder.record(kind, event);
+                if (shouldRecord()) recorder.record(kind, event);
                 return undefined as any;
             };
             // ExtensionAPI.on is overloaded per event kind; a runtime cast is

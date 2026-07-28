@@ -12,6 +12,7 @@ import {
 
 const serverMessages: ServerMessage[] = [
     { type: 'ready' },
+    { type: 'rawModeEnabled', enabled: false },
     {
         type: 'stateSync',
         state: {
@@ -184,7 +185,7 @@ describe('server protocol runtime validation', () => {
     it('accepts every current server message payload through an event envelope', () => {
         const sequencer = new AgentEventSequencer('client-1');
 
-        expect(serverMessages).toHaveLength(14);
+        expect(serverMessages).toHaveLength(15);
         for (const message of serverMessages) {
             expect(isAgentEventEnvelope(sequencer.create(message, 'tab-1')), message.type).toBe(true);
         }

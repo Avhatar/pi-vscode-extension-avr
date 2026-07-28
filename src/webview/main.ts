@@ -171,6 +171,8 @@ const BUILTIN_SLASH_COMMANDS: SlashMenuItem[] = [
     },
 ];
 
+let rawModeEnabled = false;
+
 const state: {
     messages: any[];
     isStreaming: boolean;
@@ -271,6 +273,10 @@ window.addEventListener('pagehide', () => {
 function handleMessage(msg: ServerMessage): void {
     switch (msg.type) {
         case 'ready':
+            break;
+        case 'rawModeEnabled':
+            rawModeEnabled = msg.enabled;
+            updateRawModeToolbarVisibility();
             break;
         case 'stateSync':
             applyStateSync(msg.state);
@@ -594,6 +600,8 @@ function buildPanelToolbar(): HTMLElement {
     wrap.appendChild(historyBtn);
 
     const rawBtn = el('button', 'panel-toolbar-btn');
+    rawBtn.id = 'panel-toolbar-raw';
+    rawBtn.hidden = !rawModeEnabled;
     rawBtn.title = 'Open Raw View — every event and provider payload for this chat';
     rawBtn.innerHTML = `<img class="panel-toolbar-icon-img" src="${iconsBaseUri}/magnifying-glass.png" alt="raw view">`;
     rawBtn.addEventListener('click', () => {
@@ -605,6 +613,11 @@ function buildPanelToolbar(): HTMLElement {
     wrap.appendChild(spacer);
 
     return wrap;
+}
+
+function updateRawModeToolbarVisibility(): void {
+    const rawButton = document.getElementById('panel-toolbar-raw');
+    if (rawButton) rawButton.hidden = !rawModeEnabled;
 }
 
 function render(): void {

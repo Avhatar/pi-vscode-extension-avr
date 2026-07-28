@@ -77,13 +77,19 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
                     this._controller.markActiveTab(this._tabId);
                 }
             }),
+            vscode.workspace.onDidChangeConfiguration((e) => {
+                if (e.affectsConfiguration('pi-code.rawMode.enabled')) {
+                    this.post({ type: 'rawModeEnabled', enabled: this._isRawModeEnabled() });
+                }
+            }),
             this._panel.onDidDispose(() => this.dispose()),
         );
 
         this._controller.addSink(this);
         this._controller.registerPanel(this._tabId, this);
-        // Send an initial 'ready' to mirror the sidebar's bootstrap, then push state.
+        // Send initial host state to mirror the sidebar's bootstrap, then push chat state.
         this.post({ type: 'ready' });
+        this.post({ type: 'rawModeEnabled', enabled: this._isRawModeEnabled() });
         this._controller.sendStateSync(this._tabId);
     }
 
@@ -111,6 +117,10 @@ export class ChatPanel implements ChatViewSink, vscode.Disposable {
         // The webview panel itself is disposed by VS Code when the user closes
         // the editor tab; calling dispose() again here is a no-op for that path.
         try { this._panel.dispose(); } catch { /* already disposed */ }
+    }
+
+    private _isRawModeEnabled(): boolean {
+        return vscode.workspace.getConfiguration('pi-code').get<boolean>('rawMode.enabled', false);
     }
 
     private _getHtml(webview: vscode.Webview): string {

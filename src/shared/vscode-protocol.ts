@@ -6,6 +6,7 @@ export type VsCodeClientMessage =
     | { type: 'openChangelog' }
     | { type: 'openRawView' };
 
-/** Lifecycle messages specific to the VS Code webview transport. */
+/** Lifecycle and host-configuration messages specific to the VS Code webview transport. */
 export type VsCodeServerMessage =
-    | { type: 'ready' };
+    | { type: 'ready' }
+    | { type: 'rawModeEnabled'; enabled: boolean };

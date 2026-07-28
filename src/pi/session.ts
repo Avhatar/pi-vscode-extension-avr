@@ -116,7 +116,7 @@ export class PiSessionManager {
         this._backgroundNotificationUnsubscribe = this.events.onAll((event) => {
             if (event.type === 'agent_end') this._flushBackgroundSubagentNotifications();
             const recorder = this._currentRawRecorder;
-            if (recorder && this._rawSessionOnlyEventKinds.has(event.type)) {
+            if (recorder && this._isRawModeEnabled() && this._rawSessionOnlyEventKinds.has(event.type)) {
                 // Session-listener-only kinds are relayed through the shared
                 // EventRouter so nothing is lost when ExtensionAPI does not
                 // emit them. Overlapping harness kinds arrive separately from
@@ -143,12 +143,12 @@ export class PiSessionManager {
         return this._secrets;
     }
 
-    /** Shared JSONL storage for RawMode. Undefined when the host does not enable RawMode. */
+    /** Shared JSONL storage for RawMode. Undefined when the host does not provide RawMode services. */
     get rawStorage(): RawStoragePort | undefined {
         return this._rawStorage;
     }
 
-    /** Process-wide RawMode recorder registry. Undefined when RawMode is disabled. */
+    /** Process-wide RawMode recorder registry. Undefined when the host does not provide RawMode services. */
     get rawRecorderRegistry(): RawRecorderRegistry | undefined {
         return this._rawRecorderRegistry;
     }
@@ -414,10 +414,15 @@ export class PiSessionManager {
             if (candidateRawRecorder) {
                 // Raw stream chunks + final response go through SimpleStreamOptions,
                 // not through pi.on(...), so they are captured here instead of in
-                // the inline Pi extension factory.
+                // the inline Pi extension factory. The setting is read for every
+                // callback so active sessions stop and resume capture immediately.
                 const recorder = candidateRawRecorder;
-                opts.onPayload = (chunk: unknown) => recorder.record('stream_chunk', chunk);
-                opts.onResponse = (response: unknown) => recorder.record('stream_response', response);
+                opts.onPayload = (chunk: unknown) => {
+                    if (this._isRawModeEnabled()) recorder.record('stream_chunk', chunk);
+                };
+                opts.onResponse = (response: unknown) => {
+                    if (this._isRawModeEnabled()) recorder.record('stream_response', response);
+                };
             }
 
             const { session, modelFallbackMessage } = await this._perf.time(
@@ -465,12 +470,18 @@ export class PiSessionManager {
             sessionPath: concreteSessionPath,
             initialSeq,
         });
-        recorder.record('recorder_meta', {
-            kind: 'recorder_start',
-            capturedAtMs: Date.now(),
-        });
+        if (this._isRawModeEnabled()) {
+            recorder.record('recorder_meta', {
+                kind: 'recorder_start',
+                capturedAtMs: Date.now(),
+            });
+        }
         this._rawRecorderRegistry?.register(recorder);
         return recorder;
+    }
+
+    private _isRawModeEnabled(): boolean {
+        return this._ports.settings.get('rawMode.enabled', false);
     }
 
     private async _retireCurrentRawRecorder(): Promise<void> {
@@ -621,7 +632,7 @@ export class PiSessionManager {
                     this._ports.codexUsage.updateFromHeaders(headers);
                 },
             }),
-            ...(rawRecorder ? [createRawRecorderExtension(rawRecorder)] : []),
+            ...(rawRecorder ? [createRawRecorderExtension(rawRecorder, () => this._isRawModeEnabled())] : []),
             createTodoExtension(this.todoStore, todoGuidelines),
             ...(lspExtension ? [lspExtension] : []),
             createToolSelectionGuard((gateway, target) => {

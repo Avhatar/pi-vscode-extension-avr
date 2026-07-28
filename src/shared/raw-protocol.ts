@@ -1,8 +1,9 @@
 /**
  * RawMode wire types.
  *
- * RawMode is a developer view that records every event and provider payload
- * exchanged between the Pi agent and the model. These types describe:
+ * RawMode is an opt-in developer view that records every event and provider
+ * payload exchanged between the Pi agent and the model while enabled. These
+ * types describe:
  *   - the shape of a single recorded entry;
  *   - per-session storage summaries surfaced in Settings;
  *   - the message unions carried between the RawMode webview and the
