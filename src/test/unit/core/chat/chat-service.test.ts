@@ -494,22 +494,32 @@ describe('portable ChatService direct prompt lifecycle', () => {
         expect(callbacks.prompt).not.toHaveBeenCalled();
     });
 
-    it('handles direct compact before decoration or turn mutation and publishes after rejection', async () => {
+    it('acknowledges direct compact without waiting for SDK compaction to finish', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
         const order: string[] = [];
+        let finishCompact!: () => void;
+        let acknowledged = false;
         const callbacks = createDirectPromptCallbacks({
             prepareRequest: vi.fn(() => order.push('prepare-cache')),
-            compact: vi.fn(async () => {
+            compact: vi.fn(() => new Promise<void>((resolve) => {
                 order.push('compact');
-                throw new Error('session too small');
-            }),
+                finishCompact = resolve;
+            })),
             publishState: vi.fn(() => order.push('publish')),
         });
 
-        await expect(service.dispatchDirectPrompt(tab, {
+        const dispatch = service.dispatchDirectPrompt(tab, {
             text: '/compact focus on tests',
-        }, callbacks)).resolves.toEqual({ kind: 'compacted' });
+        }, callbacks).then((result) => {
+            acknowledged = true;
+            return result;
+        });
+
+        await Promise.resolve();
+        expect(acknowledged).toBe(true);
+        await expect(dispatch).resolves.toEqual({ kind: 'compacted' });
+        finishCompact();
 
         expect(order).toEqual(['prepare-cache', 'compact', 'publish']);
         expect(callbacks.prepareRequest).toHaveBeenCalledOnce();

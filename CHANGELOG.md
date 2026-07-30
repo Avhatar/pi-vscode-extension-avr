@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.65.3] - 2026-07-30
+
+### Fixed
+- Running `/compact` no longer shows a misleading VS Code request timeout while compaction is still in progress.
+- Scrolling upward during an agent turn now keeps the chat at the user's reading position unless the user is already at the bottom.
+
 ## [0.65.2] - 2026-07-28
 
 ### Fixed

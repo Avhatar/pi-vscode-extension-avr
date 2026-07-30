@@ -11,6 +11,7 @@ import {
 import { mergeStateMessages } from './interrupted-turn-notice';
 import { shouldShowFileUndoView } from './file-undo-view';
 import { createAttachmentOnlyPromptText, prepareUserMessageContent } from './user-message-content';
+import { shouldResumeAutoFollow } from './scroll-follow-state';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: unknown): void;
@@ -5191,10 +5192,14 @@ function scrollToBottom(force = false): void {
     lastScrollTop = messages.scrollTop;
 }
 
-function isNearBottom(): boolean {
+function isAtAutoFollowResumePoint(): boolean {
     const messages = document.getElementById('messages');
     if (!messages) return true;
-    return messages.scrollHeight - messages.scrollTop - messages.clientHeight < 50;
+    return shouldResumeAutoFollow({
+        scrollHeight: messages.scrollHeight,
+        scrollTop: messages.scrollTop,
+        clientHeight: messages.clientHeight,
+    });
 }
 
 function updateScrollButton(): void {
@@ -5244,7 +5249,7 @@ function bindScrollListener(): void {
             // inside the near-bottom threshold. This lets the user escape
             // auto-follow mode while new content is still arriving.
             userHasScrolled = true;
-        } else if (isNearBottom()) {
+        } else if (isAtAutoFollowResumePoint()) {
             userHasScrolled = false;
         }
         lastScrollTop = currentScrollTop;

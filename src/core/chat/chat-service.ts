@@ -352,7 +352,9 @@ export class ChatService {
         if (compactInstructions !== null) {
             callbacks.prepareRequest();
             try {
-                await callbacks.compact(compactInstructions);
+                void callbacks.compact(compactInstructions).catch(() => {
+                    // The concrete session reports compaction failures through its event stream.
+                });
             } catch {
                 // The concrete session reports compaction failures through its event stream.
             }
