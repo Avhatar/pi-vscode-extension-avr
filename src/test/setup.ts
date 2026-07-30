@@ -1,38 +1,33 @@
-import { beforeAll, afterAll } from 'vitest';
-import type { AgentSession, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import type { AgentSession, ModelRuntime } from '@earendil-works/pi-coding-agent';
 
 export const TEST_MODEL_PROVIDER = 'ollama';
 export const TEST_MODEL_ID = 'local/Qwen3.6-27B-Coding';
 
-export function getPreferredTestModel(registry: ModelRegistry) {
-    return registry.find(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
+export function getPreferredTestModel(runtime: ModelRuntime) {
+    return runtime.getModel(TEST_MODEL_PROVIDER, TEST_MODEL_ID);
 }
 
-export function getFallbackTestModel(registry: ModelRegistry) {
-    const models = registry.getAvailable();
+export function getFallbackTestModel(runtime: ModelRuntime) {
+    const models = runtime.getAvailableSnapshot();
     if (models.length === 0) {
-        throw new Error('No models available in test registry');
+        throw new Error('No models available in test runtime');
     }
     return models[0];
 }
 
-let _authStorage: any;
-let _modelRegistry: ModelRegistry;
-let _initialized = false;
+let _modelRuntime: ModelRuntime;
 
 export async function initTestInfra() {
-    if (_initialized) { return { authStorage: _authStorage, modelRegistry: _modelRegistry }; }
+    if (_modelRuntime) return { modelRuntime: _modelRuntime };
 
-    const { AuthStorage, ModelRegistry } = await import('@earendil-works/pi-coding-agent');
-    _authStorage = AuthStorage.create();
-    _modelRegistry = ModelRegistry.create(_authStorage);
-    _initialized = true;
-    return { authStorage: _authStorage, modelRegistry: _modelRegistry };
+    const { ModelRuntime: Runtime } = await import('@earendil-works/pi-coding-agent');
+    _modelRuntime = await Runtime.create({ allowModelNetwork: false });
+    return { modelRuntime: _modelRuntime };
 }
 
 export async function createTestSession(cwd?: string): Promise<AgentSession> {
     const { createAgentSession, SessionManager } = await import('@earendil-works/pi-coding-agent');
-    const { authStorage, modelRegistry } = await initTestInfra();
+    const { modelRuntime } = await initTestInfra();
 
     const fs = await import('fs');
     const os = await import('os');
@@ -42,12 +37,11 @@ export async function createTestSession(cwd?: string): Promise<AgentSession> {
     const sessionManager = SessionManager.create(tmpDir);
     const { session } = await createAgentSession({
         cwd: tmpDir,
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         sessionManager,
     });
 
-    const model = getPreferredTestModel(modelRegistry);
+    const model = getPreferredTestModel(modelRuntime);
     if (model) {
         await session.setModel(model);
     }
@@ -55,15 +49,7 @@ export async function createTestSession(cwd?: string): Promise<AgentSession> {
     return session;
 }
 
-export function getModelRegistry(): ModelRegistry {
-    if (!_modelRegistry) { throw new Error('Call initTestInfra() first'); }
-    return _modelRegistry;
+export function getTestModelRuntime(): ModelRuntime {
+    if (!_modelRuntime) throw new Error('Call initTestInfra() first');
+    return _modelRuntime;
 }
-
-beforeAll(async () => {
-    await initTestInfra();
-}, 30_000);
-
-afterAll(() => {
-    _initialized = false;
-});

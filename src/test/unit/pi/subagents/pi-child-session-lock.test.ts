@@ -67,6 +67,11 @@ describe('PiChildSessionFactory session ownership', () => {
             agentId: 'child', signal: new AbortController().signal,
         });
         expect(order.slice(0, 3)).toEqual(['manager:create', 'session:lock', 'agent:create']);
+        expect(sdk.createAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+            modelRuntime: expect.any(Object),
+        }));
+        expect(sdk.createAgentSession.mock.calls[0][0]).not.toHaveProperty('authStorage');
+        expect(sdk.createAgentSession.mock.calls[0][0]).not.toHaveProperty('modelRegistry');
 
         await handle.dispose();
         expectLifecycleOrder(order, ['session:dispose', 'session:unlock']);
@@ -110,9 +115,8 @@ function createFactory(transcriptDirectory: string, sessionLocks: any): PiChildS
     return new PiChildSessionFactory({
         cwd: transcriptDirectory,
         workspaceTrusted: true,
-        authStorage: {} as any,
-        modelRegistry: {
-            find: () => model,
+        modelRuntime: {
+            getModel: () => model,
             hasConfiguredAuth: () => true,
         } as any,
         transcriptDirectory,

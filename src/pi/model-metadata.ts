@@ -1,4 +1,4 @@
-import type { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { extractCodexAccountId } from './codex-auth';
 import {
     getCachedCodexCatalog,
@@ -56,13 +56,12 @@ const catalogRequests = new Map<string, Promise<CodexCatalogModel[]>>();
  * Codex failures are non-fatal: the bundled Pi catalog remains available.
  */
 export async function refreshModelMetadata(
-    registry: Pick<ModelRegistry, 'getAll'>,
-    authStorage: Pick<AuthStorage, 'getApiKey'>,
+    runtime: Pick<ModelRuntime, 'getModels' | 'getAuth'>,
     log?: ModelMetadataLog,
     fetchImpl: typeof fetch = fetch,
 ): Promise<number> {
-    let corrected = applyDocumentedApiMetadata(registry);
-    const accessToken = await authStorage.getApiKey('openai-codex', { includeFallback: false });
+    let corrected = applyDocumentedApiMetadata(runtime);
+    const accessToken = (await runtime.getAuth('openai-codex'))?.auth.apiKey;
     if (!accessToken) return corrected;
 
     let accountId: string;
@@ -86,16 +85,16 @@ export async function refreshModelMetadata(
             // Stale cache: apply the last-known catalog immediately so the
             // caller does not block on the network, then refresh in the
             // background. The refreshed catalog is mutated onto the shared
-            // registry when it arrives, so future reads see updated numbers.
+            // runtime models when it arrives, so future reads see updated numbers.
             catalog = cachedCatalog.models;
-            void refreshCodexCatalogInBackground(registry, accountId, accessToken, log, fetchImpl);
+            void refreshCodexCatalogInBackground(runtime, accountId, accessToken, log, fetchImpl);
         } else {
             // No cached entry — must wait once. Subsequent starts read from
             // the persistent cache instead.
             catalog = await fetchAndCacheCodexCatalog(accountId, accessToken, fetchImpl);
         }
 
-        const updated = applyCodexCatalogMetadata(registry, catalog);
+        const updated = applyCodexCatalogMetadata(runtime, catalog);
         corrected += updated;
         const gpt56 = catalog.find((model) => GPT_56_MODEL_IDS.includes(model.slug as typeof GPT_56_MODEL_IDS[number]));
         if (gpt56) {
@@ -142,7 +141,7 @@ async function fetchAndCacheCodexCatalog(
  * to the caller that already returned with stale data.
  */
 async function refreshCodexCatalogInBackground(
-    registry: Pick<ModelRegistry, 'getAll'>,
+    runtime: Pick<ModelRuntime, 'getModels'>,
     accountId: string,
     accessToken: string,
     log: ModelMetadataLog | undefined,
@@ -150,7 +149,7 @@ async function refreshCodexCatalogInBackground(
 ): Promise<void> {
     try {
         const catalog = await fetchAndCacheCodexCatalog(accountId, accessToken, fetchImpl);
-        applyCodexCatalogMetadata(registry, catalog);
+        applyCodexCatalogMetadata(runtime, catalog);
     } catch (error) {
         log?.(`Codex catalog background refresh failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -158,10 +157,10 @@ async function refreshCodexCatalogInBackground(
 
 /** Apply the documented direct OpenAI API limits in-place. */
 export function applyDocumentedApiMetadata(
-    registry: Pick<ModelRegistry, 'getAll'>,
+    runtime: Pick<ModelRuntime, 'getModels'>,
 ): number {
     let corrected = 0;
-    for (const model of registry.getAll()) {
+    for (const model of runtime.getModels()) {
         const override = DOCUMENTED_API_OVERRIDES.find(candidate =>
             candidate.provider === model.provider
             && candidate.modelIds.includes(model.id)
@@ -176,12 +175,12 @@ export function applyDocumentedApiMetadata(
 
 /** Apply context windows returned by the authenticated Codex catalog. */
 export function applyCodexCatalogMetadata(
-    registry: Pick<ModelRegistry, 'getAll'>,
+    runtime: Pick<ModelRuntime, 'getModels'>,
     catalog: readonly CodexCatalogModel[],
 ): number {
     const bySlug = new Map(catalog.map((model) => [model.slug, model]));
     let corrected = 0;
-    for (const model of registry.getAll()) {
+    for (const model of runtime.getModels()) {
         if (model.provider !== 'openai-codex') continue;
         const remote = bySlug.get(model.id);
         if (!remote || model.contextWindow === remote.contextWindow) continue;

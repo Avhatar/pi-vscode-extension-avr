@@ -1,5 +1,5 @@
 import * as process from 'node:process';
-import type { AgentSession, AgentSessionEvent, ModelRegistry, ResourceLoader } from '@earendil-works/pi-coding-agent';
+import type { AgentSession, AgentSessionEvent, CreateAgentSessionOptions, ModelRuntime, ResourceLoader } from '@earendil-works/pi-coding-agent';
 import type { Logger } from '../core/ports/logger';
 import { NOOP_PERF_LOGGER, type PerfLogger } from '../core/ports/perf-logger';
 import {
@@ -21,8 +21,8 @@ import { createRawRecorderExtension } from './raw-recorder-extension';
 import { RawRecorder, RawRecorderRegistry } from '../core/raw/raw-recorder';
 import type { RawStoragePort } from '../core/ports/raw-storage';
 import { RAW_SESSION_ONLY_EVENT_KINDS } from '../shared/raw-protocol';
-import { getAuthStorage, disposeAuthStorage, reloadCredentials } from './auth';
-import { getModelRegistry, getAvailableModels, findModel, refreshModelRegistry, disposeModelRegistry } from './models';
+import { disposeModelRuntime, getModelRuntime, reloadCredentials } from './auth';
+import { findModel, getAvailableModels, prepareModelRuntime, refreshModelRuntime, resetModelRuntimeState } from './models';
 import { createCodexMonitorExtension } from './codex-monitor';
 import { getStandardSkillPaths } from './standard-resources';
 import { createClaudeContextExtension } from './claude-compat/context-extension';
@@ -69,7 +69,7 @@ type SessionCreationKind = 'initial' | 'restore' | 'new' | 'load';
 export class PiSessionManager {
     private static readonly _instances = new Set<PiSessionManager>();
     private readonly _runtime: PiSessionRuntime;
-    private _modelRegistry: ModelRegistry | undefined;
+    private _modelRuntime: ModelRuntime | undefined;
     private _outputChannel: Logger;
     private _secrets: SecretStore | undefined;
     readonly events = new EventRouter();
@@ -329,22 +329,22 @@ export class PiSessionManager {
         // Chdir to the workspace folder so adapters resolve project files correctly.
         try { if (cwd && process.cwd() !== cwd) { process.chdir(cwd); } } catch { /* ignore — non-fatal */ }
 
-        let authStorage;
         if (kind === 'initial' || kind === 'restore') {
-            authStorage = await this._perf.time(
-                'session.createRuntime.getAuthStorage',
-                () => getAuthStorage(this._secrets),
+            this._modelRuntime = await this._perf.time(
+                'session.createRuntime.getModelRuntime',
+                () => getModelRuntime(this._secrets),
             );
-            this._modelRegistry = await this._perf.time(
-                'session.createRuntime.getModelRegistry',
-                () => getModelRegistry(
+            await this._perf.time(
+                'session.createRuntime.prepareModelRuntime',
+                () => prepareModelRuntime(
+                    this._modelRuntime!,
                     (message) => this._outputChannel.appendLine(message),
                 ),
             );
         } else {
             await this._perf.time(
-                'session.createRuntime.refreshModelRegistry',
-                () => refreshModelRegistry((message) => this._outputChannel.appendLine(message)),
+                'session.createRuntime.refreshModelRuntime',
+                () => refreshModelRuntime((message) => this._outputChannel.appendLine(message)),
             );
         }
 
@@ -396,33 +396,19 @@ export class PiSessionManager {
                 'session.createRuntime.buildResourceLoader',
                 () => this._buildResourceLoader(cwd, candidateRawRecorder),
             );
-            authStorage ??= await this._perf.time(
-                'session.createRuntime.getAuthStorage',
-                () => getAuthStorage(this._secrets),
+            this._modelRuntime ??= await this._perf.time(
+                'session.createRuntime.getModelRuntime',
+                () => getModelRuntime(this._secrets),
             );
 
-            const opts: any = {
+            const opts: CreateAgentSessionOptions = {
                 cwd,
-                authStorage,
-                modelRegistry: this._modelRegistry,
+                modelRuntime: this._modelRuntime,
                 sessionManager,
                 resourceLoader,
             };
             if (allowedTools.length > 0) {
                 opts.tools = allowedTools;
-            }
-            if (candidateRawRecorder) {
-                // Raw stream chunks + final response go through SimpleStreamOptions,
-                // not through pi.on(...), so they are captured here instead of in
-                // the inline Pi extension factory. The setting is read for every
-                // callback so active sessions stop and resume capture immediately.
-                const recorder = candidateRawRecorder;
-                opts.onPayload = (chunk: unknown) => {
-                    if (this._isRawModeEnabled()) recorder.record('stream_chunk', chunk);
-                };
-                opts.onResponse = (response: unknown) => {
-                    if (this._isRawModeEnabled()) recorder.record('stream_response', response);
-                };
             }
 
             const { session, modelFallbackMessage } = await this._perf.time(
@@ -728,11 +714,11 @@ export class PiSessionManager {
         }
 
         const defaultModel = this._ports.settings.get('defaultModel', '');
-        if (defaultModel && this._modelRegistry) {
-            const available = getAvailableModels(this._modelRegistry);
+        if (defaultModel && this._modelRuntime) {
+            const available = getAvailableModels(this._modelRuntime);
             const match = available.find(m => m.id === defaultModel);
             if (match) {
-                const model = findModel(this._modelRegistry, match.provider, match.id);
+                const model = findModel(this._modelRuntime, match.provider, match.id);
                 if (model) {
                     try {
                         await session.setModel(model);
@@ -801,10 +787,10 @@ export class PiSessionManager {
     }
 
     async setModel(provider: string, modelId: string): Promise<void> {
-        if (!this._session || !this._modelRegistry) {
+        if (!this._session || !this._modelRuntime) {
             throw new Error('Session not initialized');
         }
-        const model = findModel(this._modelRegistry, provider, modelId);
+        const model = findModel(this._modelRuntime, provider, modelId);
         if (!model) {
             throw new Error(`Model not found: ${provider}/${modelId}`);
         }
@@ -887,8 +873,8 @@ export class PiSessionManager {
     }
 
     getModels(): ModelInfo[] {
-        if (!this._modelRegistry) { return []; }
-        return getAvailableModels(this._modelRegistry);
+        if (!this._modelRuntime) { return []; }
+        return getAvailableModels(this._modelRuntime);
     }
 
     getCurrentModel(): ModelInfo | undefined {
@@ -902,11 +888,11 @@ export class PiSessionManager {
         };
     }
 
-    /** Copy refreshed registry metadata onto an already-open session model. */
+    /** Copy refreshed runtime metadata onto an already-open session model. */
     refreshCurrentModelMetadata(): boolean {
         const current: any = this._session?.model;
-        if (!current || !this._modelRegistry) return false;
-        const refreshed: any = findModel(this._modelRegistry, getProviderId(current), current.id);
+        if (!current || !this._modelRuntime) return false;
+        const refreshed: any = findModel(this._modelRuntime, getProviderId(current), current.id);
         if (!refreshed || refreshed.contextWindow === current.contextWindow) return false;
         current.contextWindow = refreshed.contextWindow;
         return true;
@@ -1127,7 +1113,7 @@ export class PiSessionManager {
         const manager = this._subagentManager;
         const session = this._session;
         const parentModel = this.getCurrentModel();
-        if (!manager || !session || !parentModel || !this._modelRegistry) {
+        if (!manager || !session || !parentModel || !this._modelRuntime) {
             throw new Error('Subagent runtime is not ready for this parent session.');
         }
         const snapshot = await registry.reload();
@@ -1140,7 +1126,7 @@ export class PiSessionManager {
 
         const defaultModel = this._ports.settings.get('subagents.defaultModel', '').trim();
         const spec = resolveAgentSpec(registry, invocation, {
-            availableModels: getAvailableModels(this._modelRegistry),
+            availableModels: getAvailableModels(this._modelRuntime),
             parentModel: { provider: parentModel.provider, id: parentModel.id },
             parentThinkingLevel: session.thinkingLevel,
             ...(defaultModel ? { defaultModel } : {}),
@@ -1324,8 +1310,7 @@ export class PiSessionManager {
         this._subagentManagerUnsubscribe = undefined;
         await this._subagentManager?.dispose();
         this._subagentManager = undefined;
-        if (!this._subagentCoordinator || !this._modelRegistry) return;
-        const authStorage = await getAuthStorage(this._secrets);
+        if (!this._subagentCoordinator || !this._modelRuntime) return;
         const parentSessionPath = this._sessionManager?.getSessionFile();
         const restoredRecords = this._subagentStore
             ? await this._subagentStore.loadParent(session.sessionId)
@@ -1336,8 +1321,7 @@ export class PiSessionManager {
         const childFactory = new PiChildSessionFactory({
             cwd,
             workspaceTrusted: this._ports.workspace.isTrusted(),
-            authStorage,
-            modelRegistry: this._modelRegistry,
+            modelRuntime: this._modelRuntime,
             ...(transcriptDirectory ? { transcriptDirectory } : {}),
             ...(parentSessionPath ? { parentSessionPath } : {}),
             ...(this._writeIsolation ? { writeIsolation: this._writeIsolation } : {}),
@@ -1471,8 +1455,8 @@ export class PiSessionManager {
                 firstError ??= error;
             }
         }
-        disposeAuthStorage();
-        disposeModelRegistry();
+        resetModelRuntimeState();
+        disposeModelRuntime();
         if (firstError !== undefined) throw firstError;
     }
 }

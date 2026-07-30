@@ -11,11 +11,11 @@ const sdkMocks = vi.hoisted(() => ({
 }));
 
 const authMocks = vi.hoisted(() => ({
-    getAuthStorage: vi.fn(async () => ({})),
+    getModelRuntime: vi.fn(async () => ({})),
 }));
 
 const modelMocks = vi.hoisted(() => ({
-    refreshModelRegistry: vi.fn(async () => undefined),
+    refreshModelRuntime: vi.fn(async () => undefined),
 }));
 
 const preflightMocks = vi.hoisted(() => ({
@@ -35,17 +35,17 @@ vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
 });
 
 vi.mock('../../../pi/auth', () => ({
-    getAuthStorage: authMocks.getAuthStorage,
+    getModelRuntime: authMocks.getModelRuntime,
     reloadCredentials: vi.fn(async () => undefined),
-    disposeAuthStorage: vi.fn(),
+    disposeModelRuntime: vi.fn(),
 }));
 
 vi.mock('../../../pi/models', () => ({
-    getModelRegistry: vi.fn(async () => ({})),
     getAvailableModels: vi.fn(() => []),
     findModel: vi.fn(() => undefined),
-    refreshModelRegistry: modelMocks.refreshModelRegistry,
-    disposeModelRegistry: vi.fn(),
+    prepareModelRuntime: vi.fn(async (runtime) => runtime),
+    refreshModelRuntime: modelMocks.refreshModelRuntime,
+    resetModelRuntimeState: vi.fn(),
 }));
 
 vi.mock('../../../pi/tools/preflight-edit', () => ({
@@ -282,7 +282,7 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
         session: original.session,
         sessionManager: { getSessionFile: () => undefined },
     }));
-    (manager as any)._modelRegistry = {};
+    (manager as any)._modelRuntime = {};
     (manager as any)._subagentManager = {
         async dispose(): Promise<void> {
             order.push('original-subagents:dispose');
@@ -301,12 +301,8 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
     (manager as any)._resetSubagentManager = resetSubagentManager;
     (manager as any)._applyDefaultSettings = applyDefaultSettings;
     preflightMocks.install.mockImplementation(() => order.push('replacement:preflight'));
-    modelMocks.refreshModelRegistry.mockImplementation(async () => {
+    modelMocks.refreshModelRuntime.mockImplementation(async () => {
         order.push('models:refresh');
-    });
-    authMocks.getAuthStorage.mockImplementation(async () => {
-        order.push('auth:get');
-        return {};
     });
     sdkMocks.createSessionManager.mockImplementation(() => {
         order.push('manager:create');
@@ -374,7 +370,6 @@ function expectReplacementLifecycle(harness: ReplacementHarness, appliesDefaults
             ? ['manager:create', 'replacement:lock']
             : ['replacement:lock', 'manager:open']),
         'resources:build',
-        'auth:get',
         'replacement:create',
         'replacement:bind',
         'replacement:preflight',

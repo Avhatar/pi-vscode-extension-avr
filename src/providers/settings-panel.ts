@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import type { SettingsClientMessage, SettingsServerMessage, SettingsData, SkillInfo, OAuthProviderInfo } from '../shared/protocol';
 import { API_KEY_PROVIDERS } from '../shared/providers';
-import { getAuthStorage, notifyAuthChanged } from '../pi/auth';
+import { getModelRuntime, notifyAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { OAuthLoginFlow } from '../pi/oauth-login-flow';
-import { refreshModelRegistry } from '../pi/models';
+import { refreshModelRuntime } from '../pi/models';
 import { syncClaudeCodeMcpImport } from '../pi/mcp/claude-code-import';
 import type { ExternalUrlService } from '../core/ports/external-url';
 import type { RawStoragePort } from '../core/ports/raw-storage';
@@ -277,14 +277,14 @@ export class SettingsPanel {
 
     private async _getOAuthProviders(): Promise<OAuthProviderInfo[]> {
         try {
-            const authStorage = await getAuthStorage(this._secrets);
-            const providers = authStorage.getOAuthProviders();
-            return providers.map((p: any) => ({
-                id: String(p.id),
-                name: String(p.name ?? p.id),
-                signedIn: authStorage.has(String(p.id)),
-                usesCallbackServer: !!p.usesCallbackServer,
-            }));
+            const runtime = await getModelRuntime(this._secrets);
+            const providers = runtime.getProviders().filter((provider) => provider.auth.oauth);
+            return Promise.all(providers.map(async (provider) => ({
+                id: provider.id,
+                name: provider.auth.oauth?.loginLabel ?? provider.auth.oauth?.name ?? provider.name,
+                signedIn: (await runtime.checkAuth(provider.id))?.type === 'oauth',
+                usesCallbackServer: false,
+            })));
         } catch {
             return [];
         }
@@ -300,7 +300,7 @@ export class SettingsPanel {
             return;
         }
 
-        const authStorage = await getAuthStorage(this._secrets);
+        const runtime = await getModelRuntime(this._secrets);
         const flow = new OAuthLoginFlow({
             onState: (state) => this._post({ type: 'oauthState', providerId, state }),
             openExternal: (url) => {
@@ -318,13 +318,13 @@ export class SettingsPanel {
         });
 
         try {
-            await authStorage.login(providerId as any, flow.callbacks);
+            await runtime.login(providerId, 'oauth', flow.interaction);
             this._post({
                 type: 'oauthState',
                 providerId,
                 state: { kind: 'success' },
             });
-            await refreshModelRegistry();
+            await refreshModelRuntime();
             if (providerId === 'openai-codex') getCodexUsageStore().clear();
             notifyAuthChanged(providerId);
             await this._sendSettings();
@@ -344,9 +344,9 @@ export class SettingsPanel {
     }
 
     private async _oauthLogout(providerId: string): Promise<void> {
-        const authStorage = await getAuthStorage(this._secrets);
-        authStorage.logout(providerId);
-        await refreshModelRegistry();
+        const runtime = await getModelRuntime(this._secrets);
+        await runtime.logout(providerId);
+        await refreshModelRuntime();
         if (providerId === 'openai-codex') getCodexUsageStore().clear();
         notifyAuthChanged(providerId);
         await this._sendSettings();

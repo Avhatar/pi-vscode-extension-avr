@@ -2,7 +2,7 @@
 
 ## Stance
 
-The session manager is a coordinator, not the SDK. It owns the *shape* of a session — resource paths, extensions, tool selection, event router wiring, lock ownership — but delegates every actual agent operation to the SDK's `AgentSession`. The two invariants that dominate: **the SDK is externalized**, so every call site that touches it uses `await import('@earendil-works/pi-coding-agent')`; and **the session lock is acquired before the SDK opens the session file**, so a concurrent VS Code window (or standalone desktop) cannot double-mount the same session.
+The session manager is a coordinator, not the SDK. It owns the *shape* of a session — resource paths, extensions, tool selection, event router wiring, lock ownership — but delegates every actual agent operation to the SDK's `AgentSession`. Three invariants dominate: **the SDK is externalized**, so runtime imports use `await import('@earendil-works/pi-coding-agent')`; **every parent and child session receives the same canonical `ModelRuntime`**; and **the session lock is acquired before the SDK opens the session file**, so a concurrent VS Code window (or standalone desktop) cannot double-mount the same session.
 
 ## Role
 
@@ -20,6 +20,8 @@ The session manager is a coordinator, not the SDK. It owns the *shape* of a sess
 - [`getSessions()`](../../../../src/pi/session.ts#L792) — lists sessions on disk (long-running; hence the 120 s timeout floor documented in [Part II § protocol-runtime](../../02-shared-protocol-and-contracts/protocol-runtime/protocol-runtime.md)).
 
 Turn-lifecycle bookkeeping uses `markTurnStarted() / markTurnCompleted()` at [session.ts:912/918](../../../../src/pi/session.ts#L912); interruption detection consults `getLatestTurnLifecycleStatus` + `hasIncompleteTurnTail` from [interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts).
+
+During initialization, the manager obtains the process-wide runtime from [`getModelRuntime()`](../../../../src/pi/auth.ts), applies the SecretStorage bridge, prepares custom providers/metadata, and passes `modelRuntime` to `createAgentSession()`. It does not construct per-tab auth or model registries. The runtime is also passed into the subagent factory, so child model lookup and credentials remain synchronized with the parent.
 
 `_buildResourceLoader()` [session.ts:465](../../../../src/pi/session.ts#L465) is where a session's *world* is assembled. It dynamically imports `DefaultResourceLoader` from the SDK, then supplies:
 
@@ -40,6 +42,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 - `PiSessionRuntime` — class [session-runtime.ts:15](../../../../src/pi/session-runtime.ts#L15)
 - `AgentSession` — SDK type; not our declaration, imported dynamically
 - `DefaultResourceLoader` — SDK class; instance built by `_buildResourceLoader`
+- `ModelRuntime` — one process-wide SDK runtime passed to parent and child sessions
 
 **Methods — user-facing:**
 - `initialize` — [session.ts:178](../../../../src/pi/session.ts#L178)
@@ -75,7 +78,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 
 **Depends on:**
 - [event-router](../event-router/event-router.md) — the manager owns an `EventRouter` and binds it into the SDK session listener.
-- [models-and-auth](../models-and-auth/models-and-auth.md) — model resolution and `AuthStorage` bridge.
+- [models-and-auth](../models-and-auth/models-and-auth.md) — canonical `ModelRuntime`, model resolution, and SecretStorage overrides.
 - [bundled-pi-packages](../bundled-pi-packages/bundled-pi-packages.md) — `additionalExtensionPaths` is fed from this list.
 - [claude-sdk-compat](../claude-sdk-compat/claude-sdk-compat.md) — claude-compat extension is one of the factories.
 - [Part III § platform-ports](../../03-portable-chat-core/platform-ports/platform-ports.md) — session platform ports (workspace, settings, dialogs, lock, extensions, codex usage) come from this surface.
@@ -88,7 +91,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 - [claude-sdk-compat](../claude-sdk-compat/claude-sdk-compat.md) — `createClaudeContextExtension` is registered as an ExtensionFactory during resource-loader construction.
 - [desktop-host-lifecycle](../../10-standalone-desktop-host/desktop-host-lifecycle/desktop-host-lifecycle.md) — `PiSessionManager` instantiated per tab.
 - [lsp-tools](../../11-auxiliary-systems/lsp-tools/lsp-tools.md) — the extension factory is one of the resource-loader factories.
-- [models-and-auth](../models-and-auth/models-and-auth.md) — the session consults both singletons during model resolution.
+- [models-and-auth](../models-and-auth/models-and-auth.md) — every session consumes the shared runtime during model resolution and request authentication.
 - [plan-mode-and-todos](../../08-message-flow-discipline/plan-mode-and-todos/plan-mode-and-todos.md) — the ToDo extension is one of the factories handed to the resource loader.
 - [raw-mode](../../11-auxiliary-systems/raw-mode/raw-mode.md) — recorder is created / mounted / bound per session.
 - [steering](../../08-message-flow-discipline/steering/steering.md) — `PiSessionManager` exposes the three SDK operations.
@@ -98,7 +101,8 @@ Process CWD is changed to the workspace root before resource discovery [session.
 ## See also
 
 - **Rule — SDK imports are dynamic.** `await import('@earendil-works/pi-coding-agent')` inside async methods; never top-level import. The package is externalized in [esbuild.js](../../../../esbuild.js) and resolved by VS Code's module loader at runtime.
-- **Rule — session lock before session open.** `_activateSessionRuntime` acquires the sidecar lock first; the SDK then opens the session file. Reversing the order opens a race with another host / window.
+- **Rule — one runtime across sessions.** Parent and child `createAgentSession()` calls receive the process-wide `modelRuntime`; creating a private runtime would split credentials and provider state.
+- **Rule — session lock before session open.** The session-creation path acquires the sidecar lock before `SessionManager.open()` reads the session file. Reversing the order opens a race with another host / window.
 - **Pattern — resource loader is a description, not a build step.** Extension factories, skill paths, package paths are handed to the SDK; the SDK is responsible for validating and loading them.
 - **Pattern — turn lifecycle is a marker on the session entry list.** Interrupted turns are detected by inspecting persisted entries (`getLatestTurnLifecycleStatus`) — not by looking at in-memory flags that reset on reload.
 - **Pitfall — `process.cwd()` change is load-bearing.** MCP adapters expect to find `.mcp.json` at the workspace root; if the CWD isn't set correctly, they silently miss the file. Do not remove the `chdir` in `_buildResourceLoader`.

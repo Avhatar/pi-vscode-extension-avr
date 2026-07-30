@@ -5,8 +5,8 @@ import type { RawRecorder } from '../core/raw/raw-recorder';
 /**
  * Inline Pi extension that mirrors every event exposed via {@link ExtensionAPI}
  * into the shared {@link RawRecorder} while its capture gate is enabled. It
- * captures system prompts, tool schemas, message history, provider request payload, provider
- * response headers, streamed chunks, tool calls/results — verbatim, in the
+ * captures system prompts, tool schemas, message history, provider request payload,
+ * response headers, streamed message updates, tool calls/results — verbatim, in the
  * order events fire.
  *
  * Handlers return `undefined` so no side effect is imposed on the agent's

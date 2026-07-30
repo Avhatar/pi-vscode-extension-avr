@@ -62,7 +62,7 @@ The webview [src/webview/settings.ts](../../../../src/webview/settings.ts) subsc
 
 **Depends on:**
 - [webview-architecture](../webview-architecture/webview-architecture.md) — the settings webview shares the transport / DOM pattern.
-- [Part I § configuration-and-secrets](../../01-extension-host-substrate/configuration-and-secrets/configuration-and-secrets.md) — `SettingsData`, `KNOWN_PROVIDERS`, `AuthStorage` bridge live there.
+- [Part I § configuration-and-secrets](../../01-extension-host-substrate/configuration-and-secrets/configuration-and-secrets.md) — `SettingsData`, `KNOWN_PROVIDERS`, and the `ModelRuntime` SecretStorage bridge live there.
 - [Part V § models-and-auth](../../05-pi-sdk-integration/models-and-auth/models-and-auth.md) — providers dropdown source.
 - [Part XI § raw-mode](../../11-auxiliary-systems/raw-mode/raw-mode.md) — stats block wires into the raw storage port.
 

@@ -21,7 +21,7 @@ import { createChatPanel, CHAT_PANEL_VIEW_TYPE } from './providers/chat-panel';
 import { ChatPanelSerializer } from './providers/chat-panel-serializer';
 import { openRawPanel, RawPanelSerializer, RAW_PANEL_VIEW_TYPE, type RawPanelServices } from './providers/raw-panel';
 import { notifyAuthChanged, reloadCredentials } from './pi/auth';
-import { refreshModelRegistry } from './pi/models';
+import { refreshModelRuntime } from './pi/models';
 
 import { DiffManager } from './core/files/diff-manager';
 import { CheckpointManager } from './core/files/checkpoint-manager';
@@ -117,7 +117,7 @@ export async function activate(context: vscode.ExtensionContext) {
             context.secrets.onDidChange(async (e) => {
                 if (e.key.startsWith('pi-code.apiKey.')) {
                     await reloadCredentials();
-                    await refreshModelRegistry((message) => outputChannel.appendLine(message));
+                    await refreshModelRuntime((message) => outputChannel.appendLine(message));
                     notifyAuthChanged(e.key.slice('pi-code.apiKey.'.length));
                     outputChannel.appendLine(`Credentials reloaded after change to ${e.key}`);
                 }

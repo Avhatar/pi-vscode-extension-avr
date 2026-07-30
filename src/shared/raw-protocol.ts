@@ -20,8 +20,8 @@
  * Kept intentionally open (`string`) so that any event exposed by the Pi
  * SDK — including ones added by future SDK releases — can be captured
  * verbatim without touching this type. See {@link RAW_HARNESS_EVENT_KINDS}
- * for the concrete list the recorder subscribes to today, plus the
- * `stream_*` and `recorder_meta` values produced by the wrapper.
+ * for the concrete list the recorder subscribes to today. Legacy `stream_*`
+ * entries remain readable, while `recorder_meta` is produced by the recorder.
  */
 export type RawEntryKind = string;
 

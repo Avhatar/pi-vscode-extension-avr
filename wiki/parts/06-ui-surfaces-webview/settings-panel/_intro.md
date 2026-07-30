@@ -17,7 +17,7 @@ The reader arrives here to answer one of:
 
 ## Neighborhood
 
-- **Storage side** — `SettingsData` shape, `AuthStorage` bridge, `KNOWN_PROVIDERS` — is [Part I § configuration-and-secrets](../../01-extension-host-substrate/configuration-and-secrets/configuration-and-secrets.md).
+- **Storage side** — `SettingsData`, canonical `ModelRuntime` SecretStorage bridge, and `KNOWN_PROVIDERS` — is [Part I § configuration-and-secrets](../../01-extension-host-substrate/configuration-and-secrets/configuration-and-secrets.md).
 - **RawMode stats source** — the recorder / storage port — is [Part XI § raw-mode](../../11-auxiliary-systems/raw-mode/raw-mode.md).
 - **MCP import** setting behavior at agent-run time is a Claude-compat concern — see [Part V § claude-sdk-compat](../../05-pi-sdk-integration/claude-sdk-compat/claude-sdk-compat.md).
 

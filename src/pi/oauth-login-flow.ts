@@ -1,10 +1,4 @@
-import type {
-    OAuthAuthInfo,
-    OAuthDeviceCodeInfo,
-    OAuthLoginCallbacks,
-    OAuthPrompt,
-    OAuthSelectPrompt,
-} from '@earendil-works/pi-ai';
+import type { AuthEvent, AuthInteraction, AuthPrompt } from '@earendil-works/pi-ai';
 import type { OAuthFlowState } from '../shared/protocol';
 
 interface PendingInput {
@@ -13,6 +7,7 @@ interface PendingInput {
     optionIds?: Set<string>;
     resolve: (value: string) => void;
     reject: (error: Error) => void;
+    abortCleanup?: () => void;
 }
 
 export interface OAuthLoginFlowOptions {
@@ -20,13 +15,12 @@ export interface OAuthLoginFlowOptions {
     openExternal: (url: string) => void;
 }
 
-/** Bridges the Pi SDK OAuth callback contract to the settings webview. */
+/** Bridges the Pi SDK AuthInteraction contract to the settings webview. */
 export class OAuthLoginFlow {
     private readonly _abortController = new AbortController();
     private _pending?: PendingInput;
     private _finished = false;
     private _cancelled = false;
-    private _browserAuth?: OAuthAuthInfo;
 
     constructor(private readonly _options: OAuthLoginFlowOptions) {}
 
@@ -34,18 +28,11 @@ export class OAuthLoginFlow {
         return this._cancelled;
     }
 
-    get callbacks(): OAuthLoginCallbacks {
+    get interaction(): AuthInteraction {
         return {
-            onAuth: (info) => this._handleAuth(info),
-            onDeviceCode: (info) => this._handleDeviceCode(info),
-            onPrompt: (prompt) => this._promptForText(prompt),
-            onProgress: (message) => {
-                this._ensureActive();
-                this._options.onState({ kind: 'progress', message });
-            },
-            onManualCodeInput: () => this._promptForManualCode(),
-            onSelect: (prompt) => this._promptForSelection(prompt),
             signal: this._abortController.signal,
+            prompt: (prompt) => this._handlePrompt(prompt),
+            notify: (event) => this._handleNotification(event),
         };
     }
 
@@ -55,6 +42,7 @@ export class OAuthLoginFlow {
             throw new Error('A value is required to continue authentication.');
         }
         this._pending = undefined;
+        pending.abortCleanup?.();
         pending.resolve(value.trim());
     }
 
@@ -64,6 +52,7 @@ export class OAuthLoginFlow {
             throw new Error('The selected authentication option is no longer available.');
         }
         this._pending = undefined;
+        pending.abortCleanup?.();
         pending.resolve(optionId);
     }
 
@@ -75,81 +64,91 @@ export class OAuthLoginFlow {
         this._abortController.abort(error);
         const pending = this._pending;
         this._pending = undefined;
+        pending?.abortCleanup?.();
         pending?.reject(error);
     }
 
     finish(): void {
         this._finished = true;
+        this._pending?.abortCleanup?.();
         this._pending = undefined;
     }
 
-    private _handleAuth(info: OAuthAuthInfo): void {
+    private _handlePrompt(prompt: AuthPrompt): Promise<string> {
         this._ensureActive();
-        this._browserAuth = info;
-        this._options.onState({
-            kind: 'awaitingBrowser',
-            url: info.url,
-            instructions: info.instructions,
-            promptForCode: {
-                message: 'After logging in, paste the authorization code or callback URL here:',
-                placeholder: 'Paste code or full callback URL',
-                allowEmpty: false,
-            },
-        });
-        this._options.openExternal(info.url);
-    }
+        if (prompt.type === 'select') {
+            this._options.onState({
+                kind: 'awaitingSelection',
+                message: prompt.message,
+                options: prompt.options.map((option) => ({ id: option.id, label: option.label })),
+            });
+            return this._waitForInput(
+                'select',
+                false,
+                new Set(prompt.options.map((option) => option.id)),
+                prompt.signal,
+            );
+        }
 
-    private _handleDeviceCode(info: OAuthDeviceCodeInfo): void {
-        this._ensureActive();
-        this._options.onState({
-            kind: 'awaitingDeviceCode',
-            userCode: info.userCode,
-            verificationUri: info.verificationUri,
-            expiresInSeconds: info.expiresInSeconds,
-        });
-        this._options.openExternal(info.verificationUri);
-    }
-
-    private _promptForText(prompt: OAuthPrompt): Promise<string> {
-        this._ensureActive();
+        const allowEmpty = prompt.type === 'text'
+            && (prompt as AuthPrompt & { allowEmpty?: boolean }).allowEmpty === true;
         this._options.onState({
             kind: 'awaitingPrompt',
             message: prompt.message,
             placeholder: prompt.placeholder,
-            allowEmpty: prompt.allowEmpty ?? false,
+            allowEmpty,
         });
-        return this._waitForInput('text', prompt.allowEmpty ?? false) as Promise<string>;
+        return this._waitForInput('text', allowEmpty, undefined, prompt.signal);
     }
 
-    private _promptForManualCode(): Promise<string> {
+    private _handleNotification(event: AuthEvent): void {
         this._ensureActive();
-        if (!this._browserAuth) {
+        if (event.type === 'auth_url') {
             this._options.onState({
-                kind: 'awaitingPrompt',
-                message: 'Paste the authorization code or callback URL:',
-                placeholder: 'Paste code or full callback URL',
-                allowEmpty: false,
+                kind: 'awaitingBrowser',
+                url: event.url,
+                instructions: event.instructions,
             });
+            this._options.openExternal(event.url);
+            return;
         }
-        return this._waitForInput('text', false) as Promise<string>;
+        if (event.type === 'device_code') {
+            this._options.onState({
+                kind: 'awaitingDeviceCode',
+                userCode: event.userCode,
+                verificationUri: event.verificationUri,
+                expiresInSeconds: event.expiresInSeconds,
+            });
+            this._options.openExternal(event.verificationUri);
+            return;
+        }
+        this._options.onState({ kind: 'progress', message: event.message });
     }
 
-    private _promptForSelection(prompt: OAuthSelectPrompt): Promise<string | undefined> {
-        this._ensureActive();
-        this._options.onState({
-            kind: 'awaitingSelection',
-            message: prompt.message,
-            options: prompt.options.map((option) => ({ id: option.id, label: option.label })),
-        });
-        return this._waitForInput('select', false, new Set(prompt.options.map((option) => option.id)));
-    }
-
-    private _waitForInput(kind: PendingInput['kind'], allowEmpty: boolean, optionIds?: Set<string>): Promise<string> {
+    private _waitForInput(
+        kind: PendingInput['kind'],
+        allowEmpty: boolean,
+        optionIds?: Set<string>,
+        signal?: AbortSignal,
+    ): Promise<string> {
         if (this._pending) {
             return Promise.reject(new Error('The OAuth provider requested overlapping user input.'));
         }
+        if (signal?.aborted) {
+            return Promise.reject(abortError(signal.reason));
+        }
         return new Promise<string>((resolve, reject) => {
-            this._pending = { kind, allowEmpty, optionIds, resolve, reject };
+            const pending: PendingInput = { kind, allowEmpty, optionIds, resolve, reject };
+            if (signal) {
+                const onAbort = () => {
+                    if (this._pending !== pending) return;
+                    this._pending = undefined;
+                    reject(abortError(signal.reason));
+                };
+                signal.addEventListener('abort', onAbort, { once: true });
+                pending.abortCleanup = () => signal.removeEventListener('abort', onAbort);
+            }
+            this._pending = pending;
         });
     }
 
@@ -166,4 +165,8 @@ export class OAuthLoginFlow {
             throw new Error('Login cancelled');
         }
     }
+}
+
+function abortError(reason: unknown): Error {
+    return reason instanceof Error ? reason : new Error('Login cancelled');
 }

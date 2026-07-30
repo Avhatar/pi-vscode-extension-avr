@@ -22,9 +22,9 @@ describe('provider model metadata', () => {
             model('openai-codex', `gpt-5.6-${variant}`, 372_000),
             model('openai', `gpt-5.6-${variant}`, 272_000),
         ]);
-        const registry = { getAll: () => models } as any;
+        const runtime = { getModels: () => models } as any;
 
-        expect(applyDocumentedApiMetadata(registry)).toBe(3);
+        expect(applyDocumentedApiMetadata(runtime)).toBe(3);
         expect(models.filter(item => item.provider === 'openai-codex')
             .every(item => item.contextWindow === 372_000)).toBe(true);
         expect(models.filter(item => item.provider === 'openai')
@@ -54,7 +54,7 @@ describe('provider model metadata', () => {
             maxContextWindow: 272_000,
             effectiveContextWindowPercent: 95,
         });
-        expect(applyCodexCatalogMetadata({ getAll: () => models } as any, catalog)).toBe(2);
+        expect(applyCodexCatalogMetadata({ getModels: () => models } as any, catalog)).toBe(2);
         expect(models.map(item => item.contextWindow)).toEqual([272_000, 272_000, 1_050_000]);
     });
 
@@ -64,18 +64,15 @@ describe('provider model metadata', () => {
             models: [{ slug: 'gpt-5.6-luna', context_window: 372_000 }],
         });
 
-        expect(applyCodexCatalogMetadata({ getAll: () => models } as any, catalog)).toBe(1);
+        expect(applyCodexCatalogMetadata({ getModels: () => models } as any, catalog)).toBe(1);
         expect(models[0].contextWindow).toBe(372_000);
-        expect(applyCodexCatalogMetadata({ getAll: () => models } as any, catalog)).toBe(0);
+        expect(applyCodexCatalogMetadata({ getModels: () => models } as any, catalog)).toBe(0);
     });
 
     it('fetches Codex metadata with the current account credentials', async () => {
         const token = jwt({
             'https://api.openai.com/auth': { chatgpt_account_id: 'account-123' },
         });
-        const authStorage = {
-            getApiKey: vi.fn().mockResolvedValue(token),
-        };
         const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
             models: [{
                 slug: 'gpt-5.6-sol',
@@ -84,10 +81,13 @@ describe('provider model metadata', () => {
             }],
         }), { status: 200, headers: { 'content-type': 'application/json' } }));
         const models = [model('openai-codex', 'gpt-5.6-sol', 372_000)];
+        const runtime = {
+            getModels: () => models,
+            getAuth: vi.fn().mockResolvedValue({ auth: { apiKey: token } }),
+        };
 
         expect(await refreshModelMetadata(
-            { getAll: () => models } as any,
-            authStorage as any,
+            runtime as any,
             undefined,
             fetchImpl as any,
         )).toBe(1);
@@ -105,14 +105,16 @@ describe('provider model metadata', () => {
         const token = jwt({
             'https://api.openai.com/auth': { chatgpt_account_id: 'account-cache' },
         });
-        const authStorage = { getApiKey: vi.fn().mockResolvedValue(token) };
         const fetchImpl = vi.fn();
         setCachedCodexCatalog('account-cache', [{ slug: 'gpt-5.6-sol', contextWindow: 272_000 }]);
         const models = [model('openai-codex', 'gpt-5.6-sol', 372_000)];
+        const runtime = {
+            getModels: () => models,
+            getAuth: vi.fn().mockResolvedValue({ auth: { apiKey: token } }),
+        };
 
         expect(await refreshModelMetadata(
-            { getAll: () => models } as any,
-            authStorage as any,
+            runtime as any,
             undefined,
             fetchImpl as any,
         )).toBe(1);
@@ -124,7 +126,6 @@ describe('provider model metadata', () => {
         const token = jwt({
             'https://api.openai.com/auth': { chatgpt_account_id: 'account-stale' },
         });
-        const authStorage = { getApiKey: vi.fn().mockResolvedValue(token) };
         const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
             models: [{ slug: 'gpt-5.6-sol', context_window: 300_000 }],
         }), { status: 200, headers: { 'content-type': 'application/json' } }));
@@ -133,11 +134,14 @@ describe('provider model metadata', () => {
         const seeded = getCachedCodexCatalog('account-stale');
         if (seeded) seeded.capturedAt = Date.now() - (48 * 60 * 60_000);
         const models = [model('openai-codex', 'gpt-5.6-sol', 372_000)];
+        const runtime = {
+            getModels: () => models,
+            getAuth: vi.fn().mockResolvedValue({ auth: { apiKey: token } }),
+        };
 
         // refreshModelMetadata resolves synchronously with the stale value.
         await refreshModelMetadata(
-            { getAll: () => models } as any,
-            authStorage as any,
+            runtime as any,
             undefined,
             fetchImpl as any,
         );

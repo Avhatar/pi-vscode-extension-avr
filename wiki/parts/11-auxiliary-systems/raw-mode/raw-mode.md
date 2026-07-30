@@ -35,7 +35,7 @@ Storage on disk under `<globalStorageUri>/raw/`:
 
 `RawEntryBuffer` [raw-entry-buffer.ts:19](../../../../src/core/raw/raw-entry-buffer.ts#L19) — FIFO ring, `DEFAULT_RAW_BUFFER_CAPACITY = 5000` [raw-entry-buffer.ts:3](../../../../src/core/raw/raw-entry-buffer.ts#L3).
 
-Pi extension [raw-recorder-extension.ts:17](../../../../src/pi/raw-recorder-extension.ts#L17) — `createRawRecorderExtension(recorder)`: iterates `RAW_HARNESS_EVENT_KINDS`, subscribes each via `pi.on(kind, handler)`, each handler calls `recorder.record(kind, event)`.
+Pi extension [raw-recorder-extension.ts:17](../../../../src/pi/raw-recorder-extension.ts#L17) — `createRawRecorderExtension(recorder)`: iterates `RAW_HARNESS_EVENT_KINDS`, subscribes each via `pi.on(kind, handler)`, and records the event. Provider request/response payloads and streamed `message_update` events therefore stay on the supported extension-event path; legacy stored `stream_*` kinds remain readable by the protocol.
 
 RawPanel [raw-panel.ts:46](../../../../src/providers/raw-panel.ts#L46):
 

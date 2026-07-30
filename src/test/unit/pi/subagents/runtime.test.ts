@@ -64,15 +64,14 @@ describe('subagent coordinator and child runtime boundaries', () => {
     });
 
     it('rejects unsupported child tools and unavailable models before creating an SDK session', async () => {
-        const unavailableRegistry = {
-            find: () => undefined,
+        const unavailableRuntime = {
+            getModel: () => undefined,
             hasConfiguredAuth: () => false,
         } as any;
         const factory = new PiChildSessionFactory({
             cwd: process.cwd(),
             workspaceTrusted: true,
-            authStorage: {} as any,
-            modelRegistry: unavailableRegistry,
+            modelRuntime: unavailableRuntime,
         });
 
         await expect(factory.create({ ...spec(), tools: ['bash'] }, {

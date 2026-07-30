@@ -1,7 +1,7 @@
 import type { StateStore } from '../core/ports/chat-platform';
 import type { CodexUsageSnapshot } from '../shared/protocol';
 import { CODEX_USAGE_STALE_MS, normalizeCodexLimitId } from '../shared/codex-usage';
-import { getAuthStorage } from './auth';
+import { getProviderAccessToken } from './auth';
 import { parseCodexHeaders, parseCodexUsagePayload } from './codex-usage-parser';
 import { extractCodexAccountId } from './codex-auth';
 
@@ -77,8 +77,7 @@ class CodexUsageStore {
     }
 
     private async _refreshFromApi(): Promise<CodexUsageSnapshot | null> {
-        const authStorage = await getAuthStorage();
-        const accessToken = await authStorage.getApiKey('openai-codex', { includeFallback: false });
+        const accessToken = await getProviderAccessToken('openai-codex');
         if (!accessToken) {
             this.clear();
             return null;

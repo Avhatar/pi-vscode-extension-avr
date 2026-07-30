@@ -681,17 +681,18 @@ function buildOAuthCard(p: { id: string; name: string; signedIn: boolean; usesCa
         `;
     } else if (flow.kind === 'awaitingBrowser') {
         const instr = flow.instructions ? `<p class="setting-description">${escHtml(flow.instructions)}</p>` : '';
-        const promptMsg = flow.promptForCode?.message ?? '';
-        const placeholder = flow.promptForCode?.placeholder ?? 'Paste authorization code';
+        const manualCode = flow.promptForCode ? `
+            <p class="setting-description"><strong>${escHtml(flow.promptForCode.message)}</strong></p>
+            <div class="api-key-input-row">
+                <input type="text" class="setting-input" data-oauth-input="${escAttr(p.id)}" data-oauth-allow-empty="false" placeholder="${escAttr(flow.promptForCode.placeholder ?? 'Paste authorization code')}">
+                <button class="setting-btn primary" data-oauth-submit-input="${escAttr(p.id)}">Submit</button>
+            </div>
+        ` : '';
         flowDetails = `
             <div class="oauth-flow-block">
                 <p class="setting-description">A browser window should have opened. If not, <a href="#" data-oauth-open-url="${escAttr(flow.url)}">open this link manually</a>.</p>
                 ${instr}
-                <p class="setting-description"><strong>${escHtml(promptMsg)}</strong></p>
-                <div class="api-key-input-row">
-                    <input type="text" class="setting-input" data-oauth-input="${escAttr(p.id)}" data-oauth-allow-empty="false" placeholder="${escAttr(placeholder)}">
-                    <button class="setting-btn primary" data-oauth-submit-input="${escAttr(p.id)}">Submit</button>
-                </div>
+                ${manualCode}
             </div>
         `;
     } else if (flow.kind === 'awaitingDeviceCode') {

@@ -68,7 +68,7 @@ Wraps the `@earendil-works/pi-coding-agent` SDK: session lifecycle, event fan-ou
 
 - `session-lifecycle` — `PiSessionManager`, resource loader construction, prompt / steer / settlement flow, and cross-cutting session state.
 - `event-router` — SDK event fan-out to the chat service, tab runtime, checkpoint manager, and file tracker.
-- `models-and-auth` — model registry, provider ids, the `AuthStorage` bridge, and the `KNOWN_PROVIDERS` list.
+- `models-and-auth` — canonical `ModelRuntime`, provider ids, SecretStorage runtime overrides, OAuth, and the `KNOWN_PROVIDERS` list.
 - `bundled-pi-packages` — VSIX-embedded Pi extensions, `additionalExtensionPaths`, and the constraints they place on release.
 - `claude-sdk-compat` — the Claude compatibility bridge (context, discovery, resources, tool-compat, settings) that lets Claude-shaped tools plug into Pi sessions.
 
@@ -131,7 +131,7 @@ Historical snapshot of the Electron-based alternate host that reused the portabl
 Opt-in surfaces and release plumbing that sit around the main product.
 
 - `lsp-tools` — opt-in Language Server tools (`find_references`, `hover`, and friends) gated by `pi-code.lsp.enabled`.
-- `raw-mode` — per-chat developer view of the full agent-to-model exchange: inline Pi extension over `pi.on(...)`, `onPayload`/`onResponse` stream capture, portable recorder + ring buffer, JSONL storage keyed by `sessionPath`, RawPanel + Settings block, and `deleteHistorySession`-driven cleanup.
+- `raw-mode` — per-chat developer view of the full agent-to-model exchange: inline Pi extension over `pi.on(...)` including streamed `message_update` events, portable recorder + ring buffer, JSONL storage keyed by `sessionPath`, RawPanel + Settings block, and `deleteHistorySession`-driven cleanup.
 - `packaging-and-release` — VSIX packaging pipeline, prune / restore dance, `.vscodeignore` invariants, and the `deploy:patch|minor|major` scripts.
 
 ---

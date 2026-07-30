@@ -9,13 +9,14 @@ function createFlow() {
         onState: (state) => states.push(state),
         openExternal: (url) => openedUrls.push(url),
     });
-    return { flow, callbacks: flow.callbacks, states, openedUrls };
+    return { flow, interaction: flow.interaction, states, openedUrls };
 }
 
 describe('OAuthLoginFlow', () => {
     it('supports provider login-method selection', async () => {
-        const { flow, callbacks, states } = createFlow();
-        const selected = callbacks.onSelect({
+        const { flow, interaction, states } = createFlow();
+        const selected = interaction.prompt({
+            type: 'select',
             message: 'Choose a login method',
             options: [
                 { id: 'browser', label: 'Browser login' },
@@ -36,13 +37,18 @@ describe('OAuthLoginFlow', () => {
         await expect(selected).resolves.toBe('browser');
     });
 
-    it('supports browser callbacks and manual authorization input', async () => {
-        const { flow, callbacks, states, openedUrls } = createFlow();
-        callbacks.onAuth({
+    it('supports browser authorization followed by manual code input', async () => {
+        const { flow, interaction, states, openedUrls } = createFlow();
+        interaction.notify({
+            type: 'auth_url',
             url: 'https://auth.example.test/login',
             instructions: 'Complete login in the browser.',
         });
-        const manualCode = callbacks.onManualCodeInput!();
+        const manualCode = interaction.prompt({
+            type: 'manual_code',
+            message: 'Paste the authorization code',
+            placeholder: 'Paste code or full callback URL',
+        });
 
         expect(openedUrls).toEqual(['https://auth.example.test/login']);
         expect(states[0]).toMatchObject({
@@ -50,18 +56,24 @@ describe('OAuthLoginFlow', () => {
             url: 'https://auth.example.test/login',
             instructions: 'Complete login in the browser.',
         });
+        expect(states[1]).toMatchObject({
+            kind: 'awaitingPrompt',
+            message: 'Paste the authorization code',
+            allowEmpty: false,
+        });
 
         flow.submitText('  callback-code  ');
         await expect(manualCode).resolves.toBe('callback-code');
     });
 
-    it('renders provider text prompts and permits explicitly empty answers', async () => {
-        const { flow, callbacks, states } = createFlow();
-        const answer = callbacks.onPrompt({
+    it('preserves allowEmpty from legacy text prompts', async () => {
+        const { flow, interaction, states } = createFlow();
+        const answer = interaction.prompt({
+            type: 'text',
             message: 'GitHub Enterprise domain (blank for github.com)',
             placeholder: 'company.ghe.com',
             allowEmpty: true,
-        });
+        } as any);
 
         expect(states).toEqual([{
             kind: 'awaitingPrompt',
@@ -75,8 +87,9 @@ describe('OAuthLoginFlow', () => {
     });
 
     it('shows device codes and opens the verification page', () => {
-        const { callbacks, states, openedUrls } = createFlow();
-        callbacks.onDeviceCode({
+        const { interaction, states, openedUrls } = createFlow();
+        interaction.notify({
+            type: 'device_code',
             userCode: 'ABCD-EFGH',
             verificationUri: 'https://device.example.test',
             expiresInSeconds: 900,
@@ -91,20 +104,50 @@ describe('OAuthLoginFlow', () => {
         expect(openedUrls).toEqual(['https://device.example.test']);
     });
 
+    it('surfaces progress and info notifications', () => {
+        const { interaction, states } = createFlow();
+        interaction.notify({ type: 'progress', message: 'Waiting for authorization' });
+        interaction.notify({
+            type: 'info',
+            message: 'Use your organization account',
+            links: [{ label: 'Help', url: 'https://example.test/help' }],
+        });
+
+        expect(states).toEqual([
+            { kind: 'progress', message: 'Waiting for authorization' },
+            { kind: 'progress', message: 'Use your organization account' },
+        ]);
+    });
+
     it('aborts polling and rejects pending input when cancelled', async () => {
-        const { flow, callbacks } = createFlow();
-        const answer = callbacks.onPrompt({ message: 'Enter a value' });
+        const { flow, interaction } = createFlow();
+        const answer = interaction.prompt({ type: 'text', message: 'Enter a value' });
 
         flow.cancel();
 
         expect(flow.cancelled).toBe(true);
-        expect(callbacks.signal?.aborted).toBe(true);
+        expect(interaction.signal?.aborted).toBe(true);
         await expect(answer).rejects.toThrow('Login cancelled');
     });
 
+    it('honors cancellation of a single provider prompt', async () => {
+        const { interaction } = createFlow();
+        const controller = new AbortController();
+        const answer = interaction.prompt({
+            type: 'manual_code',
+            message: 'Paste code',
+            signal: controller.signal,
+        });
+
+        controller.abort(new Error('Browser callback completed'));
+
+        await expect(answer).rejects.toThrow('Browser callback completed');
+    });
+
     it('rejects stale or unknown selections', async () => {
-        const { flow, callbacks } = createFlow();
-        const selected = callbacks.onSelect({
+        const { flow, interaction } = createFlow();
+        const selected = interaction.prompt({
+            type: 'select',
             message: 'Choose',
             options: [{ id: 'known', label: 'Known option' }],
         });
@@ -112,5 +155,14 @@ describe('OAuthLoginFlow', () => {
         expect(() => flow.submitSelection('unknown')).toThrow('no longer available');
         flow.cancel();
         await expect(selected).rejects.toThrow('Login cancelled');
+    });
+
+    it('rejects overlapping prompts', async () => {
+        const { flow, interaction } = createFlow();
+        const first = interaction.prompt({ type: 'text', message: 'First' });
+        await expect(interaction.prompt({ type: 'text', message: 'Second' }))
+            .rejects.toThrow('overlapping user input');
+        flow.cancel();
+        await expect(first).rejects.toThrow('Login cancelled');
     });
 });

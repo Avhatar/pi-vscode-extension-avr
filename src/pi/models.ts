@@ -1,78 +1,74 @@
-import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
+import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ModelInfo } from '../shared/protocol';
-import { getAuthStorage } from './auth';
+import { getInitializedModelRuntime, hasRuntimeSecretOverride } from './auth';
 import { registerQwenCnProvider, registerQwenProvider } from './providers/qwen';
 import { refreshModelMetadata, type ModelMetadataLog } from './model-metadata';
 
-let cached: ModelRegistry | undefined;
+let registeredProviders = new WeakMap<ModelRuntime, Set<string>>();
 
-export async function getModelRegistry(log?: ModelMetadataLog): Promise<ModelRegistry> {
-    const authStorage = await getAuthStorage();
-    if (!cached) {
-        const { ModelRegistry: MR } = await import('@earendil-works/pi-coding-agent');
-        cached = MR.create(authStorage);
-        await syncCustomProviders();
+export async function prepareModelRuntime(
+    runtime: ModelRuntime,
+    log?: ModelMetadataLog,
+): Promise<ModelRuntime> {
+    await syncCustomProviders(runtime);
+    await refreshModelMetadata(runtime, log);
+    return runtime;
+}
+
+// Pi Code keeps its DashScope providers conditional because their model list
+// should only be visible while a real SecretStorage key is applied to the
+// canonical ModelRuntime.
+export async function syncCustomProviders(runtime: ModelRuntime): Promise<void> {
+    let runtimeProviders = registeredProviders.get(runtime);
+    if (!runtimeProviders) {
+        runtimeProviders = new Set<string>();
+        registeredProviders.set(runtime, runtimeProviders);
     }
-    await refreshModelMetadata(cached, authStorage, log);
-    return cached;
+    syncProvider(runtime, runtimeProviders, 'qwen', () => registerQwenProvider(runtime));
+    syncProvider(runtime, runtimeProviders, 'qwen-cn', () => registerQwenCnProvider(runtime));
 }
-
-// Dynamically register/unregister providers that pi-coding-agent's validator
-// refuses without an `apiKey OR oauth` field. We only register them when the
-// user has actually stored a key (so `getAvailable()` doesn't show models
-// with no working credentials), and we tear them down when the key is removed.
-export async function syncCustomProviders(): Promise<void> {
-    if (!cached) return;
-    const registry = cached;
-    const authStorage = await getAuthStorage();
-    syncProvider(registry, 'qwen', () => registerQwenProvider(registry), () => authStorage.hasAuth('qwen'));
-    syncProvider(registry, 'qwen-cn', () => registerQwenCnProvider(registry), () => authStorage.hasAuth('qwen-cn'));
-}
-
-const registeredProviders = new Set<string>();
 
 function syncProvider(
-    registry: ModelRegistry,
+    runtime: ModelRuntime,
+    runtimeProviders: Set<string>,
     providerId: string,
     register: () => void,
-    hasKey: () => boolean,
 ): void {
-    const wantRegistered = hasKey();
-    const isRegistered = registeredProviders.has(providerId);
+    const wantRegistered = hasRuntimeSecretOverride(providerId);
+    const isRegistered = runtimeProviders.has(providerId);
     try {
         if (wantRegistered && !isRegistered) {
             register();
-            registeredProviders.add(providerId);
+            runtimeProviders.add(providerId);
         } else if (!wantRegistered && isRegistered) {
-            registry.unregisterProvider(providerId);
-            registeredProviders.delete(providerId);
+            runtime.unregisterProvider(providerId);
+            runtimeProviders.delete(providerId);
         }
     } catch (err) {
         console.error(`[pi-code] Failed to sync provider "${providerId}":`, err);
     }
 }
 
-export async function refreshModelRegistry(log?: ModelMetadataLog): Promise<void> {
-    if (!cached) return;
-    cached.refresh();
-    await syncCustomProviders();
-    const authStorage = await getAuthStorage();
-    await refreshModelMetadata(cached, authStorage, log);
+export async function refreshModelRuntime(log?: ModelMetadataLog): Promise<void> {
+    const runtime = getInitializedModelRuntime();
+    if (!runtime) return;
+    await runtime.refresh({ allowNetwork: false });
+    await prepareModelRuntime(runtime, log);
 }
 
-export function getAvailableModels(registry: ModelRegistry): ModelInfo[] {
-    return registry.getAvailable().map((m: any) => ({
-        provider: String(m.provider),
-        id: m.id,
-        name: m.name,
-        supportsImages: Array.isArray(m.input) ? m.input.includes('image') : undefined,
+export function getAvailableModels(runtime: ModelRuntime): ModelInfo[] {
+    return runtime.getAvailableSnapshot().map((model) => ({
+        provider: String(model.provider),
+        id: model.id,
+        name: model.name,
+        supportsImages: Array.isArray(model.input) ? model.input.includes('image') : undefined,
     }));
 }
 
-export function findModel(registry: ModelRegistry, provider: string, modelId: string) {
-    return registry.find(provider, modelId);
+export function findModel(runtime: ModelRuntime, provider: string, modelId: string) {
+    return runtime.getModel(provider, modelId);
 }
 
-export function disposeModelRegistry() {
-    cached = undefined;
+export function resetModelRuntimeState(): void {
+    registeredProviders = new WeakMap<ModelRuntime, Set<string>>();
 }

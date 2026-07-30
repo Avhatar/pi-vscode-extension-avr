@@ -1,4 +1,4 @@
-import type { ModelRegistry } from '@earendil-works/pi-coding-agent';
+import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 
 const DASHSCOPE_INTL_BASE_URL = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
 const DASHSCOPE_CN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
@@ -175,15 +175,14 @@ const QWEN_MODELS: QwenModel[] = [
 ];
 
 // Placeholder satisfies pi-coding-agent's `apiKey OR oauth required` validation in
-// `registerProvider`. The actual key always comes from `AuthStorage.runtimeOverrides`
-// (set via `setRuntimeApiKey`), which takes precedence over `providerConfig.apiKey`
-// in `getApiKeyAndHeaders`. This placeholder is never sent to DashScope, because we
-// only call these registrations after confirming the user has stored a real key
-// (see `syncCustomProviders` in ../models.ts).
+// `registerProvider`. The actual key comes from ModelRuntime's runtime override,
+// which takes precedence over this provider fallback. This placeholder is never
+// sent to DashScope because registration only happens after Pi Code applies a real
+// SecretStorage key (see `syncCustomProviders` in ../models.ts).
 const REGISTRATION_APIKEY_PLACEHOLDER = 'managed-by-pi-code-vscode';
 
-export function registerQwenProvider(registry: ModelRegistry, baseUrl?: string): void {
-    registry.registerProvider('qwen', {
+export function registerQwenProvider(runtime: ModelRuntime, baseUrl?: string): void {
+    runtime.registerProvider('qwen', {
         api: 'openai-completions',
         baseUrl: baseUrl || DASHSCOPE_INTL_BASE_URL,
         apiKey: REGISTRATION_APIKEY_PLACEHOLDER,
@@ -191,8 +190,8 @@ export function registerQwenProvider(registry: ModelRegistry, baseUrl?: string):
     });
 }
 
-export function registerQwenCnProvider(registry: ModelRegistry, baseUrl?: string): void {
-    registry.registerProvider('qwen-cn', {
+export function registerQwenCnProvider(runtime: ModelRuntime, baseUrl?: string): void {
+    runtime.registerProvider('qwen-cn', {
         api: 'openai-completions',
         baseUrl: baseUrl || DASHSCOPE_CN_BASE_URL,
         apiKey: REGISTRATION_APIKEY_PLACEHOLDER,

@@ -3,8 +3,7 @@ import * as path from 'node:path';
 import type {
     AgentSession,
     AgentSessionEvent,
-    AuthStorage,
-    ModelRegistry,
+    ModelRuntime,
     SessionManager,
 } from '@earendil-works/pi-coding-agent';
 import { createCompleteSubagentTool } from './completion-tool';
@@ -27,8 +26,7 @@ const CHILD_SAFE_TOOL_SET = new Set<string>(CHILD_SAFE_TOOLS);
 export interface PiChildSessionFactoryOptions {
     cwd: string;
     workspaceTrusted: boolean;
-    authStorage: AuthStorage;
-    modelRegistry: ModelRegistry;
+    modelRuntime: ModelRuntime;
     transcriptDirectory?: string;
     parentSessionPath?: string;
     writeIsolation?: WriteIsolationManager;
@@ -135,11 +133,11 @@ export class PiChildSessionFactory implements ChildSessionFactory {
             throw new Error(`Unsupported child tools: ${unsafeTools.join(', ')}.`);
         }
 
-        const model = this.options.modelRegistry.find(spec.model.provider, spec.model.id);
+        const model = this.options.modelRuntime.getModel(spec.model.provider, spec.model.id);
         if (!model) {
             throw new Error(`Subagent model ${formatModelRef(spec.model)} is unavailable; no fallback was applied.`);
         }
-        if (!this.options.modelRegistry.hasConfiguredAuth(model)) {
+        if (!this.options.modelRuntime.hasConfiguredAuth(spec.model.provider)) {
             throw new Error(`Authentication is not configured for subagent model ${formatModelRef(spec.model)}; no fallback was applied.`);
         }
 
@@ -191,8 +189,7 @@ export class PiChildSessionFactory implements ChildSessionFactory {
                 cwd: lease.cwd,
                 model,
                 thinkingLevel: spec.thinkingLevel as any,
-                authStorage: this.options.authStorage,
-                modelRegistry: this.options.modelRegistry,
+                modelRuntime: this.options.modelRuntime,
                 sessionManager,
                 settingsManager,
                 resourceLoader,
