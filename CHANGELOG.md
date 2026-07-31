@@ -7,8 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.65.5] - 2026-07-31
+
+### Fixed
+- File mentions in prompts no longer expose Pi Code's internal referenced-workspace-files metadata in the chat transcript.
+
+## [0.65.4] - 2026-07-30
+
 ### Changed
 - Updated the bundled Pi SDK to 0.82.1 for the latest model runtime, provider authentication, retry, and model catalog improvements.
+
+### Fixed
+- New chat titles no longer expose internal Plan Mode or attachment instructions after the first prompt.
 
 ## [0.65.3] - 2026-07-30
 

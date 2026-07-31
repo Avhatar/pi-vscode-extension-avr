@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatService } from '../../../../core/chat/chat-service';
+import { PLAN_MODE_INSTRUCTIONS } from '../../../../core/chat/chat-preferences';
 import { TabRuntime } from '../../../../core/chat/tab-runtime';
 import type { CodexTurnUsage, SerializedAgentState, TabInfo } from '../../../../shared/agent-protocol';
 import { isServerMessage } from '../../../../shared/protocol-runtime';
@@ -289,6 +290,20 @@ describe('portable ChatService event and state projection', () => {
 
         tab.session.session = { sessionName: 'Persisted name' };
         expect(service.updateTabName(tab)).toEqual({ changed: true, name: 'Persisted name' });
+    });
+
+    it('does not use Plan Mode instructions when deriving a chat name', () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'user',
+            content: `${PLAN_MODE_INSTRUCTIONS}\n\nRefactor the launcher tabs`,
+        }];
+
+        expect(service.updateTabName(tab)).toEqual({
+            changed: true,
+            name: 'Refactor the launcher tabs',
+        });
     });
 });
 

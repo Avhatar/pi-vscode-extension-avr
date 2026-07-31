@@ -1,6 +1,7 @@
 const FILE_BLOCK_RE = /\[File:\s*(.+?)\]\s*(?:\(binary file\))?[\s\S]*?\[\/File\]\s*\n?/g;
 const PLAN_MODE_BLOCK_RE = /^<plan-mode-instructions>[\s\S]*?<\/plan-mode-instructions>\s*\n?/;
 const ATTACHMENT_INSTRUCTIONS_BLOCK_RE = /<pi-code-attachment-instructions>[\s\S]*?<\/pi-code-attachment-instructions>\s*\n?/g;
+const REFERENCED_WORKSPACE_FILES_BLOCK_RE = /\n\nReferenced workspace files to inspect if needed:\n[\s\S]*$/;
 
 /** Build the model-facing fallback used when attachments are sent without user text. */
 export function createAttachmentOnlyPromptText(imageCount: number, fileNames: readonly string[]): string {
@@ -52,9 +53,10 @@ export function prepareUserMessageContent(rawText: string, imageCount = 0): User
     });
     const withoutPlanMode = withoutFiles.replace(PLAN_MODE_BLOCK_RE, '');
     const withoutAttachmentInstructions = withoutPlanMode.replace(ATTACHMENT_INSTRUCTIONS_BLOCK_RE, '');
+    const withoutFileMentionMetadata = withoutAttachmentInstructions.replace(REFERENCED_WORKSPACE_FILES_BLOCK_RE, '');
     const legacyAttachmentPrompt = getLegacyAttachmentOnlyPromptText(imageCount, fileNames);
-    const cleanText = legacyAttachmentPrompt && withoutAttachmentInstructions.trim() === legacyAttachmentPrompt
+    const cleanText = legacyAttachmentPrompt && withoutFileMentionMetadata.trim() === legacyAttachmentPrompt
         ? ''
-        : withoutAttachmentInstructions;
+        : withoutFileMentionMetadata;
     return { cleanText, fileNames };
 }

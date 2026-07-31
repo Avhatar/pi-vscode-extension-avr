@@ -67,6 +67,11 @@ export interface TabNameUpdate {
     readonly name: string;
 }
 
+const FILE_BLOCK_TITLE_RE = /\[File:\s*(.+?)\]\s*(?:\(binary file\))?[\s\S]*?\[\/File\]\s*\n?/g;
+const PLAN_MODE_TITLE_BLOCK_RE = /^<plan-mode-instructions>[\s\S]*?<\/plan-mode-instructions>\s*/;
+const ATTACHMENT_INSTRUCTIONS_TITLE_BLOCK_RE = /<pi-code-attachment-instructions>[\s\S]*?<\/pi-code-attachment-instructions>\s*\n?/g;
+const REFERENCED_WORKSPACE_FILES_TITLE_RE = /\n\nReferenced workspace files to inspect if needed:\n[\s\S]*$/;
+
 export type QueueControlCommand = Extract<
     AgentClientMessage,
     { type: 'queueMessage' | 'editQueuedMessage' | 'removeQueuedMessage' | 'cancelQueue' }
@@ -589,13 +594,7 @@ export class ChatService {
         if (tab.name === 'New Agent') {
             const firstUser = tab.session.getMessages().find((message: any) => message.role === 'user');
             if (firstUser) {
-                const content = firstUser.content;
-                const text: string = typeof content === 'string'
-                    ? content
-                    : Array.isArray(content)
-                        ? (content.find((part: any) => part.type === 'text')?.text ?? '')
-                        : '';
-                const trimmed = text.replace(/\n/g, ' ').trim().slice(0, 60);
+                const trimmed = deriveTabNameFromUserContent(firstUser.content);
                 if (trimmed) {
                     tab.name = trimmed;
                     return { changed: true, name: tab.name };
@@ -682,6 +681,22 @@ export function countUserTurns(messages: readonly unknown[]): number {
         }
     }
     return count;
+}
+
+function deriveTabNameFromUserContent(content: unknown): string {
+    const text = typeof content === 'string'
+        ? content
+        : Array.isArray(content)
+            ? String(content.find((part: any) => part?.type === 'text')?.text ?? '')
+            : '';
+    return text
+        .replace(FILE_BLOCK_TITLE_RE, '')
+        .replace(PLAN_MODE_TITLE_BLOCK_RE, '')
+        .replace(ATTACHMENT_INSTRUCTIONS_TITLE_BLOCK_RE, '')
+        .replace(REFERENCED_WORKSPACE_FILES_TITLE_RE, '')
+        .replace(/\n/g, ' ')
+        .trim()
+        .slice(0, 60);
 }
 
 function findMessageCutoff(messages: readonly any[], rollbackPoint: number): number {

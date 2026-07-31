@@ -52,6 +52,20 @@ describe('user message content preparation', () => {
         });
     });
 
+    it('hides file mention augmentation metadata from rendered user prompts', () => {
+        const rawText = [
+            '@LICENSE test file mention rendering',
+            '',
+            'Referenced workspace files to inspect if needed:',
+            '- LICENSE',
+        ].join('\n');
+
+        expect(prepareUserMessageContent(rawText)).toEqual({
+            cleanText: '@LICENSE test file mention rendering',
+            fileNames: [],
+        });
+    });
+
     it('hides an internal attachment-only instruction while retaining the file chip', () => {
         const attachmentPrompt = createAttachmentOnlyPromptText(0, ['notes.txt']);
         const rawText = [
