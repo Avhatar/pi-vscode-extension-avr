@@ -48,13 +48,13 @@ export function resolveAgentSpec(
 
     const maxTurns = resolveBoundedInteger(
         'maxTurns',
-        invocation.maxTurns ?? definition?.maxTurns ?? policy.defaultMaxTurns ?? 30,
+        invocation.maxTurns ?? definition?.maxTurns ?? policy.defaultMaxTurns ?? 60,
         policy.maxTurns ?? 100,
         diagnostics,
     );
     const timeoutMinutes = resolveBoundedInteger(
         'timeoutMinutes',
-        invocation.timeoutMinutes ?? definition?.timeoutMinutes ?? policy.defaultTimeoutMinutes ?? 10,
+        invocation.timeoutMinutes ?? definition?.timeoutMinutes ?? policy.defaultTimeoutMinutes ?? 30,
         policy.maxTimeoutMinutes ?? 120,
         diagnostics,
     );

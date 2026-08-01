@@ -68,6 +68,7 @@ export const AgentClientMessageSchema = Type.Union([
     Type.Object({ type: Type.Literal('loadSession'), sessionPath: Type.String() }, StrictObject),
     Type.Object({ type: Type.Literal('getSessions') }, StrictObject),
     Type.Object({ type: Type.Literal('getState') }, StrictObject),
+    Type.Object({ type: Type.Literal('renameTab'), name: NonEmptyString }, StrictObject),
     Type.Object({
         type: Type.Literal('undoFileChange'),
         filePath: Type.String(),

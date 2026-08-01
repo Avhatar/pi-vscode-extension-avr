@@ -268,8 +268,8 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.subagents.defaultModel` | `string` | `""` | Default child model in canonical `provider/id` format; empty uses the agent definition and then the parent model |
 | `pi-code.subagents.allowedModels` | `string[]` | `[]` | Exact `provider/id` allowlist for child agents; empty permits every configured model |
 | `pi-code.subagents.allowInvocationModelOverride` | `boolean` | `true` | Allow the parent orchestrator to select an exact child provider/model per delegation |
-| `pi-code.subagents.defaultMaxTurns` | `number` | `30` | Default maximum child turns (1–100) |
-| `pi-code.subagents.defaultTimeoutMinutes` | `number` | `10` | Default child timeout in minutes (1–120) |
+| `pi-code.subagents.defaultMaxTurns` | `number` | `60` | Default maximum child turns (1–100) |
+| `pi-code.subagents.defaultTimeoutMinutes` | `number` | `30` | Default child timeout in minutes (1–120) |
 | `pi-code.subagents.maxConcurrentGlobal` | `number` | `4` | Maximum children running across all Pi Code chats (1–16) |
 | `pi-code.subagents.maxConcurrentPerChat` | `number` | `2` | Maximum children from one parent chat occupying execution slots (1–8) |
 | `pi-code.mcp.importClaudeCode` | `boolean` | `false` | Add a managed import for user-level Claude Code MCP servers without copying definitions or credentials |

@@ -8,7 +8,7 @@ There is one union of client messages and one union of server messages, and they
 
 [src/shared/protocol.ts](../../../../src/shared/protocol.ts) is a barrel. It re-exports the three transport-partitioned message unions and adds the surfaces that don't cleanly belong to any single transport (settings, launcher, RawMode):
 
-- `AgentClientMessage` / `AgentServerMessage` — agent-domain messages. Live in [src/shared/agent-protocol.ts](../../../../src/shared/agent-protocol.ts). Prompts, model choice, session lifecycle, tool toggles, checkpoint / undo, file mentions, queue edits.
+- `AgentClientMessage` / `AgentServerMessage` — agent-domain messages. Live in [src/shared/agent-protocol.ts](../../../../src/shared/agent-protocol.ts). Prompts, model choice, session lifecycle, tab naming, tool toggles, checkpoint / undo, file mentions, queue edits.
 - `PlatformClientMessage` / `PlatformServerMessage` — host-capability requests. Live in [src/shared/platform-protocol.ts](../../../../src/shared/platform-protocol.ts). Two members total: `openFile`, `confirmAction`. `PlatformServerMessage` is `never`.
 - `VsCodeClientMessage` / `VsCodeServerMessage` — VS Code-specific UI operations. Live in [src/shared/vscode-protocol.ts](../../../../src/shared/vscode-protocol.ts). `openDiff`, `openSettings`, `openKeybindings`, `openChangelog`, `openRawView`, and a single `{ type: 'ready' }` server-side lifecycle marker.
 
@@ -87,7 +87,7 @@ The [src/shared/interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts)
 **Used by:**
 - [activation-and-registration](../../01-extension-host-substrate/activation-and-registration/activation-and-registration.md) — every registered provider and serializer eventually posts `ServerMessage`s built from these types.
 - [agent-connection-client](../agent-connection-client/agent-connection-client.md) — the client's request and event payloads are members of those unions.
-- [configuration-and-secrets](../../01-extension-host-substrate/configuration-and-secrets/configuration-and-secrets.md) — `SettingsData`, `SettingsClientMessage`, `SettingsServerMessage`, and `OAuthFlowState` are declared there.
+- [configuration-and-secrets](../../01-extension-host-substrate/configuration-and-secrets/configuration-and-secrets.md) — typed settings messages.
 - [launcher-view](../../06-ui-surfaces-webview/launcher-view/launcher-view.md) — 31 client messages + 1 server message.
 - [platform-ports](../../03-portable-chat-core/platform-ports/platform-ports.md) — `DiffReviewRequest` and `RawSessionSummary` reference message-protocol types.
 - [protocol-runtime](../protocol-runtime/protocol-runtime.md) — schemas are declared against those message types; any drift is caught here at build time.

@@ -1,6 +1,6 @@
 ---
 name: wiki-maintain
-description: Use to keep the repo wiki synchronized with the repo as it evolves (code, tooling, assets, pipelines). Triggers — after a code change that added / renamed / deleted types appearing as wiki keywords; on explicit user request ("update wiki", "check wiki", "update wiki for X"); quarterly drift audit.
+description: Keep the repo wiki synchronized with every repository change that affects documented behavior, architecture, configuration, workflows, rules, identifiers, paths, assets, or pipelines. Run automatically as a completion gate, on explicit sync requests, and for drift audits.
 ---
 
 # wiki-maintain
@@ -9,9 +9,11 @@ Maintain the repo wiki at `<repo-root>/wiki/` — `index.md` (book-chapters TOC)
 
 ## When to invoke
 
-1. **After a code change touches types that are wiki keywords.** Run the lightweight check (Step 1 below); if the change affects wiki content, run the full workflow.
+1. **After every repository change.** Run the lightweight impact check in Step 1. If the change affects any fact represented in the existing wiki, update the affected articles and `wiki/changelog.md` in the same work without waiting for a separate request.
 2. **Explicit request** — user says "update wiki for X", "check wiki", "sync wiki".
 3. **Quarterly drift audit** — scheduled reconciliation between wiki Keywords and the current code index.
+
+No wiki edit is required when the impact check confirms that the change affects no documented fact. The assessment itself is mandatory.
 
 ## Scope
 
@@ -70,7 +72,7 @@ Routing rubric. **Approval column = does this need user sign-off before editing 
 | Rename type | `grep -r <OLD_NAME> wiki/`, replace across all hits, rerun validators | ❌ No |
 | Delete type | Remove from Keywords; if it was the last mention, remove any dedicated Pitfall/Pattern bullet too | ❌ No |
 | Code contradicts existing Stance / Role sentence | Revise the sentence — obvious correction | ❌ No |
-| Code contradicts a Rule/Pitfall bullet | **Escalate** — the rule may no longer hold | ✅ Yes |
+| Approved code change contradicts a Rule/Pitfall bullet | Revise it in place when the new rule is unambiguous; escalate only if the contradiction suggests an unintended invariant violation or the replacement rule is unclear | ❌ No when unambiguous; ✅ Yes otherwise |
 | New subsystem under existing article | Mention as sub-hint in See-also or Stance; never as a new article. **If it introduces a cross-article dependency, also add to `## Lifecycle edges § Depends on:` on the source side; `compute-used-by.py` will populate the reverse.** | ❌ No |
 | New article needed (subsystem too large for inline mention) | **Escalate** — possible new article OR chapter expansion. New article: ≥7 distinct types + distinct reader-task. | ✅ Yes |
 | Cross-cutting concept that doesn't fit any one chapter | Update `appendix-a-seam-types.md` (create if absent) to reference primary owner; new appendix entry only if it spans 3+ chapters | ❌ No for cross-link addition; ✅ Yes for new appendix entry |
@@ -150,7 +152,7 @@ Present the checklist to the user in one message. Wait for explicit approval bef
 ## Non-scope
 
 - **Automated code-index diff** (finding types added/removed/renamed in code not yet reflected in wiki) — not part of this skill's scope. Rely on the triggers above + manual `grep`.
-- **Auto-sync hooks** — no hook listens for code changes and updates wiki; manual workflow.
+- **Filesystem auto-sync hooks** — no hook listens for code changes and rewrites wiki files. The coding agent still runs this manual workflow automatically as a required completion gate.
 
 ## Scripts inventory
 

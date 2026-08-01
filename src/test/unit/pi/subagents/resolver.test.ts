@@ -43,6 +43,20 @@ function policy(overrides: Partial<SubagentResolutionPolicy> = {}): SubagentReso
 }
 
 describe('subagent specification resolution', () => {
+    it('uses generous built-in execution defaults when the host does not provide them', () => {
+        const resolved = resolveAgentSpec({ get: () => undefined }, {
+            task: 'Investigate thoroughly.',
+        }, policy({
+            defaultMaxTurns: undefined,
+            maxTurns: 100,
+            defaultTimeoutMinutes: undefined,
+            maxTimeoutMinutes: 120,
+        }));
+
+        expect(resolved.maxTurns).toBe(60);
+        expect(resolved.timeoutMinutes).toBe(30);
+    });
+
     it('combines named and ad-hoc instructions with invocation model precedence', () => {
         const resolved = resolveAgentSpec(lookup, {
             task: 'Investigate auth.',

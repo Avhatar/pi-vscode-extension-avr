@@ -25,7 +25,7 @@ describe('Protocol types', () => {
         const agentClientTypes = [
             'prompt', 'steer', 'followUp', 'abort', 'getModels', 'setModel', 'toggleFavorite',
             'setThinkingLevel', 'newSession', 'loadSession', 'getSessions', 'getState',
-            'undoFileChange', 'restoreCheckpoint', 'redoCheckpoint', 'createTab', 'closeTab',
+            'renameTab', 'undoFileChange', 'restoreCheckpoint', 'redoCheckpoint', 'createTab', 'closeTab',
             'switchTab', 'getSkills', 'searchWorkspaceFiles', 'queueMessage', 'editQueuedMessage',
             'removeQueuedMessage', 'cancelQueue', 'setCacheMode', 'setTodoEnabled',
             'setSubagentsEnabled', 'setPlanModeEnabled', 'setFileUndoViewEnabled',
@@ -64,7 +64,7 @@ describe('Protocol types', () => {
             ...agentClientTypes,
             ...platformClientTypes,
             ...vsCodeClientTypes,
-        ]).toHaveLength(38);
+        ]).toHaveLength(39);
         expect([
             ...agentServerTypes,
             ...platformServerTypes,
@@ -82,6 +82,7 @@ describe('Protocol types', () => {
             { type: 'getModels' },
             { type: 'getSessions' },
             { type: 'getState' },
+            { type: 'renameTab', name: 'Renamed chat' },
             { type: 'setPlanModeEnabled', enabled: true },
             { type: 'setTodoEnabled', enabled: false },
             { type: 'setToolDisabled', toolName: 'read', disabled: true },

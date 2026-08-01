@@ -74,7 +74,7 @@ Activation is a single-shot integration function, not a controller. Its job is t
 **Used by:**
 - [bundle-targets-and-esbuild](../bundle-targets-and-esbuild/bundle-targets-and-esbuild.md) — extension host bundle target has to include everything `activate()` transitively imports; changing entry point layout ripples here.
 - [chat-panel-provider](../../06-ui-surfaces-webview/chat-panel-provider/chat-panel-provider.md) — `ChatPanelSerializer` and the `openOrFocusPanel` command are registered from `activate()`.
-- [configuration-and-secrets](../configuration-and-secrets/configuration-and-secrets.md) — the sole subscriber to `context.secrets.onDidChange` and the only place `SettingsPanel.show` is bound to a command.
+- [configuration-and-secrets](../configuration-and-secrets/configuration-and-secrets.md) — secret-change subscription and settings command registration.
 - [vscode-workspace-and-diff](../../04-platform-adapters/vscode-workspace-and-diff/vscode-workspace-and-diff.md) — `DiffContentProvider` is registered once from `activate()` with `vscode.workspace.registerTextDocumentContentProvider`.
 
 ## See also

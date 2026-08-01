@@ -45,6 +45,7 @@ describe('chat protocol runtime validation', () => {
             { type: 'loadSession', sessionPath: '/session.jsonl' },
             { type: 'getSessions' },
             { type: 'getState' },
+            { type: 'renameTab', name: 'Renamed chat' },
             { type: 'openFile', filePath: '/workspace/file.ts' },
             { type: 'openDiff', filePath: '/workspace/file.ts', toolCallId: 'tool-1' },
             { type: 'undoFileChange', filePath: '/workspace/file.ts', toolCallId: 'tool-1' },
@@ -72,7 +73,7 @@ describe('chat protocol runtime validation', () => {
             { type: 'setToolsBulk', disabled: ['bash', 'write'] },
         ];
 
-        expect(messages).toHaveLength(37);
+        expect(messages).toHaveLength(38);
         for (const message of messages) expect(isClientMessage(message), message.type).toBe(true);
     });
 
@@ -81,6 +82,7 @@ describe('chat protocol runtime validation', () => {
             { type: 'prompt', text: 'hello' },
             { type: 'abort' },
             { type: 'getState' },
+            { type: 'renameTab', name: 'Renamed chat' },
             { type: 'createTab' },
             { type: 'setCacheMode', mode: 'auto' },
         ];
@@ -108,6 +110,7 @@ describe('chat protocol runtime validation', () => {
             { type: 'unknown' },
             { type: 'prompt' },
             { type: 'prompt', text: 42 },
+            { type: 'renameTab', name: '' },
             {
                 type: 'prompt',
                 text: 'hello',

@@ -63,9 +63,9 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 - [session-lifecycle](../session-lifecycle/session-lifecycle.md) — acquires the runtime during session initialization.
 
 **Used by:**
-- Parent and child `createAgentSession({ modelRuntime })` calls.
-- Settings OAuth controls and provider/model projections.
-- Codex model metadata and usage-token resolution.
+- [configuration-and-secrets](../../01-extension-host-substrate/configuration-and-secrets/configuration-and-secrets.md) — canonical runtime and model/provider projection.
+- [session-lifecycle](../session-lifecycle/session-lifecycle.md) — canonical `ModelRuntime`, model resolution, and SecretStorage overrides.
+- [settings-panel](../../06-ui-surfaces-webview/settings-panel/settings-panel.md) — providers dropdown source.
 
 ## See also
 

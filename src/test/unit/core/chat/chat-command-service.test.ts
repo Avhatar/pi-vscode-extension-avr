@@ -81,7 +81,7 @@ describe('portable ChatCommandService', () => {
         }
     });
 
-    it('routes prompt, streaming, and queue commands through existing portable services', async () => {
+    it('routes prompt, streaming, queue, and rename commands through existing portable services', async () => {
         const { service, chat, tab, callbacks, handleName, publishState } = createHarness();
 
         await service.dispatch(tab, { type: 'prompt', text: 'task' }, callbacks);
@@ -97,6 +97,10 @@ describe('portable ChatCommandService', () => {
         await service.dispatch(tab, { type: 'queueMessage', text: 'next' }, callbacks);
         expect(chat.applyQueueControl).toHaveBeenCalledWith(tab, { type: 'queueMessage', text: 'next' });
         expect(publishState).toHaveBeenCalled();
+
+        await service.dispatch(tab, { type: 'renameTab', name: 'Local' }, callbacks);
+        expect(handleName).toHaveBeenCalledWith('/name Local', false);
+        expect(chat.dispatchDirectPrompt).toHaveBeenCalledTimes(1);
 
         handleName.mockReturnValueOnce(true);
         await service.dispatch(tab, { type: 'prompt', text: '/name Local' }, callbacks);

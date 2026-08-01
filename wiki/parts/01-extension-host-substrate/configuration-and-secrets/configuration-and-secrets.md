@@ -47,9 +47,15 @@ OAuth is distinct from manual keys. The settings host derives OAuth-capable prov
 - [message-protocol](../../02-shared-protocol-and-contracts/message-protocol/message-protocol.md) — typed settings messages.
 
 **Used by:**
-- Parent and child Pi sessions through their shared `ModelRuntime`.
-- Settings-panel provider, sign-in, and key-state rendering.
-- Model picker and Codex metadata/usage consumers via `onAuthChanged` refreshes.
+- [activation-and-registration](../activation-and-registration/activation-and-registration.md) — reads `pi-code.*` config and stores / retrieves API keys through the same `pi-code.apiKey.<provider>` prefix documented there.
+- [claude-sdk-compat](../../05-pi-sdk-integration/claude-sdk-compat/claude-sdk-compat.md) — `pi-code.claudeCompat.enabled` / `pi-code.claudeCompat.mode` gate activation.
+- [lsp-tools](../../11-auxiliary-systems/lsp-tools/lsp-tools.md) — `pi-code.lsp.enabled` setting.
+- [message-protocol](../../02-shared-protocol-and-contracts/message-protocol/message-protocol.md) — `SettingsData` is one of the artefacts declared here and consumed there.
+- [models-and-auth](../../05-pi-sdk-integration/models-and-auth/models-and-auth.md) — owns persistence and the secret-change subscription.
+- [plan-mode-and-todos](../../08-message-flow-discipline/plan-mode-and-todos/plan-mode-and-todos.md) — `pi-code.planMode.defaultEnabled`, `pi-code.todo.promptGuidelines`, `pi-code.todo.defaultEnabled` settings.
+- [settings-panel](../../06-ui-surfaces-webview/settings-panel/settings-panel.md) — `SettingsData`, `KNOWN_PROVIDERS`, and the `ModelRuntime` SecretStorage bridge live there.
+- [subagent-manager-and-lifecycle](../../09-subagents/subagent-manager-and-lifecycle/subagent-manager-and-lifecycle.md) — `pi-code.subagents.*` settings.
+- [vscode-session-platform](../../04-platform-adapters/vscode-session-platform/vscode-session-platform.md) — the settings and secret-storage surface the adapters wrap.
 
 ## See also
 

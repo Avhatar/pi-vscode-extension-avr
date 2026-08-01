@@ -82,12 +82,19 @@ body[data-mode="panel"] .tab-strip,
 }
 
 /* Panel-mode toolbar: a small action bar at the top of every editor chat panel,
-   giving the user "New chat" and "History" without going back to the launcher. */
+   giving the user chat actions without going back to the launcher. */
 .panel-toolbar {
     display: flex;
     gap: 4px;
     align-items: center;
     padding: 4px 6px;
+}
+.panel-toolbar-inner {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
 }
 .panel-toolbar .panel-toolbar-btn {
     background: transparent;
@@ -113,6 +120,33 @@ body[data-mode="panel"] .tab-strip,
     height: 14px;
     object-fit: contain;
     filter: brightness(0) invert(0.8);
+}
+.panel-rename-form {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 120px;
+    max-width: min(360px, 55vw);
+    flex: 1 1 240px;
+}
+.panel-rename-input {
+    flex: 1 1 auto;
+    min-width: 80px;
+    height: 24px;
+    padding: 2px 6px;
+    color: var(--vscode-input-foreground);
+    background: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border, var(--vscode-focusBorder));
+    border-radius: 3px;
+    font: inherit;
+}
+.panel-rename-input:focus {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
+.panel-rename-action {
+    padding-left: 6px;
+    padding-right: 6px;
 }
 .panel-toolbar-spacer {
     flex: 1;

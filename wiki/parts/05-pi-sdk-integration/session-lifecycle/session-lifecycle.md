@@ -91,7 +91,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 - [claude-sdk-compat](../claude-sdk-compat/claude-sdk-compat.md) — `createClaudeContextExtension` is registered as an ExtensionFactory during resource-loader construction.
 - [desktop-host-lifecycle](../../10-standalone-desktop-host/desktop-host-lifecycle/desktop-host-lifecycle.md) — `PiSessionManager` instantiated per tab.
 - [lsp-tools](../../11-auxiliary-systems/lsp-tools/lsp-tools.md) — the extension factory is one of the resource-loader factories.
-- [models-and-auth](../models-and-auth/models-and-auth.md) — every session consumes the shared runtime during model resolution and request authentication.
+- [models-and-auth](../models-and-auth/models-and-auth.md) — acquires the runtime during session initialization.
 - [plan-mode-and-todos](../../08-message-flow-discipline/plan-mode-and-todos/plan-mode-and-todos.md) — the ToDo extension is one of the factories handed to the resource loader.
 - [raw-mode](../../11-auxiliary-systems/raw-mode/raw-mode.md) — recorder is created / mounted / bound per session.
 - [steering](../../08-message-flow-discipline/steering/steering.md) — `PiSessionManager` exposes the three SDK operations.

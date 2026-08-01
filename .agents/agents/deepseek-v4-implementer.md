@@ -4,8 +4,8 @@ description: Implement one small, concrete, well-specified change in this reposi
 model: deepseek/deepseek-v4-pro
 thinkingLevel: high
 tools: [read, grep, find, ls, edit, write]
-maxTurns: 20
-timeoutMinutes: 15
+maxTurns: 60
+timeoutMinutes: 30
 background: false
 contextMode: fresh
 isolation: worktree

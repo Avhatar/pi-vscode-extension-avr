@@ -14,6 +14,7 @@ Two things happen when a client message hits the chat core. First, `ChatCommandS
 - **Session lifecycle** (`newSession`, `loadSession`, `getSessions`) — return an intent or emit sessions via `callbacks.emit`.
 - **Tool toggles** (`setTodoEnabled`, `setSubagentsEnabled`, `setPlanModeEnabled`, `setFileUndoViewEnabled`, `setToolDisabled`, `setToolsBulk`) — return an intent.
 - **State queries** (`getState`) — call `callbacks.publishState()`.
+- **Tab naming** (`renameTab`) — translate the typed toolbar action into the same `/name` path used by prompt commands, then call `callbacks.handleName` without dispatching a model prompt.
 - **File mentions** (`searchWorkspaceFiles`) — call `fileMentions.ensureIndexed`, then emit `workspaceFileSuggestions`.
 - **File history** (`undoFileChange`, `restoreCheckpoint`, `redoCheckpoint`) — await the corresponding `chat` method, call `callbacks.notifyFileHistory`, publish state.
 - **Tab lifecycle** (`createTab`, `closeTab`, `switchTab`) — return an intent.
@@ -44,6 +45,7 @@ The callback surface (`directPrompt`, `streaming`, `fileMentions`, `getFavorites
 
 **Attributes / markers:**
 - Slash prefix `/name` — reserved for tab renaming; parsed before prompt dispatch
+- Client message `renameTab` — toolbar-native rename intent routed through the same `handleName` callback as `/name`
 - Slash prefix `/compact` — reserved; parsed inside `ChatService.dispatchDirectPrompt`
 
 **Namespaces:**

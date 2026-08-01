@@ -150,6 +150,9 @@ export class ChatCommandService {
             case 'getState':
                 callbacks.publishState();
                 return {};
+            case 'renameTab':
+                callbacks.handleName(`/name ${message.name}`, false);
+                return {};
             case 'getSkills':
                 callbacks.emit({ type: 'skills', skills: tab.session.getSkills() });
                 return {};

@@ -1,7 +1,7 @@
 # desktop-ipc-contract
 
 > **Retired.** Documents the Electron standalone host removed on 2026-07-22.
-> See [`dev-notes/migration-overview.md`](../../../../dev-notes/migration-overview.md).
+> Its successor lives in the private `standalone/` submodule.
 
 ## Stance
 

@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.66.1] - 2026-08-01
+
+### Changed
+- Child agents now have 60 turns and 30 minutes by default, reducing premature failures during longer delegated tasks.
+
+## [0.66.0] - 2026-07-31
+
+### Added
+- Added a rename button to chat editor panels that opens an inline field prefilled with the current chat name.
+
 ## [0.65.5] - 2026-07-31
 
 ### Fixed

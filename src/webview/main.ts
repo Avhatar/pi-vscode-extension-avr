@@ -573,16 +573,12 @@ function handleStreamingDelta(ae: any): void {
 let skeletonBuilt = false;
 
 /**
- * Build the panel-mode toolbar with "New chat" and "History" buttons. The
- * sidebar variant uses VS Code's `view/title` menu instead, so this only
- * runs for editor panels.
+ * Build the panel-mode toolbar with "New chat", "History", and per-chat action
+ * buttons. The sidebar variant uses VS Code's `view/title` menu instead, so
+ * this only runs for editor panels.
  */
 function buildPanelToolbar(): HTMLElement {
-    const wrap = document.createElement('div');
-    wrap.style.display = 'flex';
-    wrap.style.alignItems = 'center';
-    wrap.style.gap = '4px';
-    wrap.style.width = '100%';
+    const wrap = el('div', 'panel-toolbar-inner');
 
     const newBtn = el('button', 'panel-toolbar-btn');
     newBtn.title = 'Start a new chat in a new editor tab';
@@ -600,6 +596,15 @@ function buildPanelToolbar(): HTMLElement {
     });
     wrap.appendChild(historyBtn);
 
+    const renameBtn = el('button', 'panel-toolbar-btn');
+    renameBtn.id = 'panel-toolbar-rename';
+    renameBtn.title = 'Rename this chat';
+    renameBtn.innerHTML = `<img class="panel-toolbar-icon-img" src="${iconsBaseUri}/pencil.png" alt="rename chat">`;
+    renameBtn.addEventListener('click', () => {
+        showPanelRenameEditor();
+    });
+    wrap.appendChild(renameBtn);
+
     const rawBtn = el('button', 'panel-toolbar-btn');
     rawBtn.id = 'panel-toolbar-raw';
     rawBtn.hidden = !rawModeEnabled;
@@ -614,6 +619,80 @@ function buildPanelToolbar(): HTMLElement {
     wrap.appendChild(spacer);
 
     return wrap;
+}
+
+function getCurrentSessionDisplayName(): string {
+    const targetTabId = viewMode === 'panel' ? panelTabId : state.activeTabId;
+    const currentTab = state.tabs.find((tab) => tab.id === targetTabId);
+    return currentTab?.name ?? state.sessionName ?? 'New Chat';
+}
+
+function normalizeSessionNameInput(value: string): string {
+    return value.replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
+function showPanelRenameEditor(): void {
+    const toolbar = document.querySelector('.panel-toolbar-inner') as HTMLElement | null;
+    if (!toolbar) return;
+
+    const existing = document.getElementById('panel-rename-input') as HTMLInputElement | null;
+    if (existing) {
+        existing.focus();
+        existing.select();
+        return;
+    }
+
+    const form = el('form', 'panel-rename-form') as HTMLFormElement;
+    form.id = 'panel-rename-form';
+
+    const input = document.createElement('input');
+    input.id = 'panel-rename-input';
+    input.className = 'panel-rename-input';
+    input.type = 'text';
+    input.maxLength = 60;
+    input.value = getCurrentSessionDisplayName();
+    input.setAttribute('aria-label', 'Chat name');
+
+    const saveBtn = el('button', 'panel-toolbar-btn panel-rename-action') as HTMLButtonElement;
+    saveBtn.type = 'submit';
+    saveBtn.title = 'Save chat name';
+    saveBtn.innerHTML = `<img class="panel-toolbar-icon-img" src="${iconsBaseUri}/check.png" alt="save chat name">`;
+
+    const cancelBtn = el('button', 'panel-toolbar-btn panel-rename-action') as HTMLButtonElement;
+    cancelBtn.type = 'button';
+    cancelBtn.title = 'Cancel rename';
+    cancelBtn.innerHTML = `<img class="panel-toolbar-icon-img" src="${iconsBaseUri}/cross.png" alt="cancel rename">`;
+
+    const close = () => form.remove();
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const nextName = normalizeSessionNameInput(input.value);
+        if (!nextName) {
+            input.focus();
+            input.select();
+            return;
+        }
+        if (nextName !== normalizeSessionNameInput(getCurrentSessionDisplayName())) {
+            vscode.postMessage({ type: 'renameTab', name: nextName });
+        }
+        close();
+    });
+    cancelBtn.addEventListener('click', close);
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            close();
+        }
+    });
+
+    form.append(input, saveBtn, cancelBtn);
+    const renameButton = document.getElementById('panel-toolbar-rename');
+    const spacer = toolbar.querySelector('.panel-toolbar-spacer');
+    toolbar.insertBefore(form, renameButton?.nextSibling ?? spacer ?? null);
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 0);
 }
 
 function updateRawModeToolbarVisibility(): void {

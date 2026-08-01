@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-01 — Chat rename, subagent defaults, and automatic wiki maintenance
+
+- **Code:** Added typed inline chat renaming in editor panels, raised default child-agent execution limits from 30 turns / 10 minutes to 60 turns / 30 minutes, and aligned the bundled `deepseek-v4-implementer` definition; repository guidance now requires an automatic wiki-impact check and in-place synchronization during every relevant change.
+- **Wiki:** `chat-command-service.md` and `message-protocol.md` now document the typed `renameTab` path; `subagent-manager-and-lifecycle.md` records the new execution defaults. The two retired desktop IPC pages now point to the private `standalone/` successor instead of a deleted migration note. Recomputed five stale `Used by` sections from the dependency graph. `wiki-maintain` policy and workflow now make existing-article synchronization a required completion gate rather than an opt-in follow-up.
+- **Escalations:** none — these are existing-article fact, link, graph, and maintenance-rule corrections without a taxonomy change.
+
 ## 2026-07-23 — Standalone-repo split reflected in TOC framing
 
 - **Code:** Split standalone into a separate private repo <https://github.com/Avhatar/pi-code-standalone> attached as a submodule at `standalone/` (commit `09434c3`); then inlined the fonts/assets into that submodule and dropped the nested `pi-code-standalone-assets` layer (commit `ec5df86`). CRT-shader work (commit `fc8edd1`) lives entirely inside the submodule and does not surface in the extension-runtime wiki.

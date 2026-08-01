@@ -212,6 +212,7 @@ export type AgentClientMessage =
     | { type: 'loadSession'; sessionPath: string }
     | { type: 'getSessions' }
     | { type: 'getState' }
+    | { type: 'renameTab'; name: string }
     | { type: 'undoFileChange'; filePath: string; toolCallId: string }
     | { type: 'restoreCheckpoint'; messageIndex: number }
     | { type: 'redoCheckpoint' }

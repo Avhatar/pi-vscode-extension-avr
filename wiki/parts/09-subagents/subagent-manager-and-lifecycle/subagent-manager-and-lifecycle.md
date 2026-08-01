@@ -84,7 +84,7 @@ Mutation routing [mutations.ts:1](../../../../src/pi/subagents/mutations.ts#L1) 
 - Default global concurrency: `4` (`pi-code.subagents.maxConcurrentGlobal`)
 - Default per-parent concurrency: `2` (`pi-code.subagents.maxConcurrentPerChat`)
 - Default terminal retention: 10 minutes, 20-slot LRU
-- Default maxTurns: `30`, default timeoutMinutes: `10`
+- Default maxTurns: `60`, default timeoutMinutes: `30`
 - Status values: `queued | running | completed | failed | aborted | timed-out`
 
 **Namespaces:**
