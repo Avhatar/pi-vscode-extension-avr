@@ -1,6 +1,6 @@
 # Chapter: raw-mode
 
-RawMode is the per-chat developer view of the full agent-to-model exchange. Every `pi.on(...)` event, every provider payload, every response, every stream chunk — captured verbatim, appended to a JSONL file keyed by session path, replayable through a dedicated panel. Not a debug flag: **always recording, always unbounded**, deleted only by explicit user action (clear this session, clear all, or delete the parent history session).
+RawMode is the per-chat developer view of the full agent-to-model exchange. While the opt-in `pi-code.rawMode.enabled` setting is on, every `pi.on(...)` event, provider payload, response, and stream chunk is captured verbatim, appended to an unbounded JSONL file keyed by session path, and replayable through a dedicated panel. Disabling capture leaves existing recordings available until the user clears one session, clears all Raw Mode data, or deletes the corresponding History session.
 
 ## Article roster
 
@@ -24,6 +24,6 @@ The reader arrives here to answer one of:
 
 ## Non-goals
 
-- Redaction / retention policy — the design decision is "no redaction, no retention"; user-initiated Clear is the only removal path.
+- Redaction / automatic retention policy — enabled capture is verbatim and unbounded; removal occurs through per-session Clear, Clear All, or deletion of the corresponding History session.
 - Cross-session correlation — the recorder is per-session, not per-tab.
 - Analysis / query language — RawMode is a raw dump for humans; consume via the panel or read the JSONL directly.

@@ -17,11 +17,12 @@ The paths are then handed to `DefaultResourceLoader.additionalExtensionPaths` in
 
 ## Role — packaging constraints
 
-The mechanism only works if the VSIX actually contains the packages. Three rules:
+The mechanism only works if the VSIX actually contains the packages. Four rules:
 
 1. **The package must be a production dependency in the root `package.json`.** `devDependencies` are stripped by `npm prune --omit=dev` before packaging (see [Part I § bundle-targets-and-esbuild](../../01-extension-host-substrate/bundle-targets-and-esbuild/bundle-targets-and-esbuild.md)) and will not be in the VSIX.
-2. **`.vscodeignore` must not filter `node_modules/**`.** Any filter (even with `!node_modules/@earendil-works/**` exceptions) strips hoisted transitive dependencies and breaks activation. Current `.vscodeignore` leaves `node_modules/` alone; keep it that way.
-3. **Don't call `pi install` from extension code.** No activation-time install, no `postinstall` script, no calls into `~/.pi/`. The mechanism is `additionalExtensionPaths` and nothing else.
+2. **`.vscodeignore` must not filter `node_modules/**`.** Any broad filter (even with `!node_modules/@earendil-works/**` exceptions) strips hoisted transitive dependencies and breaks activation. Current `.vscodeignore` leaves `node_modules/` alone; keep it that way.
+3. **Don't call `pi install` from extension code or lifecycle scripts.** No activation-time package install and no calls into `~/.pi/`; bundled resources still arrive only through `additionalExtensionPaths`.
+4. **Repair and verify the physical runtime tree after every reification step.** Pi SDK 0.82.1 ships a shrinkwrap that pins vulnerable nested `brace-expansion` 5.0.7. The root declares patched 5.0.9, and `scripts/ensure-safe-brace-expansion.js --repair` removes the nested copy so Pi's `minimatch` resolves the safe root package. Root `postinstall` repairs after install; because `npm prune` restores the shrinkwrapped copy, packaging repairs again and then verifies before `vsce` runs. This local deterministic repair never downloads packages or writes user-global Pi state.
 
 ## Keywords
 
@@ -30,6 +31,7 @@ The mechanism only works if the VSIX actually contains the packages. Three rules
 
 **Methods:**
 - `getBundledPiPackagePaths(extensionRoot, log?)` — [bundled-packages.ts:25](../../../../src/pi/bundled-packages.ts#L25)
+- `ensure-safe-brace-expansion.js --repair` — install-time nested-package repair and package-time physical-resolution verification
 
 **Attributes / markers:**
 - Path resolution: `${extensionRoot}/node_modules/<name>`
@@ -53,8 +55,9 @@ The mechanism only works if the VSIX actually contains the packages. Three rules
 ## See also
 
 - **Rule — add a new bundled Pi extension in four steps.** (1) `npm install <package> --save` — MUST be a production dependency. (2) Append the name to `BUNDLED_PI_PACKAGES`. (3) Confirm `.vscodeignore` doesn't exclude `node_modules/<pkg>/**`. (4) Smoke-test the produced VSIX in a clean VS Code window; new tools should show in the tool list, new skills in the `/` menu.
-- **Rule — never call `pi install npm:<pkg>` from extension code.** No activation, no postinstall. It writes to user-global state and pollutes the install; nothing in the VSIX changes.
+- **Rule — never call `pi install npm:<pkg>` from extension code or lifecycle scripts.** It writes to user-global state and pollutes the install; the local `brace-expansion` repair is not a Pi package install and never touches `~/.pi/`.
 - **Rule — do not rely on transitive dependencies.** Declare the Pi package explicitly in the root `package.json`. `npm prune --omit=dev` cannot drop what's a direct production dep; it can drop packages only reachable through another dep.
 - **Pattern — the SDK reads the package manifest.** You don't wire skills or extensions manually. Ensure the package's `package.json` correctly declares `pi.extensions` and `pi.skills`; the SDK does the rest.
 - **Pitfall — Pi extension versions are pinned to the VSIX release.** Upgrading a bundled Pi extension requires cutting a new Pi Code release. Tradeoff: an upstream regression in a bundled extension can't break the plugin between our releases; a fix requires a release.
 - **Pitfall — missing package = silent skip.** If the extensionRoot's `node_modules` is missing a listed package (e.g. developer nuked `node_modules` and forgot `npm install`), `getBundledPiPackagePaths` logs and moves on. Activation will not crash; the affected extension will simply be unavailable at runtime.
+- **Pitfall — audit metadata can lag behind the repaired tree.** The upstream SDK shrinkwrap still names `brace-expansion` 5.0.7, so `npm audit` can report it after postinstall removed that nested directory. Release acceptance checks `verify:runtime-dependencies` and the VSIX contents; remove the workaround only after an upstream shrinkwrap resolves a safe version itself.

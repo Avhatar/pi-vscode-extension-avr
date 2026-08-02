@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-02 — Marketplace patch readiness
+
+- **Code:** Refreshed Marketplace and repository product documentation and the Marketplace screenshot for the changes accumulated since Marketplace 0.57.1, expanded manifest discovery metadata, moved CI to Node.js 22.19 with unit-test and tag/version gates, documented the current packaged size and explicit publication boundary, updated vulnerable transitive dependencies, and added a deterministic install/package guard plus SemVer boundary coverage for the Pi SDK's shrinkwrapped vulnerable `brace-expansion` copy.
+- **Wiki:** `packaging-and-release.md` now records the roughly 120 MB compressed runtime package, explicit Marketplace publication and verification step, matching-tag rule, private standalone-submodule boundary, and physical runtime-dependency repair gate; its chapter intro no longer describes the retired Electron packager as the active standalone build, and the computed reverse edge in `desktop-host-lifecycle.md` was refreshed. `bundled-pi-packages.md` documents why the local repair is not `pi install` and why audit metadata can outlive the removed nested package, while `bundle-targets-and-esbuild.md` includes runtime verification in the package chain. The Raw Mode article and intro now describe opt-in capture, immediate stop-on-disable, retained recordings, and every supported deletion path accurately.
+- **Escalations:** none — these are corrections and extensions to the existing packaging-and-release article, with no taxonomy change.
+
 ## 2026-08-01 — Chat rename, subagent defaults, and automatic wiki maintenance
 
 - **Code:** Added typed inline chat renaming in editor panels, raised default child-agent execution limits from 30 turns / 10 minutes to 60 turns / 30 minutes, and aligned the bundled `deepseek-v4-implementer` definition; repository guidance now requires an automatic wiki-impact check and in-place synchronization during every relevant change.

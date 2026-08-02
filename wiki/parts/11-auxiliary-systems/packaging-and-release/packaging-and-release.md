@@ -6,10 +6,12 @@ The release pipeline is **strict and scripted**. `[Unreleased]` in `CHANGELOG.md
 
 ## Role
 
-Manifest scripts [package.json:287-303](../../../../package.json#L287):
+Manifest scripts [package.json](../../../../package.json):
 
 - `compile` → `node esbuild.js`
-- `package` → `npm run verify:vsix-boundary && npx @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links --readme-path MARKETPLACE.md`
+- `postinstall` / `repair:runtime-dependencies` → remove the Pi SDK's shrinkwrapped vulnerable `brace-expansion` copy so its `minimatch` resolves root 5.0.9
+- `verify:runtime-dependencies` → fail unless Pi physically resolves patched `brace-expansion`
+- `package` → post-prune runtime repair + runtime-dependency verification + VSIX boundary verification + `vsce package --readme-path MARKETPLACE.md`
 - `test`, `test:unit`, `test:integration`
 - `version:patch/minor/major` → `node scripts/bump-version.js <bump> --sync-lock`
 - `deploy` → compile + prune devDeps + package + reinstall devDeps + `code --install-extension`
@@ -56,9 +58,19 @@ Deploy chain (all `deploy:*` scripts):
 1. `npm run version:<level>` — bump version + stamp CHANGELOG.
 2. `npm run compile` — esbuild bundles.
 3. `npm prune --omit=dev` — strip devDeps from `node_modules`.
-4. `npm run package` — verify boundary + `vsce package`.
-5. `npm install` — restore devDeps.
+4. `npm run package` — repair the shrinkwrapped runtime dependency restored by prune, verify the physical tree, verify the public/private boundary, then run `vsce package`.
+5. `npm install` — restore devDeps and rerun the deterministic runtime repair through `postinstall`.
 6. `code --install-extension pi-code-<version>.vsix --force` — local install for smoke test.
+
+Pruning guarantees that only production dependencies remain; it does not make the package small by itself. The current bundled SDK, provider integrations, web tooling, and native helpers produce a compressed VSIX of roughly 120 MB, and dependency upgrades can change that size.
+
+Marketplace publication is a separate explicit maintainer action after the installed-VSIX smoke test:
+
+```bash
+npx @vscode/vsce publish --packagePath pi-code-<version>.vsix
+```
+
+After publishing, verify the intended version on the Marketplace page or Gallery API. A matching `v<version>` tag independently triggers the GitHub Release workflow; CI rejects tags that disagree with `package.json`.
 
 ## Keywords
 
@@ -69,13 +81,15 @@ Deploy chain (all `deploy:*` scripts):
 - [MARKETPLACE.md](../../../../MARKETPLACE.md) — VSIX README
 - [scripts/bump-version.js](../../../../scripts/bump-version.js) — version bump
 - [scripts/verify-vsix-boundary.js](../../../../scripts/verify-vsix-boundary.js) — boundary verifier
+- [scripts/ensure-safe-brace-expansion.js](../../../../scripts/ensure-safe-brace-expansion.js) — install-time repair and package-time physical dependency verifier
 
 **Methods — scripts:**
 - `bump-version.js` steps: read → validate `[Unreleased]` → compute → stamp → sync-lock (optional)
 - `verify-vsix-boundary.js`: `vsce ls` → check prefixes → exit code
+- `ensure-safe-brace-expansion.js`: resolve Pi's `minimatch` dependency → remove vulnerable nested copy in repair mode → require safe root fallback → accept only valid, stable SemVer at or above 5.0.8 (build metadata is allowed; prereleases are rejected)
 
 **Attributes / markers:**
-- Semver: `MAJOR.MINOR.PATCH`
+- Release SemVer: stable `MAJOR.MINOR.PATCH`; generic SemVer may also carry `-PRERELEASE` and `+BUILD` identifiers
 - Date format: `YYYY-MM-DD` (ISO 8601)
 - Bump-abort condition: empty `[Unreleased]`
 - Boundary abort condition: any `standalone/` prefix in packaged files
@@ -91,7 +105,7 @@ Deploy chain (all `deploy:*` scripts):
 **Depends on:**
 - [Part I § bundle-targets-and-esbuild](../../01-extension-host-substrate/bundle-targets-and-esbuild/bundle-targets-and-esbuild.md) — `compile` invokes esbuild; the CSS unignore rule is critical.
 - [Part V § bundled-pi-packages](../../05-pi-sdk-integration/bundled-pi-packages/bundled-pi-packages.md) — bundled Pi extensions must be production deps so `npm prune --omit=dev` doesn't strip them.
-- [Part X § desktop-host-lifecycle](../../10-standalone-desktop-host/desktop-host-lifecycle/desktop-host-lifecycle.md) — the standalone desktop is a *separate* build; the boundary verifier ensures it doesn't leak into the VSIX.
+- [Part X § desktop-host-lifecycle](../../10-standalone-desktop-host/desktop-host-lifecycle/desktop-host-lifecycle.md) — the retired Electron host remains a historical snapshot, while the private `standalone/` successor is excluded wholesale from the public VSIX.
 ## See also
 
 - **Rule — `[Unreleased]` cannot be empty before bumping.** The bump script aborts. Add entries under `### Added / Changed / Removed / Fixed` before running `deploy:*`.
@@ -101,4 +115,6 @@ Deploy chain (all `deploy:*` scripts):
 - **Pattern — sync-lock is optional but recommended.** `--sync-lock` runs `npm install --package-lock-only`; guarantees `package-lock.json` reflects the new version. Skip only if you know the lock is already correct.
 - **Pitfall — `code --install-extension --force` overwrites the existing install.** Fine for developer machines; do not run inside CI without a clean profile.
 - **Pitfall — the boundary verifier hardcodes `['standalone/']`.** If a new subtree needs to be excluded from the VSIX, add it to the list; do not rely on `.vscodeignore` alone.
-- **Pattern — deploy is local by default.** The `deploy:*` scripts install the VSIX into your local VS Code; there is no `publish:*` script that pushes to the marketplace. Publishing is a separate manual step by the maintainer.
+- **Pattern — deploy is local by default.** The `deploy:*` scripts install the VSIX into local VS Code; publishing requires an explicit `vsce publish --packagePath ...` maintainer action after smoke testing.
+- **Rule — release tags must match the manifest.** The GitHub workflow accepts only `v<package.json version>` tags before packaging and creating a GitHub Release.
+- **Rule — package the physically resolved dependency tree, not audit metadata alone.** Pi SDK 0.82.1 shrinkwraps vulnerable `brace-expansion` 5.0.7. Install-time repair removes that nested copy, and packaging aborts unless Pi resolves root 5.0.9; the upstream lock metadata can continue to trigger an `npm audit` advisory until its shrinkwrap is updated.

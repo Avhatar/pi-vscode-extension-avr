@@ -31,7 +31,9 @@ npm install             # restore devDeps for further development
 The prune step is required because `vsce` packages everything in
 `node_modules/` that isn't ignored, and the hoisted layout makes it
 non-trivial to walk only production dependencies. Pruning first
-guarantees the VSIX contains exactly the runtime tree (~40 MB).
+guarantees the VSIX contains exactly the runtime tree. With the current
+bundled SDK, provider integrations, web tooling, and native helper binaries,
+the compressed VSIX is roughly 120 MB; dependency updates can change this.
 
 Install the resulting `.vsix` with `code --install-extension <file>
 --force` or via the **Extensions: Install from VSIX...** command.
@@ -44,6 +46,16 @@ and `settings-panel.ts` load CSS via `vscode.Uri.joinPath(extensionUri,
 with a `!node_modules/@earendil-works/**` exception -- that strips the
 hoisted transitive deps (`proper-lockfile`, `undici`, `glob`, ...) and
 breaks activation with `Cannot find package 'proper-lockfile'`.
+
+The Pi SDK 0.82.1 package ships an `npm-shrinkwrap.json` that pins a vulnerable
+nested `brace-expansion` 5.0.7 even though its semver range accepts the patched
+5.0.9 release. The root declares 5.0.9 explicitly, and `npm install` runs
+`scripts/ensure-safe-brace-expansion.js --repair` to remove the nested copy so
+Pi's `minimatch` resolves the safe root package. Because `npm prune` restores
+the shrinkwrapped copy, `npm run package` repairs once more and then verifies the
+physical resolution before creating a VSIX. Until the upstream shrinkwrap is
+updated, `npm audit` can still report the removed nested copy from lock metadata;
+do not suppress the package-time verifier or remove the direct fallback.
 
 ## Standalone Desktop (private submodule)
 

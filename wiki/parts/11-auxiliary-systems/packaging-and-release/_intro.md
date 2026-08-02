@@ -19,10 +19,10 @@ The reader arrives here to answer one of:
 
 - **Bundle production** (esbuild targets, tsconfig scope, `.vscodeignore` CSS unignore) is [Part I § bundle-targets-and-esbuild](../../01-extension-host-substrate/bundle-targets-and-esbuild/bundle-targets-and-esbuild.md).
 - **Bundled Pi packages** invariants (production-dep declaration) are [Part V § bundled-pi-packages](../../05-pi-sdk-integration/bundled-pi-packages/bundled-pi-packages.md).
-- **Standalone desktop build** (a separate esbuild + Electron packager) is [Part X § desktop-host-lifecycle](../../10-standalone-desktop-host/desktop-host-lifecycle/desktop-host-lifecycle.md).
+- **Standalone desktop boundary** is the private `standalone/` submodule; [Part X § desktop-host-lifecycle](../../10-standalone-desktop-host/desktop-host-lifecycle/desktop-host-lifecycle.md) preserves the retired Electron host as a historical snapshot. The VSIX boundary excludes the entire submodule.
 
 ## Non-goals
 
-- Signing / notarization of the standalone desktop app — Electron-specific, not documented here.
+- Standalone desktop packaging, signing, and private-submodule internals — owned by the standalone repository, not documented here.
 - CI workflow definitions (`.github/workflows/*`) — out of scope; the wiki describes the *local* pipeline.
 - Marketplace publisher account setup — one-time, documented outside the repo.

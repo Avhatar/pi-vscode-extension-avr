@@ -18,7 +18,7 @@ Two build targets, one repo, three constraints. First: **the extension host and 
 
 `.vscodeignore` starts by excluding `src/**` so raw TypeScript never ships, then re-includes `src/webview/styles/**` because runtime CSS paths point back into `src/webview/styles/`. Any move of the styles directory has to be reflected in both `.vscodeignore` and the panel constructors.
 
-`package.json` scripts wire everything together: `compile` runs esbuild once, `watch` runs esbuild's context/watch mode for incremental rebuilds, `package` runs a boundary verifier followed by `vsce package`, and `deploy:{patch,minor,major}` runs the full compile → prune devDeps → package → install → restore chain.
+`package.json` scripts wire everything together: `compile` runs esbuild once, `watch` runs esbuild's context/watch mode for incremental rebuilds, `package` repairs and verifies the shrinkwrapped runtime dependency before the VSIX boundary verifier and `vsce package`, and `deploy:{patch,minor,major}` runs the full compile → prune devDeps → package → install → restore chain.
 
 ## Keywords
 
@@ -38,7 +38,7 @@ Two build targets, one repo, three constraints. First: **the extension host and 
 **Methods — package scripts:**
 - `npm run compile` — build once
 - `npm run watch` — incremental rebuilds
-- `npm run package` — `verify:vsix-boundary` + `vsce package`
+- `npm run package` — `repair:runtime-dependencies` + `verify:runtime-dependencies` + `verify:vsix-boundary` + `vsce package`
 - `npm run test:unit` — vitest
 - `npm run test:all` — unit + integration
 - `npm run deploy:patch|minor|major` — full release pipeline (see [Part XI § packaging-and-release](../../../index.md#part-xi--auxiliary-systems))

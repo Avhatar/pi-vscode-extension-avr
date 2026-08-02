@@ -141,10 +141,19 @@ npm prune --omit=dev
 ```
 
 **Required** because `vsce` packages everything in `node_modules/`.
-Pruning guarantees the VSIX contains only the runtime tree (~40 MB).
+Pruning guarantees the VSIX contains only the runtime tree. With the current
+bundled SDK, provider integrations, web tooling, and native helper binaries,
+the compressed VSIX is roughly 120 MB; dependency updates can change this.
 
 **Do NOT** add `node_modules/**` to `.vscodeignore` with selective `!` exceptions —
 that strips hoisted transitive deps and breaks activation.
+
+Pi SDK 0.82.1 shrinkwraps vulnerable `brace-expansion` 5.0.7. The root pins 5.0.9,
+and the install-time repair removes the nested copy so Pi resolves the safe root package.
+Because `npm prune` restores the shrinkwrapped copy, `npm run package` starts by repairing
+again and then runs `verify:runtime-dependencies`; it must fail if the resulting physical
+resolution is unsafe. Until upstream updates its shrinkwrap, `npm audit` may still report
+the removed nested copy from lock metadata; inspect the verifier result and packaged tree.
 
 ### 3. Package into VSIX
 
@@ -160,6 +169,9 @@ Produces `pi-code-<version>.vsix` in the project root.
 npm install
 ```
 
+The root `postinstall` reruns `repair:runtime-dependencies`, keeping the restored
+development tree on the same safe runtime resolution as the packaged tree.
+
 ### 5. Install into VS Code
 
 ```bash
@@ -169,6 +181,20 @@ code --install-extension pi-code-<version>.vsix --force
 ### 6. Reload VS Code
 
 `Ctrl+Shift+P` → **Developer: Reload Window**
+
+## Marketplace publication and GitHub release
+
+Local `deploy:*` commands never publish to the Marketplace. After the installed-VSIX
+smoke test passes, publish only on an explicit user request with maintainer credentials:
+
+```bash
+npx @vscode/vsce publish --packagePath pi-code-<version>.vsix
+```
+
+Then verify `Avhatar.pi-code` reports the intended version through the Marketplace page
+or Gallery API. GitHub Releases are created separately by pushing a matching `v<version>`
+tag; CI rejects a tag whose version does not match `package.json`. Do not publish, tag,
+or push merely because a local deploy completed.
 
 ## Development mode (F5)
 
@@ -189,6 +215,8 @@ npm run watch
 |--------|-------------|
 | `npm run compile` | esbuild: TS → JS |
 | `npm run watch` | esbuild in watch mode |
+| `npm run repair:runtime-dependencies` | Remove the vulnerable shrinkwrapped `brace-expansion` copy so Pi resolves root 5.0.9 |
+| `npm run verify:runtime-dependencies` | Fail unless Pi physically resolves a patched `brace-expansion` version |
 | `npm run deploy` | compile → prune → package → install (no version bump) |
 | `npm run deploy:patch` | bump patch + deploy |
 | `npm run deploy:minor` | bump minor + deploy |
@@ -216,7 +244,7 @@ After deploy + window reload:
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `[Unreleased] section is empty` | No changelog entries | Add changes to CHANGELOG.md under `[Unreleased]` |
-| `Cannot find package 'proper-lockfile'` | VSIX built without prune | Use `npm run deploy` |
+| `Cannot find package 'proper-lockfile'` | `node_modules` was selectively excluded from the VSIX or the production install is incomplete | Keep `node_modules` unfiltered, run `npm install`, then use `npm run deploy` |
 | Code changes not visible | Old VSIX installed | `npm run deploy`, then Reload Window |
-| VSIX is ~130 MB | Packaged with devDependencies | `npm prune --omit=dev` before package |
+| VSIX is materially larger than the previous release or contains test/build packages | Dev dependencies were not pruned, or a runtime dependency grew | Run `npm prune --omit=dev`, inspect `npx @vscode/vsce ls`, then package again |
 | Extension works in F5 but not installed | Packaging bug | Always test with real VSIX install |

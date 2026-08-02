@@ -122,7 +122,7 @@ Build [build.mjs:6](../../../../standalone/desktop/build.mjs#L6):
 
 **Used by:**
 - [desktop-ipc-contract](../desktop-ipc-contract/desktop-ipc-contract.md) — the main-process runtime the host talks to.
-- [packaging-and-release](../../11-auxiliary-systems/packaging-and-release/packaging-and-release.md) — the standalone desktop is a *separate* build; the boundary verifier ensures it doesn't leak into the VSIX.
+- [packaging-and-release](../../11-auxiliary-systems/packaging-and-release/packaging-and-release.md) — the retired Electron host remains a historical snapshot, while the private `standalone/` successor is excluded wholesale from the public VSIX.
 
 ## See also
 

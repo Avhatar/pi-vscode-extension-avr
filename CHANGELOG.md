@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.66.3] - 2026-08-02
+
+### Security
+- Updated vulnerable runtime and test dependencies, and added a packaging guard that replaces the Pi SDK's shrinkwrapped vulnerable `brace-expansion` copy with the patched 5.0.9 release before tests or packaging.
+
+## [0.66.2] - 2026-08-02
+
+### Changed
+- Marketplace and repository guides now summarize all extension changes since 0.57.1 and document chat renaming, startup diagnostics, Claude compatibility controls, Raw Mode privacy and retention, current commands, and every available setting; the Marketplace screenshot now reflects the current interface.
+- Marketplace metadata now provides a richer product description and search keywords.
+- Release artifacts are now built with the supported Node.js 22.19 runtime, gated by unit tests, and protected against version-mismatched Git tags.
+
 ## [0.66.1] - 2026-08-01
 
 ### Changed

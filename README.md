@@ -37,6 +37,15 @@ In addition to those two structural changes, the fork has accumulated a number o
 
 The fork tracks the upstream `@earendil-works/pi-coding-agent` SDK as a regular npm dependency and stays in sync with its API.
 
+## What's new since Marketplace 0.57.1
+
+- **Chat renaming** — use the pencil button in a chat panel or type `/name` to rename a chat locally without contacting the model. Renamed chats keep their full history, diffs, and checkpoints.
+- **Raw Mode** — opt-in developer diagnostics that record complete unredacted provider payloads and agent events to local VS Code global storage. The recording stays local, is disabled by default, and opens with **Pi Code: Open Raw View for Active Chat**.
+- **Faster startup and restoration** — Pi SDK warm-up removes the first dynamic-import delay, an optional full prewarm (`pi-code.prewarm.full`) completes session bring-up at startup, and the Codex model catalog is cached across reloads. Chat panels show a loading overlay and VS Code status progress while new or restored sessions prepare.
+- **Claude compatibility controls** — a master switch (`pi-code.claudeCompat.enabled`) and per-workspace mode (`auto` / `on` / `off`) control when the Claude bridge activates. Restored chat and Raw View tabs reconnect after `Reload Window` without waiting for the sidebar.
+- **Reliability fixes** — streaming preserves your reading position, attachment and file-mention scaffolding stays out of visible prompts, queued messages wait for full agent settlement, and long-running compaction no longer shows a misleading request timeout.
+- **Pi SDK 0.82.1** — updated model runtime, provider authentication, retry behaviour, and model catalog support.
+
 ## Features
 
 ### Editor-Tab Chat Panels with Launcher Sidebar
@@ -67,7 +76,7 @@ Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle
 Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
 
 ### Settings Page with OAuth Login
-A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API keys, default model and thinking level, ToDo behaviour, subagents, Claude Code MCP import, file-mention indexing, and chat appearance. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
+A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API keys, default model and thinking level, ToDo behaviour, subagents, Claude compatibility controls, Raw Mode recording, performance diagnostics and prewarm, Claude Code MCP import, file-mention indexing, and chat appearance. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
 
 ### Bundled Pi Extensions
 Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `fetch_content`, and `get_search_content` — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Search uses OpenAI when suitable and available, then falls back through Exa, Brave, Parallel, Tavily, Perplexity, and Gemini; Exa MCP works without an API key. The bundled `pi-mcp-adapter` discovers project servers declared in `.mcp.json` or `.pi/mcp.json`. Enable `pi-code.mcp.importClaudeCode` to add a managed reference to user-level Claude Code MCP servers; definitions and credentials stay in Claude Code's config. No `pi install` step is required.
@@ -131,6 +140,15 @@ Token usage and context window utilization are displayed in both the chat footer
 
 ### User Message Glow
 User messages in the chat have a subtle colored glow outline for visual distinction. The color and opacity are configurable via `pi-code.userMessageGlowColor` and `pi-code.userMessageGlowOpacity` settings, allowing you to customize or disable the effect.
+
+### Chat Renaming
+Use the pencil button in a chat panel or type `/name <new name>` to rename a chat locally without contacting the model. The name is reused in the editor tab and launcher history. Renamed chats keep their full conversation history, tracked file changes, and checkpoint state.
+
+### Raw Mode (Developer Diagnostics)
+Raw Mode records the complete unredacted stream of provider payloads and agent events for a chat session into a local JSONL file under VS Code global storage. Disabled by default — toggle `pi-code.rawMode.enabled` to start capturing for active and future chats. Capture is unbounded while enabled and may include system prompts, tool schemas and results, provider headers, model exchanges, and workspace file contents. Existing recordings persist on disk after you disable the setting; clear them per session or delete all Raw Mode data from Pi Code Settings, or delete the corresponding History entry to remove its recording. Open the Raw View with the **Pi Code: Open Raw View for Active Chat** command or the inspect icon in the chat toolbar.
+
+### Startup and Performance Diagnostics
+The extension warms up behind the scenes so the launcher sidebar and first chat tab open without perceptible delay. Enable `pi-code.prewarm.full` to bring up the entire Pi session (SDK import, auth, model registry, resource loader) at VS Code startup — every subsequent chat opens nearly instantly, at the cost of ~3 seconds added to window reload and ~50 MB extra memory. For troubleshooting slow activation or session bring-up, toggle `pi-code.perf.enabled` to record detailed timing events to a JSONL file under the extension's global storage; the file path is printed to the Pi Code output channel on activation.
 
 ## Prerequisites
 
@@ -245,6 +263,8 @@ Main user-facing commands are available from the command palette (`Ctrl+Shift+P`
 - **Pi Code: Toggle Thinking Level** — Cycle through thinking verbosity levels
 - **Pi Code: Focus Chat** — Reveal the active chat panel, or fall back to the launcher
 - **Pi Code: Open Settings** — Open the Pi Code settings page
+- **Pi Code: Open Raw View for Active Chat** — Open the Raw Mode diagnostic viewer for the active chat
+- **Pi Code: Run Subagent Smoke Test** — *(developer)* validate subagent lifecycle, worktree isolation, and policy enforcement
 
 ## Settings
 
@@ -273,7 +293,12 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.subagents.maxConcurrentGlobal` | `number` | `4` | Maximum children running across all Pi Code chats (1–16) |
 | `pi-code.subagents.maxConcurrentPerChat` | `number` | `2` | Maximum children from one parent chat occupying execution slots (1–8) |
 | `pi-code.mcp.importClaudeCode` | `boolean` | `false` | Add a managed import for user-level Claude Code MCP servers without copying definitions or credentials |
+| `pi-code.claudeCompat.enabled` | `boolean` | `true` | Master switch for Claude Code compatibility; disable to bypass all Claude bridge logic regardless of workspace mode |
+| `pi-code.claudeCompat.mode` | `string` | `auto` | Per-workspace Claude compatibility mode: `auto` (detect), `on` (force), or `off` (bypass) |
 | `pi-code.lsp.enabled` | `boolean` | `false` | Expose Language Server tools (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) to the agent. Off by default — the tools are not registered and add nothing to the system prompt. Requires a language extension for each file's language (C#, rust-analyzer, Pylance, etc.). |
+| `pi-code.rawMode.enabled` | `boolean` | `false` | Record complete unredacted provider payloads and agent events to local global-storage JSONL; existing recordings persist after disabling |
+| `pi-code.perf.enabled` | `boolean` | `false` | Record activation and session-bring-up timings to a local JSONL file for troubleshooting slow startup |
+| `pi-code.prewarm.full` | `boolean` | `false` | Perform full Pi session bring-up at VS Code startup. Adds about 3 seconds to reload, roughly 50 MB of memory, and a startup model-metadata request |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines injected into the system prompt for the ToDo tool |
 | `pi-code.userMessageGlowColor` | `string` | `#00aaff` | Color of the subtle glow outline around user messages in the chat |
 | `pi-code.userMessageGlowOpacity` | `number` | `40` | Opacity of the glow around user messages, as a percentage (0–100) |
@@ -433,6 +458,12 @@ npm run test:all
 ```
 
 Use the **Run Extension** launch configuration (F5) to open an Extension Development Host with the extension loaded and debuggable.
+
+## Privacy
+
+Provider API keys and OAuth tokens entered in Pi Code settings are stored in VS Code's `SecretStorage`, never in `settings.json` or a plaintext file. Network requests go only to providers and services you configure or invoke, including enabled MCP servers and bundled web tools. Optional web-search credentials can be supplied separately through `~/.pi/web-search.json`. Opt-in managed config writes, such as the Claude Code MCP import, are explicit in their setting. No telemetry or usage data of any kind is sent to the publisher.
+
+**Raw Mode:** When `pi-code.rawMode.enabled` is on, Pi Code mirrors complete unredacted provider payloads and agent events for each chat session to a local JSONL file under VS Code global storage. Recordings may contain sensitive data such as system prompts, tool schemas and results, provider headers, model exchanges, and workspace file contents. Pi Code does not upload the recording; the captured exchanges still use the providers and services you configured. Capture is unbounded while enabled, and existing recordings persist after the setting is disabled. Clear one session or all Raw Mode data from Pi Code Settings, or delete the corresponding History entry. Raw Mode is disabled by default.
 
 ## License
 

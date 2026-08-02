@@ -6,6 +6,8 @@ Three layers keep RawMode auditable. **Recorder** owns per-session state — buf
 
 ## Role
 
+Capture is gated globally by `pi-code.rawMode.enabled`, which defaults to `false`. Enabling it mounts recording for active and future chats; disabling it immediately stops both capture channels and hides the Raw View toolbar icon without deleting existing recordings. Storage remains available until the user clears it or deletes the corresponding History session.
+
 Storage on disk under `<globalStorageUri>/raw/`:
 
 - Manifest [raw-storage.ts:24](../../../../src/adapters/vscode/raw-storage.ts#L24) — `{ version: 1, entries: Record<hash, { hash, sessionPath, createdAtMs }> }`.
@@ -112,7 +114,7 @@ Cleanup wiring in `ChatController.deleteHistorySession` [chat-controller.ts:478]
 
 ## See also
 
-- **Rule — always record, never redact.** The design is intentional: RawMode is what the agent saw, verbatim. Users who need privacy must use "Clear" (per-session or all) to remove; no filtering.
+- **Rule — when enabled, record verbatim and never redact.** Raw Mode is disabled by default; while enabled it records what the agent and provider exchange without filtering or size retention. Disabling capture preserves existing recordings until per-session Clear, Clear All, or History deletion removes them.
 - **Rule — cleanup rides `deleteHistorySession`.** Deleting the parent chat session deletes the raw data. Do not add an orphan-collection pass; if history disappears, raw follows.
 - **Pattern — two capture channels, no dedup.** Harness events (via `pi.on`) and session-only events (via `EventRouter.onAll`) are logged verbatim; the panel groups them by seq. Attempting to dedup at the recorder would confuse the timeline.
 - **Pattern — pending → concrete rebind.** New sessions start with a pending id (the session file doesn't exist yet). Once the SDK opens the file and yields `sessionPath`, `bindSessionPath` migrates the recorder to the concrete path. Buffered entries get their `sessionPath` field rewritten.

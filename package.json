@@ -1,11 +1,20 @@
 {
   "name": "pi-code",
   "displayName": "Pi Code",
-  "description": "VS Code UI for the Pi coding agent",
-  "version": "0.66.1",
+  "description": "Editor-tab UI for the Pi coding agent with multi-model chat, subagents, diffs, rollback, web/MCP tools, and Claude compatibility",
+  "version": "0.66.3",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "chat",
+    "claude-code",
+    "codex",
+    "mcp",
+    "subagents"
+  ],
   "engines": {
     "vscode": "^1.110.0"
   },
@@ -302,7 +311,10 @@
   "scripts": {
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
-    "package": "npm run verify:vsix-boundary && npx @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links --readme-path MARKETPLACE.md",
+    "postinstall": "npm run repair:runtime-dependencies",
+    "repair:runtime-dependencies": "node scripts/ensure-safe-brace-expansion.js --repair",
+    "verify:runtime-dependencies": "node scripts/ensure-safe-brace-expansion.js",
+    "package": "npm run repair:runtime-dependencies && npm run verify:runtime-dependencies && npm run verify:vsix-boundary && npx @vscode/vsce package --allow-missing-repository --no-rewrite-relative-links --readme-path MARKETPLACE.md",
     "test": "vitest",
     "test:unit": "vitest run",
     "compile:integration-tests": "tsc -p tsconfig.integration.json",
@@ -322,10 +334,12 @@
     "@earendil-works/pi-ai": "0.82.1",
     "@earendil-works/pi-coding-agent": "0.82.1",
     "@earendil-works/pi-tui": "0.82.1",
+    "brace-expansion": "5.0.9",
     "marked": "^18.0.2",
     "minimatch": "^10.2.5",
     "pi-mcp-adapter": "^2.11.0",
     "pi-web-access": "^0.13.0",
+    "semver": "7.8.0",
     "typebox": "^1.1.38",
     "yaml": "^2.9.0"
   },
