@@ -21,7 +21,7 @@ Invariants: **deterministic insertion order**; **at most one active tab**; **no 
 - Timing: `agentStartTime`, `totalTurnDurationMs`, `lastTurnEndAt`, `maxIdleGapMs`.
 - Queue: `queuedMessages[]`, `queuedRetryHead`, `queuedRetryAttempts`.
 - Streaming flags: `isStreamingLocal`, `isCompacting`, `errorReportedThisRun`, `hasNotification`.
-- Metadata: `messageMeta: Map<ordinal, TabMessageMeta>`, `turnNotificationGate`, `pendingTools: Map<callId, PendingToolInfo>`, `codexTurnBaseline`, `projectToolDefault`.
+- Metadata: `messageMeta: Map<ordinal, TabMessageMeta>`, `turnNotificationGate`, `pendingTools: Map<callId, PendingToolInfo>`, Codex account-window baselines, the DeepSeek session-cost baseline, `projectToolDefault`.
 - Cache: `cacheEffective`.
 
 Two lifecycle methods matter. [`addSubscription(unsub)`](../../../../src/core/chat/tab-runtime.ts#L107) collects callbacks (session listeners, diff listeners); [`unsubscribe()`](../../../../src/core/chat/tab-runtime.ts#L111) runs all of them and rethrows the first error so a single bad listener doesn't silently skip its peers. [`disposeResources()`](../../../../src/core/chat/tab-runtime.ts#L157) is the top-level teardown: unsubscribe, then dispose `session`, `diffManager`, `checkpointManager` in that order; each disposal is guarded so a failure in one doesn't skip the next.
@@ -46,7 +46,7 @@ The `ApplicationTab` interface at [chat-application.ts:4](../../../../src/core/c
 
 **Types — runtime:**
 - `TabRuntime<TSession, TDiff, TCheckpoint>` — [tab-runtime.ts:38](../../../../src/core/chat/tab-runtime.ts#L38)
-- `TabMessageMeta` — same file; `thinkingDurationSec`, `messageEndTime`, `codexTurn?`, `turnDurationMs?`, `totalTurnDurationMs?`
+- `TabMessageMeta` — same file; `thinkingDurationSec`, `messageEndTime`, `codexTurn?`, `deepSeekTurn?`, `turnDurationMs?`, `totalTurnDurationMs?`
 - `PendingToolInfo` — [src/shared/agent-protocol.ts:107](../../../../src/shared/agent-protocol.ts#L107)
 - `TurnNotificationGate` — [chat/turn-notification-gate.ts](../../../../src/core/chat/turn-notification-gate.ts)
 

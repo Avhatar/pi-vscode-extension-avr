@@ -1,7 +1,6 @@
 import type {
     AgentClientMessage,
     CacheMode,
-    CodexTurnUsage,
     SerializedAgentState,
 } from '../../shared/agent-protocol';
 import type { TurnCompletionInfo } from '../../shared/turn-notification';
@@ -20,6 +19,7 @@ import {
     type ChatServiceCheckpoint,
     type ChatServiceSession,
     type ChatStateContext,
+    type AgentEndAccounting,
     type FileHistoryTarget,
     type SessionProjectionResetTarget,
 } from './chat-service';
@@ -105,7 +105,7 @@ export interface ChatHostEventEffects<TTab extends ChatHostTab> {
     showAutoRetry?(event: any): void;
     logTurnEnd?(tab: TTab, assistantMessage: any | undefined): void;
     sweepPendingTools?(tab: TTab, assistantMessage: any | undefined): void;
-    completeAgentEndAccounting?(tab: TTab): Promise<CodexTurnUsage | undefined>;
+    completeAgentEndAccounting?(tab: TTab): Promise<AgentEndAccounting | undefined>;
     notifyTurnCompletion?(tab: TTab, completion: TurnCompletionInfo): void;
     emitAgentEvent(tabId: string, event: unknown): void;
     dispatchNextQueued(tab: TTab): Promise<void>;
@@ -466,8 +466,8 @@ export class ChatHost<TTab extends ChatHostTab> {
                 runtime,
                 turnCompletionOutcome(lastAssistant),
             );
-            const codexTurn = await eventEffects?.completeAgentEndAccounting?.(tab);
-            this.chat.completeAgentEnd(runtime, projection, codexTurn);
+            const accounting = await eventEffects?.completeAgentEndAccounting?.(tab);
+            this.chat.completeAgentEnd(runtime, projection, accounting);
             if (tab.id === this.activeTabId) {
                 eventEffects?.streamingContextChanged?.(false);
             }

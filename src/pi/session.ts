@@ -888,6 +888,13 @@ export class PiSessionManager {
         };
     }
 
+    getSessionCost(): number | undefined {
+        const cost = this._session?.getSessionStats?.().cost;
+        return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0
+            ? cost
+            : undefined;
+    }
+
     /** Copy refreshed runtime metadata onto an already-open session model. */
     refreshCurrentModelMetadata(): boolean {
         const current: any = this._session?.model;

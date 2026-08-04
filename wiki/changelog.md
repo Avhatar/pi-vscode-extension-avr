@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-03 — DeepSeek balance and monetary turn accounting
+
+- **Code:** Added official DeepSeek balance refreshes, key/date-scoped local daily spend accounting, SDK session-cost turn deltas, typed host/webview messages, and chat footer presentation for remaining balance plus turn, session, and daily costs.
+- **Wiki:** `message-protocol.md` and `protocol-runtime.md` now list the DeepSeek payloads and runtime schema; `tab-registry-and-runtime.md` and `chat-host-and-service.md` document provider-specific monetary turn metadata; `session-lifecycle.md` records the cumulative session-cost projection; `models-and-auth.md` owns the DeepSeek account store, credential use, and persisted daily ledger.
+- **Escalations:** none — the feature extends existing protocol, chat-accounting, session, and auth articles without meeting the new-article threshold.
+
 ## 2026-08-02 — Marketplace patch readiness
 
 - **Code:** Refreshed Marketplace and repository product documentation and the Marketplace screenshot for the changes accumulated since Marketplace 0.57.1, expanded manifest discovery metadata, moved CI to Node.js 22.19 with unit-test and tag/version gates, documented the current packaged size and explicit publication boundary, updated vulnerable transitive dependencies, and added a deterministic install/package guard plus SemVer boundary coverage for the Pi SDK's shrinkwrapped vulnerable `brace-expansion` copy.

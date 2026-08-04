@@ -17,7 +17,8 @@ The session manager is a coordinator, not the SDK. It owns the *shape* of a sess
 - [`newSession()`](../../../../src/pi/session.ts#L757) / [`initializeFromPath(sessionPath)`](../../../../src/pi/session.ts#L774) / [`loadSession(sessionPath)`](../../../../src/pi/session.ts#L810) — fresh, restore-by-path, and replace-active variants.
 - [`setModel(provider, modelId)`](../../../../src/pi/session.ts#L736), [`setThinkingLevel(level)`](../../../../src/pi/session.ts#L747) — runtime model / thinking control.
 - [`applyToolSelection(disabled)`](../../../../src/pi/session.ts#L260) — per-tab tool denylist via `session.setActiveToolsByName()`.
-- [`getSessions()`](../../../../src/pi/session.ts#L792) — lists sessions on disk (long-running; hence the 120 s timeout floor documented in [Part II § protocol-runtime](../../02-shared-protocol-and-contracts/protocol-runtime/protocol-runtime.md)).
+- [`getSessions()`](../../../../src/pi/session.ts) — lists sessions on disk (long-running; hence the 120 s timeout floor documented in [Part II § protocol-runtime](../../02-shared-protocol-and-contracts/protocol-runtime/protocol-runtime.md)).
+- [`getSessionCost()`](../../../../src/pi/session.ts) — projects the SDK's cumulative billed session cost for provider-specific turn accounting.
 
 Turn-lifecycle bookkeeping uses `markTurnStarted() / markTurnCompleted()` at [session.ts:912/918](../../../../src/pi/session.ts#L912); interruption detection consults `getLatestTurnLifecycleStatus` + `hasIncompleteTurnTail` from [interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts).
 
@@ -48,7 +49,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 - `initialize` — [session.ts:178](../../../../src/pi/session.ts#L178)
 - `prompt`, `steer`, `followUp`, `compact`, `abort` — [session.ts:680–731](../../../../src/pi/session.ts#L680)
 - `newSession`, `initializeFromPath`, `loadSession`, `getSessions` — [session.ts:757–810](../../../../src/pi/session.ts#L757)
-- `setModel`, `setThinkingLevel`, `applyToolSelection`, `getRegisteredToolNames`, `getRegisteredToolsInfo` — [session.ts:221–747](../../../../src/pi/session.ts#L221)
+- `setModel`, `setThinkingLevel`, `getSessionCost`, `applyToolSelection`, `getRegisteredToolNames`, `getRegisteredToolsInfo` — [session.ts](../../../../src/pi/session.ts)
 - `markTurnStarted`, `markTurnCompleted` — [session.ts:912](../../../../src/pi/session.ts#L912)
 
 **Methods — internal:**

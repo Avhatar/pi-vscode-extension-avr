@@ -165,6 +165,22 @@ const serverMessages: ServerMessage[] = [
         },
     },
     { type: 'codexUsageError', message: 'Unavailable' },
+    {
+        type: 'deepSeekUsage',
+        usage: {
+            isAvailable: true,
+            balanceInfos: [{
+                currency: 'USD',
+                totalBalance: 10,
+                grantedBalance: 1,
+                toppedUpBalance: 9,
+            }],
+            todayCost: 0.0042,
+            todayDate: '2026-08-03',
+            capturedAt: 100,
+        },
+    },
+    { type: 'deepSeekUsageError', message: 'Unavailable' },
     { type: 'turnCompleted', outcome: 'completed', durationMs: 1200 },
     { type: 'error', message: 'Failed', severity: 'warning' },
 ];
@@ -185,7 +201,7 @@ describe('server protocol runtime validation', () => {
     it('accepts every current server message payload through an event envelope', () => {
         const sequencer = new AgentEventSequencer('client-1');
 
-        expect(serverMessages).toHaveLength(15);
+        expect(serverMessages).toHaveLength(17);
         for (const message of serverMessages) {
             expect(isAgentEventEnvelope(sequencer.create(message, 'tab-1')), message.type).toBe(true);
         }

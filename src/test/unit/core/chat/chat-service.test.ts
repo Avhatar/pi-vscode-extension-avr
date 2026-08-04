@@ -92,6 +92,11 @@ describe('portable ChatService event and state projection', () => {
                 capturedAt: 800,
                 primary: { beforePercent: 1, afterPercent: 2, deltaPercent: 1 },
             },
+            deepSeekTurn: {
+                turnCost: 0.0042,
+                sessionCost: 0.125,
+                capturedAt: 801,
+            },
         });
         const tabs: TabInfo[] = [{
             id: 'tab-1', name: 'Chat', isActive: true, isStreaming: true, hasNotification: false,
@@ -155,6 +160,11 @@ describe('portable ChatService event and state projection', () => {
             _thinkingDurationSec: 2,
             _messageEndTime: 789,
             _codexTurnUsage: { capturedAt: 800 },
+            _deepSeekTurnUsage: {
+                turnCost: 0.0042,
+                sessionCost: 0.125,
+                capturedAt: 801,
+            },
         });
         expect(tab.cacheEffective).toBe('long');
     });
@@ -261,7 +271,7 @@ describe('portable ChatService event and state projection', () => {
             capturedAt: 6900,
             primary: { beforePercent: 10, afterPercent: 12, deltaPercent: 2 },
         };
-        service.completeAgentEnd(tab, end, codexTurn);
+        service.completeAgentEnd(tab, end, { codexTurn });
 
         expect(end).toEqual({ turnEndAt: 7000, turnDurationMs: 6000 });
         expect(tab.messageMeta.get(0)).toMatchObject({

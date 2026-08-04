@@ -37,7 +37,7 @@ This module does not decide what to *do* with a validation failure. It only repo
 - `AgentClientMessageSchema`, `AgentServerMessageSchema` — [protocol-runtime.ts:50](../../../../src/shared/protocol-runtime.ts#L50), [:371](../../../../src/shared/protocol-runtime.ts#L371)
 - `PlatformClientMessageSchema`, `VsCodeClientMessageSchema`, `VsCodeServerMessageSchema` — [protocol-runtime.ts:114](../../../../src/shared/protocol-runtime.ts#L114)
 - Envelope schemas: `AgentRequestEnvelopeSchema` [:142](../../../../src/shared/protocol-runtime.ts#L142), `AgentResponseEnvelopeSchema` [:151](../../../../src/shared/protocol-runtime.ts#L151), `AgentEventEnvelopeSchema` [:453](../../../../src/shared/protocol-runtime.ts#L453)
-- 40+ leaf schemas mirroring [message-protocol](../message-protocol/message-protocol.md) payloads: `ModelInfoSchema`, `SerializedAgentStateSchema`, `TodoSnapshotSchema`, `AgentTabControlsSchema`, `CodexUsageSnapshotSchema`, and so on
+- 40+ leaf schemas mirroring [message-protocol](../message-protocol/message-protocol.md) payloads: `ModelInfoSchema`, `SerializedAgentStateSchema`, `TodoSnapshotSchema`, `AgentTabControlsSchema`, `CodexUsageSnapshotSchema`, `DeepSeekUsageSnapshotSchema`, and so on
 
 **Types — envelope:**
 - `AgentRequestEnvelope<M>` — [connection-protocol.ts:14](../../../../src/shared/connection-protocol.ts#L14); protocolVersion, requestId, clientId, tabId?, type, payload

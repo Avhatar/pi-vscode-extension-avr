@@ -2,7 +2,7 @@
 
 ## Stance
 
-One canonical runtime, one secret bridge. [`getModelRuntime()`](../../../../src/pi/auth.ts) lazily creates a single process-wide Pi SDK `ModelRuntime`; concurrent first callers share the same initialization promise. Parent sessions, persistent child sessions, the model picker, metadata refresh, OAuth, and Codex usage all use that object. Manual keys never enter Pi's persistent auth files: `applySecretsToRuntime()` copies them from VS Code `SecretStorage` into non-persistent runtime overrides.
+One canonical runtime, one secret bridge. [`getModelRuntime()`](../../../../src/pi/auth.ts) lazily creates a single process-wide Pi SDK `ModelRuntime`; concurrent first callers share the same initialization promise. Parent sessions, persistent child sessions, the model picker, metadata refresh, Codex usage, and DeepSeek balance checks all use that object. Manual keys never enter Pi's persistent auth files: `applySecretsToRuntime()` copies them from VS Code `SecretStorage` into non-persistent runtime overrides.
 
 Pi Code creates the runtime with model-catalog networking disabled. This keeps SDK catalog refreshes — including the refresh performed when a runtime key is removed — from causing unrelated network or OAuth activity. Explicit provider login and the account-scoped Codex metadata request remain separate, intentional network operations.
 
@@ -13,7 +13,7 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 - `KNOWN_PROVIDERS` lists provider ids whose manual keys are synchronized from `pi-code.apiKey.<id>` secrets.
 - `getModelRuntime(secrets?)` dynamically imports the externalized SDK, coalesces initialization, caches the runtime, and optionally queues SecretStorage synchronization.
 - `reloadCredentials()` serially re-reads all known keys. Changed values call `setRuntimeApiKey(..., { allowNetwork: false })`; removed values call `removeRuntimeApiKey()`.
-- `getProviderAccessToken(providerId)` resolves the current credential through `ModelRuntime.getAuth()`. This allows SDK-managed OAuth refresh and is used by Codex consumers.
+- `getProviderAccessToken(providerId)` resolves the current credential through `ModelRuntime.getAuth()`. This allows SDK-managed OAuth refresh and is used by account-scoped Codex and DeepSeek consumers.
 - `notifyAuthChanged(providerId?)` fires `onAuthChanged`; subscribers then refresh their own projections.
 - `disposeModelRuntime()` clears the process cache for global shutdown and tests.
 
@@ -27,6 +27,8 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 
 [src/pi/model-metadata.ts](../../../../src/pi/model-metadata.ts) mutates the canonical runtime's model objects with documented context-window corrections and authenticated Codex catalog values. Codex credentials come from `runtime.getAuth('openai-codex')`. The persistent catalog is account-scoped, fresh for 24 hours, and stale-while-revalidate; first use without a cache waits for one request.
 
+[src/pi/deepseek-usage-store.ts](../../../../src/pi/deepseek-usage-store.ts) uses the same runtime credential to refresh DeepSeek's authoritative account balance after turns and when a chat opens. It keeps key-fingerprinted, local-calendar-day ledgers of Pi Code-attributable turn cost in global state; API-key changes invalidate in-flight balance requests and clear the old account projection without discarding that day's other-account totals.
+
 [src/pi/providers/qwen.ts](../../../../src/pi/providers/qwen.ts) registers DashScope's international and China endpoints directly on the runtime. Their models use Qwen-specific flags such as `supportsDeveloperRole: false`, `supportsStore: false`, `supportsLongCacheRetention: false`, and `thinkingFormat: 'qwen'`.
 
 [src/providers/settings-panel.ts](../../../../src/providers/settings-panel.ts) projects OAuth-capable providers from `runtime.getProviders()`, checks sign-in state with `runtime.checkAuth()`, and invokes `runtime.login(providerId, 'oauth', interaction)` or `runtime.logout(providerId)`. [`OAuthLoginFlow`](../../../../src/pi/oauth-login-flow.ts) implements the SDK `AuthInteraction` contract with prompt, selection, browser, device-code, notification, and cancellation UI states.
@@ -38,6 +40,7 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 - `AuthInteraction` — SDK OAuth UI callback contract
 - `SecretStore` — portable secret port implemented with VS Code `SecretStorage`
 - `ModelInfo`, `OAuthProviderInfo` — shared protocol projections
+- `DeepSeekUsageStore`, `PersistedDeepSeekUsage`, `DeepSeekDailyLedger` — account balance plus key/date-scoped local spend state
 
 **Methods — runtime/auth:**
 - `getModelRuntime(secrets?)`, `getInitializedModelRuntime()`, `reloadCredentials()`, `getProviderAccessToken()`, `notifyAuthChanged()`, `disposeModelRuntime()`
@@ -47,6 +50,9 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 
 **Methods — metadata:**
 - `refreshModelMetadata()`, `applyDocumentedApiMetadata()`, `applyCodexCatalogMetadata()`, `parseCodexModelCatalog()`
+
+**Methods — DeepSeek account usage:**
+- `getDeepSeekUsageStore()`, `refresh()`, `recordTurnCost()`, `clear()`
 
 **Methods — Qwen:**
 - `registerQwenProvider(runtime, baseUrl?)`, `registerQwenCnProvider(runtime, baseUrl?)`

@@ -32,6 +32,7 @@ import type {
 } from '../shared/protocol';
 import type {
     AgentServerMessage,
+    DeepSeekTurnUsage,
     FileAttachment,
     ImageAttachment,
 } from '../shared/agent-protocol';
@@ -56,7 +57,9 @@ import {
 } from '../core/chat/chat-preferences';
 import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
+import { getDeepSeekUsageStore } from '../pi/deepseek-usage-store';
 import { computeCodexTurnUsage, isCodexUsageStale } from '../shared/codex-usage';
+import { computeDeepSeekTurnUsage } from '../shared/deepseek-usage';
 import type { SubagentCoordinator } from '../pi/subagents/coordinator';
 import { SubagentCapabilityGate } from '../pi/subagents/gating';
 import { projectSubagentLauncherSnapshot } from '../pi/subagents/launcher-state';
@@ -184,6 +187,7 @@ export class ChatController implements vscode.Disposable {
     }
     private _authChangedSubscription?: vscode.Disposable;
     private _codexUsageUnsubscribe?: () => void;
+    private _deepSeekUsageUnsubscribe?: () => void;
     private readonly _fileMentions: FileMentionsPort;
     private readonly _turnNotifier: TurnNotifier;
 
@@ -270,26 +274,36 @@ export class ChatController implements vscode.Disposable {
             if (providerId === 'openai-codex') {
                 const tab = this._activeTab;
                 if (tab) void this._refreshCodexUsageForTab(tab, 'Codex authentication changed');
+            } else if (providerId === 'deepseek') {
+                getDeepSeekUsageStore().clear();
+                const tab = this._activeTab;
+                if (tab) void this._refreshDeepSeekUsageForTab(tab, 'DeepSeek authentication changed');
             }
         });
 
         this._codexUsageUnsubscribe = getCodexUsageStore().onChange((snapshot) => {
             this._postBroadcast({ type: 'codexUsage', usage: snapshot });
         });
+        this._deepSeekUsageUnsubscribe = getDeepSeekUsageStore().onChange((snapshot) => {
+            this._postBroadcast({ type: 'deepSeekUsage', usage: snapshot });
+        });
     }
 
     addSink(sink: ChatViewSink): void {
         this._sinks.add(sink);
-        // Replay a recent snapshot immediately, then refresh once for an opened
-        // Codex chat. Restored panels share the store's in-flight request.
-        const usage = getCodexUsageStore().getCurrent();
-        if (usage) {
-            sink.post({ type: 'codexUsage', usage });
-        }
+        // Replay recent account snapshots immediately, then refresh the one
+        // matching the opened chat. Concurrent panels share each store's request.
+        const codexUsage = getCodexUsageStore().getCurrent();
+        if (codexUsage) sink.post({ type: 'codexUsage', usage: codexUsage });
+        const deepSeekUsage = getDeepSeekUsageStore().getCurrent();
+        if (deepSeekUsage) sink.post({ type: 'deepSeekUsage', usage: deepSeekUsage });
         const tab = sink.tabFilter === 'active'
             ? this._activeTab
             : this._tabs.get(sink.tabFilter);
-        if (tab) void this._refreshCodexUsageForTab(tab, 'chat opened');
+        if (tab) {
+            void this._refreshCodexUsageForTab(tab, 'chat opened');
+            void this._refreshDeepSeekUsageForTab(tab, 'chat opened');
+        }
     }
 
     private async _refreshCodexUsageForTab(tab: TabState, reason: string): Promise<void> {
@@ -310,6 +324,50 @@ export class ChatController implements vscode.Disposable {
                 message: 'Unable to load subscription usage. Open the Pi Code output for details.',
             });
         }
+    }
+
+    private async _refreshDeepSeekUsageForTab(tab: TabState, reason: string): Promise<void> {
+        if (tab.session.getCurrentModel()?.provider !== 'deepseek') return;
+        try {
+            const usage = await getDeepSeekUsageStore().refresh();
+            if (!usage) {
+                this._postForTab(tab.id, {
+                    type: 'deepSeekUsageError',
+                    message: 'Add a DeepSeek API key to view account balance.',
+                });
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this._outputChannel.appendLine(`DeepSeek usage refresh failed (${reason}): ${message}`);
+            this._postForTab(tab.id, {
+                type: 'deepSeekUsageError',
+                message: 'Unable to load DeepSeek balance. Open the Pi Code output for details.',
+            });
+        }
+    }
+
+    private async _updateDeepSeekUsageAfterTurn(
+        tab: TabState,
+        turn: DeepSeekTurnUsage | undefined,
+        expectedFingerprint: string | undefined,
+    ): Promise<void> {
+        if (turn) {
+            try {
+                const recorded = await getDeepSeekUsageStore().recordTurnCost(
+                    turn.turnCost,
+                    expectedFingerprint,
+                );
+                if (!recorded && expectedFingerprint) {
+                    this._outputChannel.appendLine(
+                        'DeepSeek daily spend skipped because the account changed during the turn.',
+                    );
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                this._outputChannel.appendLine(`DeepSeek daily spend update failed: ${message}`);
+            }
+        }
+        await this._refreshDeepSeekUsageForTab(tab, 'turn ended');
     }
 
     removeSink(sink: ChatViewSink): void {
@@ -611,7 +669,14 @@ export class ChatController implements vscode.Disposable {
                     );
                 },
                 tabRenamed: (tabId, name) => this._onTabRenamed.fire({ tabId, name }),
-                modelsChanged: () => this._broadcastModels(),
+                modelsChanged: () => {
+                    this._broadcastModels();
+                    const activeTab = this._activeTab;
+                    if (activeTab) {
+                        void this._refreshCodexUsageForTab(activeTab, 'model changed');
+                        void this._refreshDeepSeekUsageForTab(activeTab, 'model changed');
+                    }
+                },
                 reportCommandFailure: (messageType, tabId, error) => {
                     this._reportCommandFailure(messageType, tabId, error);
                 },
@@ -634,6 +699,12 @@ export class ChatController implements vscode.Disposable {
                         && !isCodexUsageStale(currentUsage)
                         ? currentUsage
                         : null;
+                    tab.deepSeekSessionCostBaseline = currentModel?.provider === 'deepseek'
+                        ? tab.session.getSessionCost()
+                        : undefined;
+                    tab.deepSeekAccountFingerprint = currentModel?.provider === 'deepseek'
+                        ? getDeepSeekUsageStore().getActiveFingerprint()
+                        : undefined;
                 },
                 streamingContextChanged: (isStreaming) => {
                     void vscode.commands.executeCommand(
@@ -659,16 +730,38 @@ export class ChatController implements vscode.Disposable {
                     this._sweepPendingTools(tab, assistantMessage);
                 },
                 completeAgentEndAccounting: async (tab) => {
-                    const baseline = tab.codexTurnBaseline;
+                    const codexBaseline = tab.codexTurnBaseline;
                     const codexModelId = tab.codexTurnModelId;
+                    const deepSeekBaseline = tab.deepSeekSessionCostBaseline;
+                    const deepSeekAccountFingerprint = tab.deepSeekAccountFingerprint;
                     tab.codexTurnBaseline = undefined;
                     tab.codexTurnModelId = undefined;
+                    tab.deepSeekSessionCostBaseline = undefined;
+                    tab.deepSeekAccountFingerprint = undefined;
+
                     if (codexModelId) await this._refreshCodexUsageForTab(tab, 'turn ended');
-                    return computeCodexTurnUsage(
-                        baseline ?? null,
+                    const codexTurn = computeCodexTurnUsage(
+                        codexBaseline ?? null,
                         getCodexUsageStore().getCurrent(),
                         codexModelId,
                     );
+
+                    const deepSeekTurn = computeDeepSeekTurnUsage(
+                        deepSeekBaseline,
+                        deepSeekBaseline === undefined ? undefined : tab.session.getSessionCost(),
+                        Date.now(),
+                    );
+                    if (deepSeekBaseline !== undefined) {
+                        void this._updateDeepSeekUsageAfterTurn(
+                            tab,
+                            deepSeekTurn,
+                            deepSeekAccountFingerprint,
+                        );
+                    }
+
+                    return codexTurn || deepSeekTurn
+                        ? { codexTurn, deepSeekTurn }
+                        : undefined;
                 },
                 notifyTurnCompletion: (_tab, completion) => {
                     this._turnNotifier.notify(completion, this.getTurnNotificationSettings());
@@ -1694,6 +1787,8 @@ export class ChatController implements vscode.Disposable {
         this._authChangedSubscription = undefined;
         this._codexUsageUnsubscribe?.();
         this._codexUsageUnsubscribe = undefined;
+        this._deepSeekUsageUnsubscribe?.();
+        this._deepSeekUsageUnsubscribe = undefined;
         this._sinks.clear();
         this._openPanels.clear();
         this._panelOpener = undefined;

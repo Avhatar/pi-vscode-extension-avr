@@ -12,6 +12,7 @@ import { DiffContentProvider, VsCodeDiffPresenter } from './adapters/vscode/diff
 import { PiSessionManager } from './pi/session';
 import { getBundledPiPackagePaths } from './pi/bundled-packages';
 import { getCodexUsageStore } from './pi/codex-usage-store';
+import { getDeepSeekUsageStore } from './pi/deepseek-usage-store';
 import { initCodexCatalogCache } from './pi/codex-catalog-cache';
 import { LauncherView } from './providers/launcher-view';
 import { StatusBarManager } from './providers/status-bar';
@@ -51,8 +52,9 @@ export async function activate(context: vscode.ExtensionContext) {
     perf.event('activation.begin');
 
     try {
-        await perf.time('activation.codexUsageStore.init', async () => {
+        await perf.time('activation.accountUsageStores.init', async () => {
             getCodexUsageStore().init(context.globalState);
+            getDeepSeekUsageStore().init(context.globalState);
             initCodexCatalogCache(context.globalState);
         });
 

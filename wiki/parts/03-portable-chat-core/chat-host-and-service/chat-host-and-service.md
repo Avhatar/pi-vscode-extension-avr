@@ -21,7 +21,7 @@ Nothing here imports `vscode`. Do not add such an import.
 
 [`ChatService<TTab>`](../../../../src/core/chat/chat-service.ts#L164) is the reducer. Its main entry [`reduceEvent(tab, event)`](../../../../src/core/chat/chat-service.ts#L171) mutates the tab runtime on `agent_start`, `tool_execution_start / end`, `compaction_start / end`, `message_end`, `message_update`; streams thinking / text tokens on `stream_chunk`; and forwards to the turn-notification gate on `agent_end` / `agent_settled`.
 
-Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../../../src/core/chat/chat-service.ts#L244) records duration and arms the notification gate, [`completeAgentEnd(tab, projection, codexTurn?)`](../../../../src/core/chat/chat-service.ts#L261) commits message meta and clears streaming state, [`settleAgent(tab)`](../../../../src/core/chat/chat-service.ts#L289) resolves the turn via `turnNotificationGate.onAgentSettled()`.
+Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../../../src/core/chat/chat-service.ts) records duration and arms the notification gate, [`completeAgentEnd(tab, projection, accounting?)`](../../../../src/core/chat/chat-service.ts) commits duration plus provider-specific Codex/DeepSeek message metadata and clears streaming state, and [`settleAgent(tab)`](../../../../src/core/chat/chat-service.ts) resolves the turn via `turnNotificationGate.onAgentSettled()`.
 
 [`dispatchDirectPrompt(tab, request, callbacks)`](../../../../src/core/chat/chat-service.ts#L346) is the entry point for user prompts — parses `/compact` inline, increments `turnCounter`, arms the notification gate, invokes `_runUserPrompt`. Streaming controls flow through [`dispatchStreamingCommand`](../../../../src/core/chat/chat-service.ts#L383) (abort / steer / follow-up). Queue lifecycle is [`applyQueueControl(tab, command)`](../../../../src/core/chat/chat-service.ts#L402), [`reserveQueuedDispatch()`](../../../../src/core/chat/chat-service.ts#L443), [`dispatchNextQueued()`](../../../../src/core/chat/chat-service.ts#L449).
 
@@ -49,6 +49,7 @@ Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../
 **Types — reducer:**
 - `ChatService<TTab>` — [chat-service.ts:164](../../../../src/core/chat/chat-service.ts#L164)
 - `ChatServiceTab` — structural constraint on the tab shape the reducer expects
+- `AgentEndAccounting` — optional Codex account-window and DeepSeek monetary deltas committed to the last assistant message
 - `TurnCompletionInfo` — result of `settleAgent`
 - `TurnCompletionOutcome` — `'completed' | 'stopped' | 'failed' | 'truncated'` from [chat-event-policy](../chat-event-policy/chat-event-policy.md)
 

@@ -1,5 +1,10 @@
 import { TurnNotificationGate } from './turn-notification-gate';
-import type { CacheEffective, CodexTurnUsage, CodexUsageSnapshot } from '../../shared/agent-protocol';
+import type {
+    CacheEffective,
+    CodexTurnUsage,
+    CodexUsageSnapshot,
+    DeepSeekTurnUsage,
+} from '../../shared/agent-protocol';
 import type { ProjectToolSelectionDefault } from '../../shared/project-tool-default';
 
 export interface TabSessionResource {
@@ -14,6 +19,7 @@ export interface TabMessageMeta {
     thinkingDurationSec: number;
     messageEndTime: number;
     codexTurn?: CodexTurnUsage;
+    deepSeekTurn?: DeepSeekTurnUsage;
     turnDurationMs?: number;
     totalTurnDurationMs?: number;
 }
@@ -64,6 +70,8 @@ export class TabRuntime<
     isCompacting: boolean;
     codexTurnBaseline?: CodexUsageSnapshot | null;
     codexTurnModelId?: string;
+    deepSeekSessionCostBaseline?: number;
+    deepSeekAccountFingerprint?: string;
     errorReportedThisRun: boolean;
     lastTurnEndAt: number;
     maxIdleGapMs: number;

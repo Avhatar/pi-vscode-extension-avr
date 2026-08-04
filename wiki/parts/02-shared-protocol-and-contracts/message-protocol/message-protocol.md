@@ -41,7 +41,8 @@ The [src/shared/interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts)
 - `PendingToolInfo` — [agent-protocol.ts:107](../../../../src/shared/agent-protocol.ts#L107)
 - `ModelInfo`, `ImageAttachment`, `FileAttachment`, `SkillInfo`, `WorkspaceFileSuggestion`, `SessionInfo` — [agent-protocol.ts:153](../../../../src/shared/agent-protocol.ts#L153)
 - `FileChangeInfo` — [agent-protocol.ts:85](../../../../src/shared/agent-protocol.ts#L85)
-- `ContextUsageInfo`, `CodexUsageWindow`, `CodexUsageCredits`, `CodexUsageBucket`, `CodexSpendControlLimit`, `CodexUsageSnapshot`, `CodexTurnWindowDelta`, `CodexTurnUsage` — [agent-protocol.ts:15](../../../../src/shared/agent-protocol.ts#L15)
+- `ContextUsageInfo`, `CodexUsageWindow`, `CodexUsageCredits`, `CodexUsageBucket`, `CodexSpendControlLimit`, `CodexUsageSnapshot`, `CodexTurnWindowDelta`, `CodexTurnUsage` — [agent-protocol.ts](../../../../src/shared/agent-protocol.ts)
+- `DeepSeekBalanceInfo`, `DeepSeekUsageSnapshot`, `DeepSeekTurnUsage` — DeepSeek account balance, local daily spend, and per-turn/session cost payloads in [agent-protocol.ts](../../../../src/shared/agent-protocol.ts)
 
 **Types — control bundle:**
 - `AgentTabControls` — [src/shared/agent-control-protocol.ts:1](../../../../src/shared/agent-control-protocol.ts#L1)

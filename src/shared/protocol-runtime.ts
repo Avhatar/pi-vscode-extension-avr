@@ -363,6 +363,19 @@ const CodexUsageSnapshotSchema = Type.Object({
     resetCreditsAvailable: Type.Optional(Type.Number()),
     capturedAt: Type.Number(),
 }, StrictObject);
+const DeepSeekBalanceInfoSchema = Type.Object({
+    currency: Type.String(),
+    totalBalance: Type.Number({ minimum: 0 }),
+    grantedBalance: Type.Number({ minimum: 0 }),
+    toppedUpBalance: Type.Number({ minimum: 0 }),
+}, StrictObject);
+const DeepSeekUsageSnapshotSchema = Type.Object({
+    isAvailable: Type.Boolean(),
+    balanceInfos: Type.Array(DeepSeekBalanceInfoSchema),
+    todayCost: Type.Number({ minimum: 0 }),
+    todayDate: Type.String(),
+    capturedAt: Type.Number(),
+}, StrictObject);
 const ErrorSeveritySchema = Type.Union([
     Type.Literal('error'),
     Type.Literal('warning'),
@@ -405,6 +418,11 @@ export const AgentServerMessageSchema = Type.Union([
     }, StrictObject),
     Type.Object({ type: Type.Literal('codexUsageError'), message: Type.String() }, StrictObject),
     Type.Object({
+        type: Type.Literal('deepSeekUsage'),
+        usage: Type.Union([DeepSeekUsageSnapshotSchema, Type.Null()]),
+    }, StrictObject),
+    Type.Object({ type: Type.Literal('deepSeekUsageError'), message: Type.String() }, StrictObject),
+    Type.Object({
         type: Type.Literal('turnCompleted'),
         outcome: Type.Union([
             Type.Literal('completed'),
@@ -446,6 +464,8 @@ const AgentServerMessageTypeSchema = Type.Union([
     Type.Literal('workspaceFileSuggestions'),
     Type.Literal('codexUsage'),
     Type.Literal('codexUsageError'),
+    Type.Literal('deepSeekUsage'),
+    Type.Literal('deepSeekUsageError'),
     Type.Literal('turnCompleted'),
     Type.Literal('error'),
 ]);

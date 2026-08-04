@@ -2091,7 +2091,14 @@ body[data-mode="panel"] .input-container {
         var(--vscode-diffEditor-diagonalFill, rgba(204, 204, 204, 0.16)) 4px,
         var(--vscode-diffEditor-diagonalFill, rgba(204, 204, 204, 0.16)) 5px
     );
-    background-position: 0 var(--diff-stripe-offset-y, 0);
+    background-repeat: no-repeat;
+    background-origin: border-box;
+    background-size:
+        var(--diff-stripe-reference-width)
+        var(--diff-stripe-reference-height);
+    background-position:
+        var(--diff-stripe-offset-x)
+        var(--diff-stripe-offset-y);
 }
 
 .diff-gap {

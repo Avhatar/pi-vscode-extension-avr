@@ -82,6 +82,31 @@ export interface CodexTurnUsage {
     capturedAt: number;
 }
 
+export interface DeepSeekBalanceInfo {
+    currency: string;
+    totalBalance: number;
+    grantedBalance: number;
+    toppedUpBalance: number;
+}
+
+export interface DeepSeekUsageSnapshot {
+    isAvailable: boolean;
+    balanceInfos: DeepSeekBalanceInfo[];
+    /** Locally accounted DeepSeek spend in Pi Code for the current calendar day. */
+    todayCost: number;
+    /** Local calendar date in YYYY-MM-DD form. */
+    todayDate: string;
+    /** Unix epoch milliseconds when the account balance was captured. */
+    capturedAt: number;
+}
+
+export interface DeepSeekTurnUsage {
+    turnCost: number;
+    sessionCost: number;
+    /** Unix epoch milliseconds when the turn accounting was captured. */
+    capturedAt: number;
+}
+
 export interface FileChangeInfo {
     filePath: string;
     toolCallId: string;
@@ -246,5 +271,7 @@ export type AgentServerMessage =
     | { type: 'workspaceFileSuggestions'; requestId: number; query: string; isIndexing?: boolean; items: WorkspaceFileSuggestion[] }
     | { type: 'codexUsage'; usage: CodexUsageSnapshot | null }
     | { type: 'codexUsageError'; message: string }
+    | { type: 'deepSeekUsage'; usage: DeepSeekUsageSnapshot | null }
+    | { type: 'deepSeekUsageError'; message: string }
     | { type: 'turnCompleted'; outcome: 'completed' | 'failed' | 'stopped' | 'truncated'; durationMs?: number }
     | { type: 'error'; message: string; severity?: 'error' | 'warning' | 'info' };

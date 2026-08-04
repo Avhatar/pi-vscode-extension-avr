@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.67.2] - 2026-08-04
+
+### Fixed
+- Inline diff hatching now stays continuous across adjacent rows without shifting while the chat scrolls.
+
+## [0.67.1] - 2026-08-04
+
+### Fixed
+- Inline diff hatching now forms continuous diagonal lines across adjacent rows.
+
+## [0.67.0] - 2026-08-03
+
+### Added
+- DeepSeek chats now show the remaining USD balance, the latest turn cost, and today's Pi Code spend below the input, while completed responses show both turn and cumulative session costs.
+
 ## [0.66.3] - 2026-08-02
 
 ### Security

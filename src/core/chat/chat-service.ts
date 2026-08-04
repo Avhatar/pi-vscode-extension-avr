@@ -4,6 +4,7 @@ import type {
     CacheEffective,
     CacheMode,
     CodexTurnUsage,
+    DeepSeekTurnUsage,
     FileAttachment,
     FileChangeInfo,
     ImageAttachment,
@@ -60,6 +61,11 @@ export interface ChatStateContext {
 export interface AgentEndProjection {
     readonly turnEndAt: number;
     readonly turnDurationMs: number;
+}
+
+export interface AgentEndAccounting {
+    readonly codexTurn?: CodexTurnUsage;
+    readonly deepSeekTurn?: DeepSeekTurnUsage;
 }
 
 export interface TabNameUpdate {
@@ -266,13 +272,14 @@ export class ChatService {
     completeAgentEnd(
         tab: ChatServiceTab,
         projection: AgentEndProjection,
-        codexTurn?: CodexTurnUsage,
+        accounting?: AgentEndAccounting,
     ): void {
         const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
-        if (lastOrdinal >= 0 && (codexTurn || projection.turnDurationMs > 0)) {
+        if (lastOrdinal >= 0 && (accounting?.codexTurn || accounting?.deepSeekTurn || projection.turnDurationMs > 0)) {
             const meta = tab.messageMeta.get(lastOrdinal)
                 ?? { thinkingDurationSec: 0, messageEndTime: 0 };
-            if (codexTurn) meta.codexTurn = codexTurn;
+            if (accounting?.codexTurn) meta.codexTurn = accounting.codexTurn;
+            if (accounting?.deepSeekTurn) meta.deepSeekTurn = accounting.deepSeekTurn;
             if (projection.turnDurationMs > 0) {
                 meta.turnDurationMs = projection.turnDurationMs;
                 meta.totalTurnDurationMs = tab.totalTurnDurationMs;
@@ -655,6 +662,7 @@ export class ChatService {
                     message._totalTurnDurationMs = meta.totalTurnDurationMs;
                 }
                 if (meta.codexTurn) message._codexTurnUsage = meta.codexTurn;
+                if (meta.deepSeekTurn) message._deepSeekTurnUsage = meta.deepSeekTurn;
             }
             assistantOrdinal++;
         }

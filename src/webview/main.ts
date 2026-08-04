@@ -1,7 +1,8 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion, PendingToolInfo } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, DeepSeekUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion, PendingToolInfo } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage';
+import { formatUsdAmount } from '../shared/deepseek-usage';
 import { shouldDisplayChatMessage } from '../shared/message-visibility';
 import {
     VsCodeAgentConnection,
@@ -203,6 +204,8 @@ const state: {
     queuedMessages: string[];
     codexUsage: CodexUsageSnapshot | null;
     codexUsageError: string | null;
+    deepSeekUsage: DeepSeekUsageSnapshot | null;
+    deepSeekUsageError: string | null;
     cacheMode: 'short' | 'long' | 'auto';
     cacheEffective: 'short' | 'long';
 } = {
@@ -229,6 +232,8 @@ const state: {
     queuedMessages: [],
     codexUsage: null,
     codexUsageError: null,
+    deepSeekUsage: null,
+    deepSeekUsageError: null,
     cacheMode: 'auto',
     cacheEffective: 'short',
 };
@@ -325,6 +330,15 @@ function handleMessage(msg: ServerMessage): void {
             break;
         case 'codexUsageError':
             state.codexUsageError = msg.message;
+            updateInputArea();
+            break;
+        case 'deepSeekUsage':
+            state.deepSeekUsage = msg.usage ?? null;
+            state.deepSeekUsageError = null;
+            updateInputArea();
+            break;
+        case 'deepSeekUsageError':
+            state.deepSeekUsageError = msg.message;
             updateInputArea();
             break;
         case 'error':
@@ -1082,6 +1096,60 @@ function renderCodexUsage(): string {
     return `<span class="footer-codex${staleClass}" title="${escHtml(title)}">${segments.join(' &middot; ')}</span>`;
 }
 
+function renderDeepSeekUsage(): string {
+    if (state.model?.provider !== 'deepseek') return '';
+    const snap = state.deepSeekUsage;
+    if (!snap && state.deepSeekUsageError) {
+        return `<span class="footer-codex footer-codex--error footer-deepseek" title="${escAttr(state.deepSeekUsageError)}">DeepSeek &middot; unavailable</span>`;
+    }
+    if (!snap) {
+        return '<span class="footer-codex footer-codex--pending footer-deepseek" title="DeepSeek balance is loading">DeepSeek &middot; &hellip;</span>';
+    }
+
+    const balance = snap.balanceInfos.find((candidate) => candidate.currency.toUpperCase() === 'USD');
+    if (!balance) {
+        return '<span class="footer-codex footer-codex--error footer-deepseek" title="This DeepSeek account did not return a USD balance">DeepSeek &middot; USD unavailable</span>';
+    }
+
+    if (!snap.isAvailable) {
+        const title = `DeepSeek reports insufficient available balance. Last update: ${formatAge(Math.max(0, Math.round((Date.now() - snap.capturedAt) / 1000)))} ago`;
+        return `<span class="footer-codex footer-codex--error footer-deepseek" title="${escAttr(title)}">DeepSeek &middot; balance unavailable</span>`;
+    }
+
+    const lastTurn = findLastDeepSeekTurnUsage();
+    const lastText = lastTurn ? formatUsdAmount(lastTurn.turnCost) : '—';
+    const tooltipLines = [
+        `Balance status: ${snap.isAvailable ? 'available' : 'unavailable'}`,
+        `Total balance: ${formatUsdAmount(balance.totalBalance)}`,
+        `Granted balance: ${formatUsdAmount(balance.grantedBalance)}`,
+        `Topped-up balance: ${formatUsdAmount(balance.toppedUpBalance)}`,
+        `Today in Pi Code (${snap.todayDate}): ${formatUsdAmount(snap.todayCost)}`,
+    ];
+    if (lastTurn) {
+        tooltipLines.push(`Last completed turn in this chat: ${formatUsdAmount(lastTurn.turnCost)}`);
+    }
+    const ageSec = Math.max(0, Math.round((Date.now() - snap.capturedAt) / 1000));
+    tooltipLines.push(`Last balance update: ${formatAge(ageSec)} ago`);
+
+    const segments = [
+        '<span class="footer-codex-plan">DeepSeek</span>',
+        `<span class="footer-codex-segment">${escHtml(formatUsdAmount(balance.totalBalance))} left</span>`,
+        `<span class="footer-codex-segment">last ${escHtml(lastText)}</span>`,
+        `<span class="footer-codex-segment">today ${escHtml(formatUsdAmount(snap.todayCost))}</span>`,
+    ];
+    return `<span class="footer-codex footer-deepseek" title="${escAttr(tooltipLines.join('\n'))}">${segments.join(' &middot; ')}</span>`;
+}
+
+function findLastDeepSeekTurnUsage(): { turnCost: number; sessionCost: number; capturedAt: number } | undefined {
+    for (let index = state.messages.length - 1; index >= 0; index--) {
+        const message = state.messages[index];
+        if (message?.role === 'assistant' && message._deepSeekTurnUsage) {
+            return message._deepSeekTurnUsage;
+        }
+    }
+    return undefined;
+}
+
 function formatCodexWindowTooltip(prefix: string, window: { percentUsed: number; windowMinutes?: number; resetAt?: number }): string {
     return `${prefix}${formatCodexWindow(window.windowMinutes)} window: ${window.percentUsed.toFixed(1)}% used${formatResetSuffix(window.resetAt)}`;
 }
@@ -1254,6 +1322,7 @@ function updateInputArea(): void {
     }
 
     const codexUsageHtml = renderCodexUsage();
+    const deepSeekUsageHtml = renderDeepSeekUsage();
     const attachmentCount = currentImageAttachments.length + currentFileAttachments.length;
     const attachmentLabels: string[] = [];
     if (currentImageAttachments.length > 0) attachmentLabels.push(`${currentImageAttachments.length} image${currentImageAttachments.length === 1 ? '' : 's'}`);
@@ -1279,6 +1348,7 @@ function updateInputArea(): void {
         <div class="input-footer-group input-footer-right">
             ${attachmentHtml}
             ${codexUsageHtml}
+            ${deepSeekUsageHtml}
             ${contextHtml}
             <button id="btn-send" class="send-btn${state.isStreaming ? ' send-btn--stop' : ''}" title="${actionTitle}"><img class="send-icon-img" src="${iconsBaseUri}/${actionIcon}" alt="${actionAlt}"></button>
         </div>
@@ -2066,10 +2136,16 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
 
 function observeDiffStripeAlignment(diffView: HTMLElement): void {
     const align = () => {
+        const table = diffView.querySelector<HTMLTableElement>('.diff-side-by-side');
+        if (!table) return;
+
+        const tableRect = table.getBoundingClientRect();
         diffView.querySelectorAll<HTMLElement>('.diff-cell-empty, .diff-gap').forEach((cell) => {
-            const row = cell.closest<HTMLTableRowElement>('tr');
-            if (!row) return;
-            cell.style.setProperty('--diff-stripe-offset-y', `${-row.offsetTop}px`);
+            const cellRect = cell.getBoundingClientRect();
+            cell.style.setProperty('--diff-stripe-reference-width', `${tableRect.width}px`);
+            cell.style.setProperty('--diff-stripe-reference-height', `${tableRect.height}px`);
+            cell.style.setProperty('--diff-stripe-offset-x', `${tableRect.left - cellRect.left}px`);
+            cell.style.setProperty('--diff-stripe-offset-y', `${tableRect.top - cellRect.top}px`);
         });
     };
 
@@ -5065,6 +5141,12 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
         const turn = msg._codexTurnUsage;
         if (turn) {
             parts.push(...formatCodexTurnParts(turn));
+        }
+
+        const deepSeekTurn = msg._deepSeekTurnUsage;
+        if (deepSeekTurn) {
+            parts.push(`turn cost ${formatUsdAmount(usageNumber(deepSeekTurn.turnCost))}`);
+            parts.push(`session cost ${formatUsdAmount(usageNumber(deepSeekTurn.sessionCost))}`);
         }
     }
 
