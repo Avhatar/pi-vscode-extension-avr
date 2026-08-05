@@ -193,6 +193,7 @@ const FileChangeInfoSchema = Type.Object({
     addedLines: Type.Number(),
     removedLines: Type.Number(),
     turnIndex: Type.Number(),
+    subagentAgentId: Type.Optional(NonEmptyString),
 }, StrictObject);
 const TabInfoSchema = Type.Object({
     id: Type.String(),

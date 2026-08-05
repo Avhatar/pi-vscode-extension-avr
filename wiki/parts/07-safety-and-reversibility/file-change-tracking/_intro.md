@@ -1,6 +1,6 @@
 # Chapter: file-change-tracking
 
-Every time the agent invokes a file-mutating tool (`edit`, `write`, `delete`), Pi Code needs to snapshot the file *before* the tool runs so the user can (a) see an inline diff of what changed, (b) undo the individual edit, or (c) roll back to a checkpoint. [`DiffManager`](../../../../src/core/files/diff-manager.ts) is the portable per-tab tracker that manages this lifecycle; the Myers diff algorithm at [src/utils/diff.ts](../../../../src/utils/diff.ts) produces the unified-diff payloads that flow into `FileChangeInfo` and into the diff-presenter port.
+Every time the agent invokes `edit` or `write`, Pi Code snapshots the file *before* the tool runs so the user can (a) see a parent edit inline, (b) review tracked parent or shared-workspace child changes in File Undo View, or (c) roll back to a checkpoint. [`DiffManager`](../../../../src/core/files/diff-manager.ts) is the portable per-tab tracker that manages this lifecycle; the Myers diff algorithm at [src/utils/diff.ts](../../../../src/utils/diff.ts) produces the unified-diff payloads that flow into `FileChangeInfo` and into the diff-presenter port.
 
 ## Article roster
 

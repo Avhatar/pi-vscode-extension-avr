@@ -45,7 +45,7 @@ Executing a run [manager.ts:323](../../../../src/pi/subagents/manager.ts#L323):
 
 [`SubagentRunStore`](../../../../src/pi/subagents/persistence.ts#L8) — persists to disk under `<storageRoot>/subagents/records` and `<storageRoot>/subagents/transcripts`. Version 1. Cleanup wired into `deleteHistorySession` via `_subagentStore.deleteByParentSessionPath`.
 
-Mutation routing [mutations.ts:1](../../../../src/pi/subagents/mutations.ts#L1) — `routeSubagentMutation`: if `isolationPath` is set (worktree mode), returns `'worktree'` code; else calls `sink.handleExternalToolEvent()` for shared-workspace mode. This is how the parent's diff / checkpoint manager sees the child's edits.
+Mutation routing [mutations.ts:1](../../../../src/pi/subagents/mutations.ts#L1) — `routeSubagentMutation`: if `isolationPath` is set (worktree mode), returns `'worktree'`; otherwise it calls `sink.handleExternalToolEvent()` for shared-workspace mode. `DiffManager` preserves the child `agentId` as `FileChangeInfo.subagentAgentId`, keeping the edit available in File Undo View while the parent chat suppresses per-child inline diff cards.
 
 `namespaceChildToolCallId(agentId, toolCallId)` [manager.ts:623](../../../../src/pi/subagents/manager.ts#L623) — concatenates so parent-level tracking distinguishes children's tool calls.
 
@@ -115,6 +115,7 @@ Mutation routing [mutations.ts:1](../../../../src/pi/subagents/mutations.ts#L1) 
 - **Rule — background writes require worktree isolation.** [`write-isolation.ts:45`](../../../../src/pi/subagents/write-isolation.ts#L45) throws otherwise. Background = the parent doesn't see the child's edits in real time; without a worktree, races become invisible.
 - **Rule — terminal retention is bounded.** Do not remove the setTimeout or the LRU cap; unbounded retention will grow the runs Map until the launcher renders slowly.
 - **Pattern — namespaced tool-call ids.** `<agentId>:<toolCallId>` keeps parent-level tracking (DiffManager, CheckpointManager) from confusing sibling children's edits. Do not shorten.
+- **Pattern — aggregate foreground waiting in chat.** Once the parent has no other tool running, pending foreground `spawn` and `resume` calls are counted into one terminal "Waiting for N subagents" indicator; background spawns and lifecycle controls are excluded. Individual child activity remains in the launcher, and child edits remain reviewable without becoming inline chat noise.
 - **Pattern — coordinator signal composition.** `schedule(op, signal)` combines the caller's abort signal with the coordinator's shutdown signal — either abort cancels the operation cleanly.
 - **Pitfall — abort mid-execution races persistence.** The `persist()` chain [manager.ts:599](../../../../src/pi/subagents/manager.ts#L599) is serialized in a Promise tail; aborting during a persist call does not corrupt the file. Do not add "fast abort" shortcuts.
 - **Pitfall — `runBackground` returns before spawning.** The caller gets the persistent agentId; the actual spawn happens async. If the parent needs to serialize on child spawn, wait on the state transition to `running`, not on the function return.

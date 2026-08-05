@@ -842,6 +842,9 @@ body[data-mode="panel"] .tab-strip,
     opacity: 1;
     animation: pulse-dot 1.5s ease-in-out infinite;
 }
+.tool-card[data-tool-name="subagent"] .tool-icon {
+    animation: none !important;
+}
 .tool-name { font-weight: normal; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .tool-status {
@@ -1164,17 +1167,42 @@ body[data-mode="panel"] .tab-strip,
     top: 15px;
 }
 
-/* Rail trim: hide line below the icon when this is the last action in a turn
-   (next is a user message, or no next action — empty streaming). */
+/* Rail trim: hide line below the icon when this is the last action in a turn.
+   The streaming container always retains a hidden answer draft, so it is never
+   truly empty and live action cards sit immediately before that draft. */
 .message-group-assistant:has(+ .message-group-user)::before,
 .tool-card-wrapper:has(+ .message-group-user)::before,
-.message-group-assistant:has(+ #streaming-message:empty)::before,
-.tool-card-wrapper:has(+ #streaming-message:empty)::before,
+.message-group-assistant:has(+ #streaming-message > #answer-draft[style*="display: none"]:only-child)::before,
+.tool-card-wrapper:has(+ #streaming-message > #answer-draft[style*="display: none"]:only-child)::before,
 #streaming-message > .tool-card-wrapper:last-child::before,
-#streaming-message > .message-group-assistant:last-child::before {
+#streaming-message > .message-group-assistant:last-child::before,
+#streaming-message:has(> :is(.tool-card, .diff-card) + #answer-draft[style*="display: none"])::before {
     top: 0;
     bottom: auto;
     height: 15px;
+}
+
+/* The persistent hidden draft must not leave its otherwise empty container's
+   own rail dangling below the final transcript action. */
+#streaming-message:has(> #answer-draft[style*="display: none"]:only-child)::before {
+    display: none;
+}
+
+/* While thinking is the terminal live activity, cover the parent rail from the
+   icon center through the draft and the streaming container's bottom padding. */
+#answer-draft {
+    position: relative;
+}
+#answer-draft:has(> #streaming-thinking.active):has(> #streaming-text:empty)::after {
+    content: '';
+    position: absolute;
+    left: 24px;
+    top: 15px;
+    bottom: -8px;
+    width: 2px;
+    background: var(--bg);
+    pointer-events: none;
+    z-index: 0;
 }
 .tool-card-wrapper > .tool-card {
     margin-bottom: 0;
@@ -1329,6 +1357,21 @@ body[data-mode="panel"] .tab-strip,
     padding: 6px 16px;
     font-size: var(--vscode-font-size, 13px);
     color: var(--muted);
+    position: relative;
+}
+
+/* The preparing indicator is always the terminal live activity. Cover the
+   parent rail from its dot center through the container's bottom padding. */
+.preparing-placeholder::after {
+    content: '';
+    position: absolute;
+    left: 24px;
+    top: 15px;
+    bottom: -8px;
+    width: 2px;
+    background: var(--bg);
+    pointer-events: none;
+    z-index: 0;
 }
 
 /* Match .tool-icon box (18×18) so the dot center lands on the timeline rail. */

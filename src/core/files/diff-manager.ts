@@ -17,6 +17,8 @@ interface PendingEdit {
     filePath: string;
     originalContent: string | null;
     turnIndex: number;
+    /** Non-empty when the edit originates from a shared-workspace subagent. */
+    agentId?: string;
 }
 
 type FileChangeListener = (change: FileChangeInfo) => void;
@@ -107,6 +109,7 @@ export class DiffManager {
             filePath,
             originalContent,
             turnIndex: this._currentTurn,
+            agentId: event.agentId || undefined,
         });
     }
 
@@ -152,6 +155,7 @@ export class DiffManager {
             addedLines,
             removedLines,
             turnIndex: pending.turnIndex,
+            ...(pending.agentId ? { subagentAgentId: pending.agentId } : {}),
         };
 
         this._fileChanges.push(change);

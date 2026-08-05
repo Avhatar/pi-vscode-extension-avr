@@ -56,6 +56,35 @@ describe('portable DiffManager', () => {
         expect(diffs.fileChanges).toHaveLength(1);
     });
 
+    it('marks shared-workspace subagent edits for non-inline presentation', async () => {
+        files.files.set('/workspace/child.txt', 'before\n');
+        checkpoints.startTurn(1);
+        diffs.setCurrentTurn(1);
+
+        const nextChange = waitForNextChange();
+        diffs.handleExternalToolEvent({
+            type: 'tool_execution_start',
+            agentId: 'agent-1',
+            toolCallId: 'agent-1:tool-1',
+            toolName: 'edit',
+            args: { path: 'child.txt' },
+        });
+        files.files.set('/workspace/child.txt', 'after\n');
+        diffs.handleExternalToolEvent({
+            type: 'tool_execution_end',
+            agentId: 'agent-1',
+            toolCallId: 'agent-1:tool-1',
+            toolName: 'edit',
+            isError: false,
+        });
+
+        await expect(nextChange).resolves.toMatchObject({
+            filePath: 'child.txt',
+            toolCallId: 'agent-1:tool-1',
+            subagentAgentId: 'agent-1',
+        });
+    });
+
     it('preserves the first baseline for repeated edits, review, and individual undo', () => {
         files.files.set('/workspace/tracked.txt', 'v0\n');
         checkpoints.startTurn(1);

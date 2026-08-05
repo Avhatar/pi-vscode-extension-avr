@@ -116,6 +116,8 @@ export interface FileChangeInfo {
     addedLines: number;
     removedLines: number;
     turnIndex: number;
+    /** Non-empty only for shared-workspace subagent edits; absent for parent-originated changes. */
+    subagentAgentId?: string;
 }
 
 export interface TabInfo {

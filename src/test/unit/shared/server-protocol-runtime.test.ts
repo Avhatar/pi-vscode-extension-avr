@@ -43,6 +43,7 @@ const serverMessages: ServerMessage[] = [
                 addedLines: 1,
                 removedLines: 1,
                 turnIndex: 2,
+                subagentAgentId: 'agent-1',
             }],
             rollbackPoint: 3,
             tabs: [{
@@ -266,6 +267,12 @@ describe('server protocol runtime validation', () => {
                 change: {
                     filePath: '/file.ts', toolCallId: 'tool-1', toolName: 'edit', isNew: false,
                     addedLines: '1', removedLines: 0, turnIndex: 1,
+                },
+            }),
+            eventEnvelope('fileChange', {
+                change: {
+                    filePath: '/file.ts', toolCallId: 'tool-1', toolName: 'edit', isNew: false,
+                    addedLines: 1, removedLines: 0, turnIndex: 1, subagentAgentId: '',
                 },
             }),
             eventEnvelope('skills', {

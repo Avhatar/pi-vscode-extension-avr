@@ -13,6 +13,11 @@ import { mergeStateMessages } from './interrupted-turn-notice';
 import { shouldShowFileUndoView } from './file-undo-view';
 import { createAttachmentOnlyPromptText, prepareUserMessageContent } from './user-message-content';
 import { shouldResumeAutoFollow } from './scroll-follow-state';
+import { shouldRenderInlineFileChange } from './file-change-display';
+import {
+    countForegroundSubagentTools,
+    getTurnActivityIndicatorLabel,
+} from './turn-activity-indicator';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: unknown): void;
@@ -188,6 +193,7 @@ const state: {
     streamingText: string;
     streamingThinking: string;
     isThinking: boolean;
+    isWritingText: boolean;
     thinkingStartTime: number;
     streamingThinkingDuration: number;
     contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null; estimated?: boolean };
@@ -217,6 +223,7 @@ const state: {
     streamingText: '',
     streamingThinking: '',
     isThinking: false,
+    isWritingText: false,
     thinkingStartTime: 0,
     streamingThinkingDuration: 0,
     availableModels: [],
@@ -315,7 +322,9 @@ function handleMessage(msg: ServerMessage): void {
         case 'fileChange':
             state.fileChanges.push(msg.change);
             renderChangedFilesBar();
-            renderInlineFileChange(msg.change);
+            if (shouldRenderInlineFileChange(msg.change)) {
+                renderInlineFileChange(msg.change);
+            }
             break;
         case 'skills':
             state.skills = msg.skills;
@@ -407,6 +416,9 @@ function applyStateSync(s: SerializedAgentState): void {
     state.streamingText = s.streamingText ?? '';
     state.streamingThinking = s.streamingThinking ?? '';
     state.isThinking = s.isThinking ?? false;
+    if (!s.isStreaming || prevTab !== incomingTabId || !s.streamingText) {
+        state.isWritingText = false;
+    }
     state.thinkingStartTime = s.thinkingStartTime ?? 0;
     state.streamingThinkingDuration = s.streamingThinkingDuration ?? 0;
     state.queuedMessages = s.queuedMessages ?? [];
@@ -464,13 +476,7 @@ function applyStateSync(s: SerializedAgentState): void {
         updateInputArea();
         updateChangedFiles();
         updateQueuedMessageBanner();
-        if (state.isCompacting) {
-            showPreparingPlaceholder('Compacting...');
-        } else if (state.isStreaming) {
-            ensurePreparingPlaceholder();
-        } else {
-            removePreparingPlaceholder();
-        }
+        reconcileTurnActivityIndicator();
         updateScrollButton();
     }
 }
@@ -490,16 +496,17 @@ function handleAgentEvent(event: any): void {
             state.streamingText = '';
             state.streamingThinking = '';
             state.isThinking = false;
+            state.isWritingText = false;
             state.pendingTools = [];
             updateInputArea();
             updateStreamingUI();
-            showPreparingPlaceholder();
             break;
         case 'agent_end':
             state.isStreaming = false;
             state.streamingText = '';
             state.streamingThinking = '';
             state.isThinking = false;
+            state.isWritingText = false;
             state.pendingTools = [];
             if (userHasScrolled) {
                 const messages = document.getElementById('messages');
@@ -516,17 +523,24 @@ function handleAgentEvent(event: any): void {
             updateStreamingUI();
             updateInputArea();
             break;
+        case 'message_end':
+            if (event.message?.role === 'assistant') {
+                state.isWritingText = false;
+                reconcileTurnActivityIndicator();
+            }
+            break;
         case 'compaction_start':
             state.isCompacting = true;
-            showPreparingPlaceholder('Compacting...');
+            reconcileTurnActivityIndicator();
             updateInputArea();
             break;
         case 'compaction_end':
             state.isCompacting = false;
-            removePreparingPlaceholder();
+            reconcileTurnActivityIndicator();
             updateInputArea();
             break;
         case 'tool_execution_start':
+            state.isWritingText = false;
             removePreparingPlaceholder();
             state.pendingTools = [
                 ...state.pendingTools.filter((tool) => tool.toolCallId !== String(event.toolCallId)),
@@ -538,6 +552,7 @@ function handleAgentEvent(event: any): void {
                 },
             ];
             renderToolStart(event);
+            reconcileTurnActivityIndicator();
             break;
         case 'tool_execution_update':
             renderToolUpdate(event);
@@ -547,7 +562,7 @@ function handleAgentEvent(event: any): void {
                 (tool) => tool.toolCallId !== String(event.toolCallId),
             );
             renderToolEnd(event);
-            showPreparingPlaceholder();
+            reconcileTurnActivityIndicator();
             break;
     }
 }
@@ -555,6 +570,7 @@ function handleAgentEvent(event: any): void {
 function handleStreamingDelta(ae: any): void {
     switch (ae.type) {
         case 'thinking_start':
+            state.isWritingText = false;
             state.isThinking = true;
             state.streamingThinking = '';
             state.thinkingStartTime = Date.now();
@@ -571,12 +587,17 @@ function handleStreamingDelta(ae: any): void {
             }
             break;
         case 'text_start':
+            state.isWritingText = false;
             break;
-        case 'text_delta':
-            state.streamingText += ae.delta ?? '';
+        case 'text_delta': {
+            const delta = ae.delta ?? '';
+            state.isWritingText = delta.length > 0;
+            state.streamingText += delta;
             dismissSteerToast();
             break;
+        }
         case 'text_end':
+            state.isWritingText = false;
             break;
     }
     renderStreamingContent();
@@ -792,11 +813,7 @@ function render(): void {
     updateStreamingUI();
     updateInputArea();
     updateChangedFiles();
-    if (state.isCompacting) {
-        showPreparingPlaceholder('Compacting...');
-    } else if (state.isStreaming) {
-        ensurePreparingPlaceholder();
-    }
+    reconcileTurnActivityIndicator();
     scrollToBottom();
 }
 
@@ -2563,12 +2580,15 @@ function showPreparingPlaceholder(labelText = 'Preparing next moves...'): void {
     if (!container) return;
     const placeholderTitle = labelText === 'Compacting...'
         ? 'Compacting the conversation — summarising earlier turns to free up context.'
-        : 'The agent is preparing its next move — choosing a tool, drafting an edit, or planning the next step.';
+        : labelText.startsWith('Waiting for ')
+            ? 'The parent agent is waiting for its foreground subagents to finish.'
+            : 'The agent is preparing its next move — choosing a tool, drafting an edit, or planning the next step.';
     const existing = document.getElementById('preparing-placeholder');
     if (existing) {
         const label = existing.querySelector('.preparing-label');
         if (label) label.textContent = labelText;
         existing.title = placeholderTitle;
+        placePreparingPlaceholder(existing);
         return;
     }
     const ph = el('div', 'preparing-placeholder');
@@ -2580,16 +2600,42 @@ function showPreparingPlaceholder(labelText = 'Preparing next moves...'): void {
     label.textContent = labelText;
     ph.appendChild(spinner);
     ph.appendChild(label);
-    insertIntoStreamingContainer(ph);
+    placePreparingPlaceholder(ph);
     scrollToBottom();
 }
 
-function ensurePreparingPlaceholder(): void {
+function placePreparingPlaceholder(placeholder: HTMLElement): void {
     const container = document.getElementById('streaming-message');
     if (!container) return;
-    const hasRunningTool = container.querySelector('.tool-status.running');
-    if (!hasRunningTool) {
-        showPreparingPlaceholder(state.isCompacting ? 'Compacting...' : 'Preparing next moves...');
+    const draft = document.getElementById('answer-draft');
+    if (draft?.parentElement === container && draft.style.display !== 'none') {
+        container.appendChild(placeholder);
+    } else {
+        insertIntoStreamingContainer(placeholder);
+    }
+}
+
+function ensurePreparingPlaceholder(labelText: string): void {
+    const container = document.getElementById('streaming-message');
+    if (!container) return;
+    showPreparingPlaceholder(labelText);
+}
+
+function reconcileTurnActivityIndicator(): void {
+    const pendingSubagentCount = countForegroundSubagentTools(state.pendingTools);
+    const label = getTurnActivityIndicatorLabel({
+        isStreaming: state.isStreaming,
+        isCompacting: state.isCompacting,
+        isThinking: state.isThinking,
+        isWritingText: state.isWritingText,
+        hasStreamingText: state.streamingText.length > 0,
+        pendingToolCount: state.pendingTools.length,
+        pendingSubagentCount,
+    });
+    if (label) {
+        ensurePreparingPlaceholder(label);
+    } else {
+        removePreparingPlaceholder();
     }
 }
 
@@ -2598,9 +2644,9 @@ function ensurePreparingPlaceholder(): void {
 // *current* in-flight message. Unlike the rest of the streaming container, it
 // survives mid-turn wipes triggered by `updateStreamingUI()` on every
 // `stateSync`, so the streamed answer text does not flicker between the live
-// stream and the finalized transcript position. Tool cards, preparing
-// placeholders and diff cards are inserted *before* the draft so the visual
-// order remains: tools + thinking → answer at the bottom.
+// stream and the finalized transcript position. Tool and diff cards stay
+// before the draft; the fallback activity indicator moves after a visible
+// draft so an unfinished turn always ends with its current activity.
 function ensureAnswerDraft(): HTMLElement | null {
     const container = document.getElementById('streaming-message');
     if (!container) return null;
@@ -2644,15 +2690,12 @@ function renderStreamingContent(): void {
     const draft = ensureAnswerDraft();
     if (!draft) return;
 
-    const hasContent = !!(state.streamingText || state.streamingThinking);
+    const hasContent = !!(state.isThinking || state.streamingText || state.streamingThinking);
     draft.style.display = hasContent ? '' : 'none';
-    if (hasContent) {
-        removePreparingPlaceholder();
-    }
 
     const thinkingEl = document.getElementById('streaming-thinking') as HTMLDetailsElement | null;
     if (thinkingEl) {
-        if (state.streamingThinking) {
+        if (state.isThinking || state.streamingThinking) {
             thinkingEl.style.display = '';
             const contentEl = thinkingEl.querySelector('.thinking-content');
             if (contentEl) contentEl.innerHTML = renderMarkdown(state.streamingThinking);
@@ -2686,6 +2729,8 @@ function renderStreamingContent(): void {
             ? renderMarkdown(state.streamingText)
             : '';
     }
+
+    reconcileTurnActivityIndicator();
 
     if (hasContent) {
         bindCopyButtons();

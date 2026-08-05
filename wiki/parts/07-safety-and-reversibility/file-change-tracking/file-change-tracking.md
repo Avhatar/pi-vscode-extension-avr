@@ -2,7 +2,7 @@
 
 ## Stance
 
-Two rules matter. **Capture before the tool starts.** `DiffManager` subscribes to `tool_execution_start` and reads the pre-tool content synchronously through `FileStatePort.captureText` — synchronously, because the tool executes on the next tick and any delay opens a race. **Diff at tool end.** `tool_execution_end` fires; the manager reads the post-tool content, runs `computeUnifiedDiff`, produces a `FileChangeInfo`, hands it to listeners (the UI, the file-undo view, the checkpoint manager for its own bookkeeping). Everything is in-memory; nothing is persisted to disk beyond what the SDK's session-history JSONL already contains.
+Two rules matter. **Capture before the tool starts.** `DiffManager` subscribes to `tool_execution_start` and reads the pre-tool content synchronously through `FileStatePort.captureText` — synchronously, because the tool executes on the next tick and any delay opens a race. **Diff at tool end.** `tool_execution_end` fires; the manager reads the post-tool content, runs `computeUnifiedDiff`, produces a `FileChangeInfo`, and hands it to listeners. Parent edits may render inline; shared-workspace child edits carry `subagentAgentId` so they remain available in File Undo View without flooding the parent timeline. Everything is in-memory; nothing is persisted to disk beyond what the SDK's session-history JSONL already contains.
 
 ## Role
 
@@ -21,15 +21,15 @@ Public surface:
 Internals:
 
 - `_originalContents: Map<absolutePath, string>` — the pre-tool snapshot cache. Keyed by absolute path so consecutive edits to the same file within one turn only capture once. On undo (per-file), the entry is deleted so the next edit re-captures.
-- `_onToolStart(event)` [diff-manager.ts:86](../../../../src/core/files/diff-manager.ts#L86) — filters for known write tools (edit, write, delete), calls `fileState.captureText`, stores in `_originalContents`, forwards to `CheckpointManager.recordFileState` for the current turn.
-- `_onToolEnd(event)` [diff-manager.ts:113](../../../../src/core/files/diff-manager.ts#L113) — reads post-tool content, calls `computeUnifiedDiff(original, current, filePath)`, emits `FileChangeInfo` to listeners.
+- `_onToolStart(event)` [diff-manager.ts:86](../../../../src/core/files/diff-manager.ts#L86) — filters for known write tools (`edit`, `write`), calls `fileState.captureText`, stores in `_originalContents`, preserves an optional child `agentId`, and forwards to `CheckpointManager.recordFileState` for the current turn.
+- `_onToolEnd(event)` [diff-manager.ts:113](../../../../src/core/files/diff-manager.ts#L113) — reads post-tool content, calls `computeUnifiedDiff(original, current, filePath)`, and emits `FileChangeInfo`; child-originated entries expose the preserved id as `subagentAgentId`.
 
 Myers diff at [src/utils/diff.ts](../../../../src/utils/diff.ts):
 
 - `computeUnifiedDiff(oldText, newText, filePath, contextLines = 3)` [diff.ts:11](../../../../src/utils/diff.ts#L11) — returns `{ diff: string, stats: DiffStats }`. Splits into lines, calls `myersDiff`, groups the edit-op sequence into hunks with 3 lines of context.
 - `myersDiff(a, b)` [diff.ts:51](../../../../src/utils/diff.ts#L51) — linear-time edit-distance implementation returning an `EditOp[]` (`eq | del | add`).
 
-`FileChangeInfo` at [src/shared/agent-protocol.ts:85](../../../../src/shared/agent-protocol.ts#L85): `{ filePath, absolutePath, toolCallId, diff, linesAdded, linesRemoved, turn }`.
+`FileChangeInfo` at [src/shared/agent-protocol.ts](../../../../src/shared/agent-protocol.ts): `{ filePath, toolCallId, toolName, isNew, diff?, addedLines, removedLines, turnIndex, subagentAgentId? }`.
 
 ## Role — files under src/core/files
 
@@ -64,7 +64,8 @@ Myers diff at [src/utils/diff.ts](../../../../src/utils/diff.ts):
 - `_onToolEnd(event)` — [diff-manager.ts:113](../../../../src/core/files/diff-manager.ts#L113); reads current, computes diff, emits
 
 **Attributes / markers:**
-- Watched tool names: `edit`, `write`, `delete` — hardcoded filter in `_onToolStart`
+- Watched tool names: `edit`, `write` — hardcoded filter in `_onToolStart`
+- `subagentAgentId` — optional marker that distinguishes shared-workspace child changes from parent edits
 - Default context lines: `3` — matches GNU diff convention
 - `_originalContents` Map cleared per file on undo, not per turn
 
@@ -87,7 +88,8 @@ Myers diff at [src/utils/diff.ts](../../../../src/utils/diff.ts):
 ## See also
 
 - **Rule — capture must be synchronous.** `FileStatePort.captureText` is sync so the pre-tool snapshot lands before the tool executes on the next tick. Never wrap it in a Promise; you will race the tool.
-- **Rule — only known write tools are tracked.** The filter (`edit`, `write`, `delete`) is intentional; adding a new mutating tool must extend the filter, or its changes will not appear in the file-undo view.
+- **Rule — only known write tools are tracked.** The filter (`edit`, `write`) is intentional; adding a new mutating tool must extend the filter, or its changes will not appear in the file-undo view.
+- **Pattern — child changes stay reviewable but not inline.** Shared-workspace subagent mutations still flow through `DiffManager` and File Undo View; `subagentAgentId` lets the chat webview suppress their individual inline cards while a single aggregate parent-wait indicator represents the foreground children.
 - **Pattern — original content is per-file, not per-turn.** If the agent edits `foo.ts` three times in one turn, only the first `_onToolStart` captures the original; subsequent starts hit the cached entry. This is correct: the "before" for the whole turn is the state before the first edit.
 - **Pattern — suspend / redo is symmetric.** `suspendChangesAfter(turnIndex)` moves entries out; `redoChanges()` moves them back. The order and content are preserved.
 - **Pitfall — `_originalContents` deletion on undo is per-file.** When the user undoes a single file change, its cache entry is removed so a subsequent edit re-captures. Do not clear the whole cache; other files' edits are still tracked.

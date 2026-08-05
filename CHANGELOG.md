@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.67.5] - 2026-08-04
+
+### Changed
+- Parent chats waiting on foreground subagents now show one aggregate waiting indicator, keep individual subagent cards visually quiet, and retain child file changes for review without flooding the chat with inline diffs.
+
+## [0.67.4] - 2026-08-04
+
+### Fixed
+- Action timelines now stop at the final running or completed action icon instead of leaving a dangling vertical line below it.
+
+## [0.67.3] - 2026-08-04
+
+### Fixed
+- Active turns now keep showing the pulsing activity indicator between assistant text, reasoning, and tool actions instead of appearing stuck.
+
 ## [0.67.2] - 2026-08-04
 
 ### Fixed

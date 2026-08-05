@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-04 — Aggregate foreground-subagent waiting state
+
+- **Code:** Parent chats now summarize pending foreground subagents in one waiting indicator, keep individual child cards visually quiet, and mark shared-workspace child file changes so they remain reviewable without rendering inline chat diffs.
+- **Wiki:** `file-change-tracking.md` and its intro document child provenance and review-only presentation; `subagent-manager-and-lifecycle.md` records aggregate waiting behavior; `write-isolation-and-worktree.md` clarifies shared-workspace routing; `message-protocol.md` lists the optional `subagentAgentId` marker.
+- **Escalations:** none — the change refines existing chat, mutation-routing, protocol, and file-tracking behavior without adding a new subsystem.
+
 ## 2026-08-03 — DeepSeek balance and monetary turn accounting
 
 - **Code:** Added official DeepSeek balance refreshes, key/date-scoped local daily spend accounting, SDK session-cost turn deltas, typed host/webview messages, and chat footer presentation for remaining balance plus turn, session, and daily costs.
