@@ -133,7 +133,8 @@ describe('PiSessionManager interrupted turn state', () => {
             startedLifecycle,
         );
         expect(manager.serializeState()).not.toHaveProperty('interruptedTurn');
-        expect(getBranch).not.toHaveBeenCalled();
+        // Full transcript projection still reads the branch; interruption detection does not add a second read.
+        expect(getBranch).toHaveBeenCalledTimes(1);
 
         await replaceRuntime(
             manager,
@@ -141,7 +142,7 @@ describe('PiSessionManager interrupted turn state', () => {
             startedLifecycle,
         );
         expect(manager.serializeState()).not.toHaveProperty('interruptedTurn');
-        expect(getBranch).not.toHaveBeenCalled();
+        expect(getBranch).toHaveBeenCalledTimes(2);
 
         await replaceRuntime(manager, createSession([
             { role: 'user', content: 'Work' },

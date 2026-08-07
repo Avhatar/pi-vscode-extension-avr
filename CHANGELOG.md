@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.67.7] - 2026-08-07
+
+### Changed
+- MCP tool execution now shows the server and tool name (e.g. "MCP: wikijs.search") instead of a generic "mcp" label.
+
+## [0.67.6] - 2026-08-05
+
+### Fixed
+- Compacted chats now keep their original names and preserve the complete current-branch conversation, with earlier messages loaded automatically when scrolling upward.
+
 ## [0.67.5] - 2026-08-04
 
 ### Changed

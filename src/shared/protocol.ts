@@ -34,6 +34,8 @@ export type {
     SessionInfo,
     SkillInfo,
     TabInfo,
+    TranscriptItem,
+    TranscriptPage,
     WorkspaceFileSuggestion,
 } from './agent-protocol';
 export type { PlatformClientMessage, PlatformServerMessage } from './platform-protocol';

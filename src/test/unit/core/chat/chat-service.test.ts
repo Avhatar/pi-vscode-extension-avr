@@ -11,6 +11,10 @@ class FakeSession {
     sessionPath = '/sessions/chat.jsonl';
     session: { sessionName?: string } | undefined;
     messages: any[] = [];
+    transcriptMessages: any[] = [];
+    readonly setSessionName = vi.fn((name: string) => {
+        this.session = { sessionName: name };
+    });
 
     serializeState(): SerializedAgentState {
         return {
@@ -23,6 +27,10 @@ class FakeSession {
 
     getMessages(): any[] {
         return this.messages;
+    }
+
+    getFirstTranscriptUserMessage(): any | undefined {
+        return this.transcriptMessages.find((message) => message.role === 'user');
     }
 
     dispose(): void {}
@@ -293,10 +301,13 @@ describe('portable ChatService event and state projection', () => {
     it('derives names from persisted session metadata before the first user message', () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.session.messages = [{ role: 'user', content: 'first user request' }];
+        tab.session.messages = [{ role: 'user', content: 'recent compacted request' }];
+        tab.session.transcriptMessages = [{ role: 'user', content: 'first user request' }];
 
         expect(service.updateTabName(tab)).toEqual({ changed: true, name: 'first user request' });
+        expect(tab.session.setSessionName).toHaveBeenCalledOnce();
         expect(service.updateTabName(tab)).toEqual({ changed: false, name: 'first user request' });
+        expect(tab.session.setSessionName).toHaveBeenCalledOnce();
 
         tab.session.session = { sessionName: 'Persisted name' };
         expect(service.updateTabName(tab)).toEqual({ changed: true, name: 'Persisted name' });
@@ -305,7 +316,7 @@ describe('portable ChatService event and state projection', () => {
     it('does not use Plan Mode instructions when deriving a chat name', () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.session.messages = [{
+        tab.session.transcriptMessages = [{
             role: 'user',
             content: `${PLAN_MODE_INSTRUCTIONS}\n\nRefactor the launcher tabs`,
         }];
@@ -340,14 +351,7 @@ describe('portable ChatService session and file-history transactions', () => {
             checkpointManager: { clearAll: vi.fn(() => order.push('clear-checkpoints')) },
             resetSessionProjection: vi.fn(() => order.push('reset-projection')),
         };
-        const messages = [
-            { role: 'user' },
-            { role: 'assistant' },
-            { role: 'custom' },
-            { role: 'user' },
-        ];
-
-        service.resetSessionProjection(tab, undefined, messages);
+        service.resetSessionProjection(tab, undefined, 2);
 
         expect(order).toEqual(['clear-diffs', 'clear-checkpoints', 'reset-projection']);
         expect(tab.resetSessionProjection).toHaveBeenCalledWith(undefined, 2);

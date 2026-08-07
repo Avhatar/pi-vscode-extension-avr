@@ -245,12 +245,13 @@ describe('ChatController platform ports', () => {
             id: 'tab-1',
             session: {
                 loadSession: vi.fn(async () => undefined),
+                session: { sessionName: 'Persisted session' },
                 getMessages: vi.fn(() => [
-                    { role: 'user', content: 'first' },
-                    { role: 'assistant', content: 'reply' },
-                    { role: 'custom', customType: 'metadata' },
                     { role: 'user', content: 'second' },
                 ]),
+                getTranscriptUserTurnCount: vi.fn(() => 2),
+                getFirstTranscriptUserMessage: vi.fn(),
+                setSessionName: vi.fn(),
             },
             diffManager: { clearAll: vi.fn() },
             checkpointManager: { clearAll: vi.fn() },
@@ -261,8 +262,11 @@ describe('ChatController platform ports', () => {
         controller._outputChannel = { appendLine: vi.fn() };
         controller._applyPersistedToolSelection = vi.fn();
         controller._chatService = new ChatService({ now: () => 0 });
+        controller._onTabRenamed = { fire: vi.fn() };
+        controller._onLauncherStateChanged = { fire: vi.fn() };
         controller._updateTabName = vi.fn();
         controller._persistTabs = vi.fn();
+        controller._postForTab = vi.fn();
         controller.sendStateSync = vi.fn();
 
         await expect(controller.handleMessage({

@@ -33,6 +33,17 @@ const serverMessages: ServerMessage[] = [
             sessionId: 'session-1',
             sessionName: 'Session',
             sessionPath: '/sessions/session-1.jsonl',
+            transcript: {
+                sessionId: 'session-1',
+                items: [{
+                    id: 'entry-1:0',
+                    entryId: 'entry-1',
+                    message: { role: 'assistant', content: 'full history' },
+                }],
+                beforeCursor: 'entry-1',
+                hasMoreBefore: true,
+                totalUserMessages: 12,
+            },
             contextUsage: { tokens: 10, contextWindow: 100, percent: 10, estimated: true },
             fileChanges: [{
                 filePath: '/workspace/file.ts',

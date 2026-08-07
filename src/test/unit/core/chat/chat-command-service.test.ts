@@ -17,6 +17,7 @@ function createHarness() {
         setModel: vi.fn(async () => undefined),
         setThinkingLevel: vi.fn(),
         getSessions: vi.fn(async () => [{ id: 's', path: '/s' }]),
+        getTranscriptPage: vi.fn(() => ({ sessionId: 's', items: [], hasMoreBefore: false, totalUserMessages: 0 })),
         session: { sessionId: 's' },
         getSkills: vi.fn(() => [{ name: 'skill' }]),
     };
@@ -139,6 +140,13 @@ describe('portable ChatCommandService', () => {
             sessions: [{ id: 's', path: '/s' }],
             currentSessionId: 's',
         });
+
+        await expect(service.dispatch(tab, {
+            type: 'getTranscriptPage', sessionId: 's', beforeEntryId: 'entry-20', limit: 80,
+        }, callbacks)).resolves.toEqual({
+            result: { sessionId: 's', items: [], hasMoreBefore: false, totalUserMessages: 0 },
+        });
+        expect(session.getTranscriptPage).toHaveBeenCalledWith('s', 'entry-20', 80);
 
         await service.dispatch(tab, { type: 'getSkills' }, callbacks);
         expect(emit).toHaveBeenCalledWith({ type: 'skills', skills: [{ name: 'skill' }] });

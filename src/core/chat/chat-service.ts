@@ -25,6 +25,8 @@ export interface ChatServiceSession extends TabSessionResource {
     readonly session?: { readonly sessionName?: string };
     serializeState(): SerializedAgentState;
     getMessages(): any[];
+    getFirstTranscriptUserMessage(): any | undefined;
+    setSessionName(name: string): void;
 }
 
 export interface ChatServiceDiff extends TabDisposableResource {
@@ -305,11 +307,11 @@ export class ChatService {
     resetSessionProjection(
         tab: SessionProjectionResetTarget,
         projectToolDefault: ProjectToolSelectionDefault | undefined,
-        messages: readonly unknown[] = [],
+        initialTurnCounter = 0,
     ): void {
         tab.diffManager.clearAll();
         tab.checkpointManager.clearAll();
-        tab.resetSessionProjection(projectToolDefault, countUserTurns(messages));
+        tab.resetSessionProjection(projectToolDefault, initialTurnCounter);
     }
 
     async undoFileChange(
@@ -598,13 +600,16 @@ export class ChatService {
             return { changed: true, name: tab.name };
         }
 
-        if (tab.name === 'New Agent') {
-            const firstUser = tab.session.getMessages().find((message: any) => message.role === 'user');
+        if (!sessionName) {
+            const firstUser = tab.session.getFirstTranscriptUserMessage();
             if (firstUser) {
-                const trimmed = deriveTabNameFromUserContent(firstUser.content);
-                if (trimmed) {
-                    tab.name = trimmed;
-                    return { changed: true, name: tab.name };
+                const derivedName = deriveTabNameFromUserContent(firstUser.content);
+                if (derivedName) {
+                    tab.session.setSessionName(derivedName);
+                    if (tab.name !== derivedName) {
+                        tab.name = derivedName;
+                        return { changed: true, name: tab.name };
+                    }
                 }
             }
         }
@@ -665,6 +670,29 @@ export class ChatService {
                 if (meta.deepSeekTurn) message._deepSeekTurnUsage = meta.deepSeekTurn;
             }
             assistantOrdinal++;
+        }
+
+        // The webview renders the transcript page, while runtime timing/cost
+        // metadata is tracked against compact context assistants. Align the
+        // newest assistants from the end so recent cards keep that metadata.
+        const transcriptAssistants = state.transcript?.items
+            .map((item) => item.message)
+            .filter((message) => message?.role === 'assistant') ?? [];
+        let transcriptAssistantIndex = transcriptAssistants.length - 1;
+        for (let index = state.messages.length - 1; index >= 0 && transcriptAssistantIndex >= 0; index--) {
+            const contextMessage = state.messages[index];
+            if (contextMessage?.role !== 'assistant') continue;
+            const transcriptMessage = transcriptAssistants[transcriptAssistantIndex--];
+            for (const key of [
+                '_thinkingDurationSec',
+                '_messageEndTime',
+                '_turnDurationMs',
+                '_totalTurnDurationMs',
+                '_codexTurnUsage',
+                '_deepSeekTurnUsage',
+            ]) {
+                if (contextMessage[key] !== undefined) transcriptMessage[key] = contextMessage[key];
+            }
         }
         return state;
     }

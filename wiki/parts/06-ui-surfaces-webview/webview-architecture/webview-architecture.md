@@ -19,10 +19,13 @@ Plus helper modules imported by the chat panel:
 - [src/webview/user-message-content.ts](../../../../src/webview/user-message-content.ts) — user-message parsing helper
 - [src/webview/file-undo-view.ts](../../../../src/webview/file-undo-view.ts) — file-undo visibility rules
 - [src/webview/interrupted-turn-notice.ts](../../../../src/webview/interrupted-turn-notice.ts) — interrupted-turn state reconciliation
+- [src/webview/transcript-state.ts](../../../../src/webview/transcript-state.ts) — stable-id merge/prepend state for lazy full-history pages
 
 **The `el()` helper.** `el(tag, className?)` creates a typed DOM element with optional class. It's the only construction primitive; everything else appends children, sets `textContent`, listens for events with `.addEventListener`. Around 4900 lines of chat UI use this pattern.
 
 **Transport.** [`VsCodeAgentConnection`](../../../../src/webview/vscode-agent-connection.ts#L32) extends `AgentConnectionClient`; construction wraps `acquireVsCodeApi().postMessage` as `send` and `window.addEventListener('message', ...)` as `subscribe`. Requests are timed out per [Part II § protocol-runtime](../../02-shared-protocol-and-contracts/protocol-runtime/protocol-runtime.md); events flow via `connection.subscribe(listener)`.
+
+**Transcript history.** The host state carries only the latest page of the complete current branch; `transcript-state.ts` annotates stable item ids, merges refreshed tails, and prepends older pages without duplicates. Scrolling near the top sends a correlated `getTranscriptPage` request, then restores the viewport by the change in scroll height. A stale session or branch cursor resets the accumulator instead of mixing histories. Compact SDK `messages` remain separate and are never rendered when transcript pages are available.
 
 **State persistence.** Panel webviews call `vscode.setState({ tabId, sessionPath })` on every state change; the [`ChatPanelSerializer`](../../../../src/providers/chat-panel-serializer.ts) uses that stored `state` to restore the correct tab on `Reload Window`. Launcher and settings do not persist state — they always ask the host on connect.
 
@@ -43,6 +46,7 @@ Plus helper modules imported by the chat panel:
 - `prepareUserMessageContent(text, images, files)` — [user-message-content.ts](../../../../src/webview/user-message-content.ts); formats the user message payload for the API
 - `shouldShowFileUndoView(state)` — [file-undo-view.ts](../../../../src/webview/file-undo-view.ts); visibility predicate
 - `mergeStateMessages(...)` — from [interrupted-turn-notice.ts](../../../../src/webview/interrupted-turn-notice.ts); recovers durable turn-lifecycle status into the visible message list
+- `ClientTranscriptState`, `createTranscriptState`, `mergeTranscriptTail`, `prependTranscriptPage` — lazy transcript accumulator [transcript-state.ts](../../../../src/webview/transcript-state.ts)
 
 **Methods — DOM:**
 - `el(tag, className?)` — the sole construction helper; declared inline in [main.ts:4892](../../../../src/webview/main.ts#L4892) and mirrored in launcher / settings
@@ -52,6 +56,7 @@ Plus helper modules imported by the chat panel:
 - `connection.request(message, options?)` — request/response
 - `connection.subscribe(listener)` — event stream
 - `send(message)` — small wrapper around `connection.request` handling `confirmAction` timeouts
+- `loadOlderTranscript()` — panel-local upwards-scroll loader using correlated `getTranscriptPage` responses
 
 **Attributes / markers:**
 - `data-mode="panel" | "sidebar"` — set on `#app` by the panel provider; toggles panel-only vs. sidebar-only UI regions
@@ -80,7 +85,9 @@ Plus helper modules imported by the chat panel:
 - **Rule — no framework, no ambient DOM helpers.** Use `el()`. Do not introduce jQuery-style shortcuts; do not import React.
 - **Rule — always route through `AgentConnectionClient`.** A raw `vscode.postMessage(...)` bypasses timeouts, deduplication, and recovery. If a new webview needs a transport, wrap it in a `createXTransport(api, source)` factory that mirrors [`createVsCodeTransport`](../../../../src/webview/vscode-agent-connection.ts#L46).
 - **Rule — CSS variables all the way down.** Every color, spacing, radius goes through a `--vscode-*` variable with a fallback. Do not hardcode `#1e1e1e` or `#333`.
-- **Pattern — `vscode.setState` is a pointer, not a snapshot.** Store `{ tabId, sessionPath }`, not the whole state. The serializer looks up the actual state from the host on restore.
+- **Pattern — `vscode.setState` is a pointer, not a snapshot.** Store `{ tabId, sessionPath }`, not the whole state. The serializer looks up the actual state from the host on restore; chat titles live in SDK `session_info`, not webview state.
+- **Pattern — history grows upward without moving the reader.** Measure `scrollHeight` before prepending, rebuild the message DOM, then add the height delta to `scrollTop`. Do not rely on browser scroll anchoring across a full DOM rebuild.
+- **Pitfall — never merge pages by array position.** State syncs slide the latest page forward as turns arrive. Stable transcript item ids identify overlap; session mismatch or missing branch cursor means reset.
 - **Pattern — drafts are session-lifetime, not persistent.** Users expect that closing and reopening the window forgets drafts (they can retype); switching tabs preserves them (they were typing right there). Match this expectation.
 - **Pitfall — `data-mode` and `data-tab-id` are load-bearing.** The panel provider sets them on `#app`. If you introduce a new mode, wire the CSS switches at the same time.
 - **Pitfall — bundle size matters.** Webview code loads on every panel open. Every new dependency (a markdown library, a syntax highlighter, an icon set) inflates every load. The `marked.js` inclusion is deliberate and scoped to the chat webview alone.

@@ -36,7 +36,8 @@ The [src/shared/interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts)
 - `RawClientMessage`, `RawServerMessage`, `RawModeSettingsClientMessage`, `RawModeSettingsServerMessage` — [src/shared/raw-protocol.ts](../../../../src/shared/raw-protocol.ts)
 
 **Types — data payloads (agent-protocol.ts):**
-- `SerializedAgentState` — canonical per-tab shape [agent-protocol.ts:114](../../../../src/shared/agent-protocol.ts#L114) (messages, model, tools, streaming/compacting flags, session metadata, context usage, file changes, cache mode, interrupted-turn marker, controls, pending tools)
+- `SerializedAgentState` — canonical per-tab shape [agent-protocol.ts](../../../../src/shared/agent-protocol.ts) (compact model-context messages, latest full-transcript page, model, tools, streaming/compacting flags, session metadata, context usage, file changes, cache mode, interrupted-turn marker, controls, pending tools)
+- `TranscriptItem`, `TranscriptPage` — stable SDK-entry identities, backwards cursor, full-branch turn count, and reset marker for lazy chat-history loading [agent-protocol.ts](../../../../src/shared/agent-protocol.ts)
 - `TabInfo`, `CacheMode`, `CacheEffective` — [agent-protocol.ts:96](../../../../src/shared/agent-protocol.ts#L96)
 - `PendingToolInfo` — [agent-protocol.ts:107](../../../../src/shared/agent-protocol.ts#L107)
 - `ModelInfo`, `ImageAttachment`, `FileAttachment`, `SkillInfo`, `WorkspaceFileSuggestion`, `SessionInfo` — [agent-protocol.ts:153](../../../../src/shared/agent-protocol.ts#L153)
@@ -70,6 +71,7 @@ The [src/shared/interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts)
 **Attributes / markers:**
 - `TURN_LIFECYCLE_CUSTOM_TYPE = 'pi-code.turn-lifecycle'` — session-entry marker for durable turn lifecycle status [interrupted-turn.ts:1](../../../../src/shared/interrupted-turn.ts#L1)
 - Every message type uses a mandatory `type` discriminator; nothing else may collide with it
+- Client message `getTranscriptPage` — requests an older current-branch page by `sessionId` and SDK entry cursor; the correlated response carries `TranscriptPage`
 
 **Namespaces:**
 - [src/shared/protocol.ts](../../../../src/shared/protocol.ts) — barrel + surface-specific unions
@@ -100,5 +102,6 @@ The [src/shared/interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts)
 - **Rule — keep transport partitions honest.** `AgentClientMessage` covers agent-domain intent. `PlatformClientMessage` covers host-agnostic capabilities (open file, confirm action). `VsCodeClientMessage` is VS Code-specific. Do not put a "vscode.commands.executeCommand" request into `AgentClientMessage` just because the emitter is convenient — an alternative host will not know what to do with it.
 - **Pitfall — the top-level `ClientMessage` re-exports the three partitions.** Do not re-declare a message in `protocol.ts` that already exists in an underlying file. Grep first.
 - **Pattern — control state travels bundled.** `AgentTabControls` collapses todos, subagents, tool selection, feature toggles into one field on `SerializedAgentState.controls`. Reducer code never has to hand-roll six subscriptions; it consumes one bundle.
+- **Pattern — model context and visible transcript are separate.** `SerializedAgentState.messages` remains the SDK's compact context, while `SerializedAgentState.transcript` carries only the latest page of the complete current branch. Older pages use correlated `getTranscriptPage` responses so compaction never erases user-visible history or forces multi-megabyte state snapshots.
 - **Pattern — the interrupted-turn helpers exist because Pi tools may terminate a turn intentionally.** Durable lifecycle markers (`TURN_LIFECYCLE_CUSTOM_TYPE` entries) disambiguate "session was interrupted" from "tool decided to stop"; legacy tool tails without the marker do not activate the interruption UI.
 - **Pitfall — do not import protocol files from webview and extension host asymmetrically.** Both sides must resolve to the same declaration; that's why the shared folder is under `src/shared/` and both bundle targets emit it.

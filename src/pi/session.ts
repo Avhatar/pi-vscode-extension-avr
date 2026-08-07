@@ -8,9 +8,10 @@ import {
     type SessionLockHandle,
     type SessionRuntimePorts,
 } from '../core/ports/session-platform';
-import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment } from '../shared/protocol';
+import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment, TranscriptPage } from '../shared/protocol';
 import { TypedEventEmitter } from '../shared/typed-event';
 import { safeSerialize } from '../shared/safe-serialize';
+import { shouldDisplayChatMessage } from '../shared/message-visibility';
 import {
     TURN_LIFECYCLE_CUSTOM_TYPE,
     getLatestTurnLifecycleStatus,
@@ -58,6 +59,7 @@ import type {
 import type { SubagentRunStore } from './subagents/persistence';
 import type { WriteIsolationManager } from './subagents/write-isolation';
 import type { ChildToolFactoryRegistry } from './subagents/child-tools';
+import { buildTranscriptPage } from '../core/chat/transcript-pagination';
 
 interface CreatedSessionRuntime extends PiSessionRuntimeState {
     cwd: string;
@@ -91,6 +93,7 @@ export class PiSessionManager {
     private _disposeRequested = false;
     private _shutdownRequested = false;
     private _turnLifecycleOpen = false;
+    private _sessionEntryToContextMessages?: (entry: any) => any[];
 
     private _currentRawRecorder: RawRecorder | undefined;
     private readonly _rawSessionOnlyEventKinds: Set<string> = new Set(RAW_SESSION_ONLY_EVENT_KINDS);
@@ -318,10 +321,15 @@ export class PiSessionManager {
         kind: SessionCreationKind,
         sessionPath?: string,
     ): Promise<CreatedSessionRuntime> {
-        const { createAgentSession, SessionManager: SM } = await this._perf.time(
+        const {
+            createAgentSession,
+            SessionManager: SM,
+            sessionEntryToContextMessages,
+        } = await this._perf.time(
             'session.createRuntime.sdkImport',
             () => import('@earendil-works/pi-coding-agent'),
         );
+        this._sessionEntryToContextMessages = sessionEntryToContextMessages;
         const cwd = this._getCwd();
         // Bundled extensions like pi-mcp-adapter discover project config files via process.cwd()
         // (e.g. ".mcp.json", ".pi/mcp.json"). In the VS Code extension host process.cwd() is
@@ -963,6 +971,65 @@ export class PiSessionManager {
         return this._session?.state?.messages ?? [];
     }
 
+    getTranscriptPage(
+        sessionId: string,
+        beforeEntryId?: string,
+        limit = 80,
+    ): TranscriptPage {
+        const session = this._session;
+        if (!session || session.sessionId !== sessionId) {
+            throw new Error('Transcript session changed; refresh the chat state before loading more history.');
+        }
+        const branch = this._sessionManager?.getBranch?.() ?? [];
+        const project = (entry: any): any[] => {
+            const messages = this._sessionEntryToContextMessages
+                ? this._sessionEntryToContextMessages(entry)
+                : entry?.type === 'message' && entry.message
+                    ? [entry.message]
+                    : [];
+            return messages
+                .filter((message) => shouldDisplayChatMessage(message))
+                .map((message) => safeSerialize(message));
+        };
+        const page = buildTranscriptPage(branch, project, {
+            beforeEntryId,
+            limit: Math.min(200, Math.max(1, Math.trunc(limit))),
+        });
+        let totalUserMessages = 0;
+        for (const entry of branch) {
+            for (const message of project(entry)) {
+                if (message?.role === 'user') totalUserMessages++;
+            }
+        }
+        return {
+            sessionId,
+            items: page.items,
+            beforeCursor: page.beforeCursor,
+            hasMoreBefore: page.hasMoreBefore,
+            totalUserMessages,
+            ...(!page.cursorFound && beforeEntryId ? { reset: true } : {}),
+        };
+    }
+
+    getTranscriptUserTurnCount(): number {
+        const sessionId = this._session?.sessionId;
+        return sessionId ? this.getTranscriptPage(sessionId, undefined, 1).totalUserMessages : 0;
+    }
+
+    getFirstTranscriptUserMessage(): any | undefined {
+        const branch = this._sessionManager?.getBranch?.() ?? [];
+        for (const entry of branch) {
+            const messages = this._sessionEntryToContextMessages
+                ? this._sessionEntryToContextMessages(entry)
+                : entry?.type === 'message' && entry.message
+                    ? [entry.message]
+                    : [];
+            const userMessage = messages.find((message) => message?.role === 'user');
+            if (userMessage) return safeSerialize(userMessage);
+        }
+        return undefined;
+    }
+
     setMessages(msgs: any[]): void {
         if (this._session?.state) {
             this._session.state.messages = msgs;
@@ -1013,6 +1080,7 @@ export class PiSessionManager {
             tools: s.getActiveToolNames(),
             sessionId: s.sessionId,
             sessionName: s.sessionName,
+            transcript: this.getTranscriptPage(s.sessionId),
             contextUsage: this._getContextUsage(),
             ...(!s.isStreaming && !s.isCompacting && hasInterruptedTurn
                 ? { interruptedTurn: { reason: 'incomplete_session_tail' as const } }

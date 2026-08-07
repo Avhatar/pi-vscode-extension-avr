@@ -12,6 +12,7 @@ function createTab(id: string): ChatHostTab {
         projectToolDefault: undefined,
         session: {
             getMessages: vi.fn(() => []),
+            getTranscriptUserTurnCount: vi.fn(() => 0),
             newSession: vi.fn(async () => undefined),
             loadSession: vi.fn(async () => undefined),
             setModel: vi.fn(async () => undefined),
@@ -318,6 +319,13 @@ describe('portable ChatHost', () => {
             expect.objectContaining({ getFavorites: expect.any(Function) }),
         );
 
+        commands.dispatch.mockResolvedValueOnce({ result: { page: 'older' } });
+        await expect(host.dispatch({
+            type: 'getTranscriptPage',
+            sessionId: 'session-1',
+            beforeEntryId: 'entry-20',
+        }, tab.id)).resolves.toEqual({ ok: true, result: { page: 'older' } });
+
         commands.dispatch.mockResolvedValueOnce({ intent: { type: 'setCacheMode', mode: 'long' } });
         await host.dispatch({ type: 'setCacheMode', mode: 'long' }, tab.id);
         expect(getCacheMode()).toBe('long');
@@ -344,7 +352,7 @@ describe('portable ChatHost', () => {
         await host.dispatch({ type: 'newSession' }, tab.id);
         expect(tab.session.newSession).toHaveBeenCalledOnce();
         expect(preferences.applyPersistedToolSelection).toHaveBeenCalledWith(tab);
-        expect(chat.resetSessionProjection).toHaveBeenCalledWith(tab, undefined, []);
+        expect(chat.resetSessionProjection).toHaveBeenCalledWith(tab, undefined, 0);
         expect(effects.persistTabs).toHaveBeenCalledOnce();
         expect(persistedSessionPath).toBe('/sessions/new.jsonl');
 

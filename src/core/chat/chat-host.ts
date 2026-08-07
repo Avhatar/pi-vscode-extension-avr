@@ -35,6 +35,7 @@ import {
 export type ChatHostSession = ChatServiceSession & ChatCommandSession & {
     newSession(): Promise<void>;
     loadSession(sessionPath: string): Promise<void>;
+    getTranscriptUserTurnCount(): number;
     setMessages(messages: any[]): void;
 };
 
@@ -57,7 +58,7 @@ export interface PersistedChatHostTabs {
 }
 
 export type ChatHostDispatchResult =
-    | { readonly ok: true }
+    | { readonly ok: true; readonly result?: unknown }
     | { readonly ok: false; readonly code: 'tab_not_found' | 'command_failed'; readonly message: string };
 
 export interface ChatHostPreferencePort<TTab extends ChatHostTab> {
@@ -387,7 +388,9 @@ export class ChatHost<TTab extends ChatHostTab> {
                 getFavorites: () => [...this._options.preferences.getFavorites()],
             });
             if (outcome.intent) await this._executeIntent(tab, outcome.intent);
-            return { ok: true };
+            return outcome.result === undefined
+                ? { ok: true }
+                : { ok: true, result: outcome.result };
         } catch (error) {
             this._options.effects.reportCommandFailure(message.type, targetId, error);
             return {
@@ -629,7 +632,7 @@ export class ChatHost<TTab extends ChatHostTab> {
                 this.chat.resetSessionProjection(
                     tab,
                     projectToolDefault,
-                    tab.session.getMessages(),
+                    tab.session.getTranscriptUserTurnCount(),
                 );
                 this._options.effects.persistTabs();
                 this._options.effects.tabsChanged();
@@ -641,7 +644,11 @@ export class ChatHost<TTab extends ChatHostTab> {
                 await tab.session.loadSession(intent.sessionPath);
                 tab.projectToolDefault = undefined;
                 this._options.preferences.applyPersistedToolSelection(tab);
-                this.chat.resetSessionProjection(tab, undefined, tab.session.getMessages());
+                this.chat.resetSessionProjection(
+                    tab,
+                    undefined,
+                    tab.session.getTranscriptUserTurnCount(),
+                );
                 this.refreshTabName(tab);
                 this._options.effects.persistTabs();
                 this._options.effects.publishState(tab.id);

@@ -241,13 +241,16 @@ describe('ChatController tab registry integration', () => {
     it('registers a restored session path without changing the active tab', async () => {
         const order: string[] = [];
         const existing = { id: 'tab-existing' };
-        const session = {
+        const session: any = {
+            session: { sessionName: undefined },
             initializeFromPath: vi.fn(async (path: string) => order.push(`initialize:${path}`)),
             getMessages: vi.fn(() => [
-                { role: 'user', content: 'first' },
-                { role: 'assistant', content: 'reply' },
                 { role: 'user', content: 'second' },
             ]),
+            getTranscriptUserTurnCount: vi.fn(() => 2),
+            getFirstTranscriptUserMessage: vi.fn(() => ({ role: 'user', content: 'first' })),
+            setSessionName: vi.fn((name: string) => { session.session.sessionName = name; }),
+            dispose: vi.fn(),
         };
         const controller = Object.create(ChatController.prototype) as any;
         controller._perf = NOOP_PERF_LOGGER;

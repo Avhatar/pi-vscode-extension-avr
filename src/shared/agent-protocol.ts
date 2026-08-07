@@ -138,7 +138,28 @@ export interface PendingToolInfo {
     args?: unknown;
 }
 
+export interface TranscriptItem {
+    /** Stable within one session branch and suitable for client-side page merging. */
+    id: string;
+    /** SDK session-entry id used as the backwards pagination cursor. */
+    entryId: string;
+    message: any;
+}
+
+export interface TranscriptPage {
+    sessionId: string;
+    items: TranscriptItem[];
+    /** Entry id of the first item in this page. */
+    beforeCursor?: string;
+    hasMoreBefore: boolean;
+    /** Full-branch user turn count used by checkpoint/file-change ordinals. */
+    totalUserMessages: number;
+    /** The requested cursor left the active branch; replace instead of prepend. */
+    reset?: boolean;
+}
+
 export interface SerializedAgentState {
+    /** Compact model context. The chat UI renders `transcript` when present. */
     messages: any[];
     model?: { provider: string; id: string; name?: string; supportsImages?: boolean };
     thinkingLevel?: string;
@@ -153,6 +174,8 @@ export interface SerializedAgentState {
     sessionName?: string;
     /** Absolute path to the persisted session file (used by webview panels for restoration). */
     sessionPath?: string;
+    /** Latest page of the complete current-branch transcript. */
+    transcript?: TranscriptPage;
     contextUsage?: ContextUsageInfo;
     fileChanges?: FileChangeInfo[];
     rollbackPoint?: number | null;
@@ -239,6 +262,7 @@ export type AgentClientMessage =
     | { type: 'loadSession'; sessionPath: string }
     | { type: 'getSessions' }
     | { type: 'getState' }
+    | { type: 'getTranscriptPage'; sessionId: string; beforeEntryId: string; limit?: number }
     | { type: 'renameTab'; name: string }
     | { type: 'undoFileChange'; filePath: string; toolCallId: string }
     | { type: 'restoreCheckpoint'; messageIndex: number }

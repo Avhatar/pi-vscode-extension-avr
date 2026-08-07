@@ -13,7 +13,7 @@ Two things happen when a client message hits the chat core. First, `ChatCommandS
 - **Model / thinking / favorites** (`getModels`, `setModel`, `toggleFavorite`, `setThinkingLevel`) — emit through `callbacks.emit` for read requests, return an intent for writes.
 - **Session lifecycle** (`newSession`, `loadSession`, `getSessions`) — return an intent or emit sessions via `callbacks.emit`.
 - **Tool toggles** (`setTodoEnabled`, `setSubagentsEnabled`, `setPlanModeEnabled`, `setFileUndoViewEnabled`, `setToolDisabled`, `setToolsBulk`) — return an intent.
-- **State queries** (`getState`) — call `callbacks.publishState()`.
+- **State queries** (`getState`, `getTranscriptPage`) — publish the current snapshot or return an older full-branch transcript page through the correlated request result.
 - **Tab naming** (`renameTab`) — translate the typed toolbar action into the same `/name` path used by prompt commands, then call `callbacks.handleName` without dispatching a model prompt.
 - **File mentions** (`searchWorkspaceFiles`) — call `fileMentions.ensureIndexed`, then emit `workspaceFileSuggestions`.
 - **File history** (`undoFileChange`, `restoreCheckpoint`, `redoCheckpoint`) — await the corresponding `chat` method, call `callbacks.notifyFileHistory`, publish state.
@@ -23,6 +23,8 @@ The intent taxonomy in [chat-command-service.ts:26](../../../../src/core/chat/ch
 
 `ChatCommandTab` is a structural type constraint: the tab must satisfy `ChatServiceTab & FileHistoryTarget & session compliance`. That means the service can be reused for hosts with different concrete tab types, as long as they carry the fields the service reads.
 
+`ChatCommandOutcome` may carry either a host-owned `intent` or a correlated `result`; `getTranscriptPage` uses the latter so large history pages do not enter the event stream. `ChatHost.dispatch` and `ChatController.handleMessage` preserve that result through `ChatPanelConnection`.
+
 The callback surface (`directPrompt`, `streaming`, `fileMentions`, `getFavorites`, `handleName`, `publishState`, `emit`, `notifyFileHistory`) is the host-injection seam. VS Code, Electron, and dev harnesses all wire different implementations of these callbacks.
 
 ## Keywords
@@ -30,7 +32,8 @@ The callback surface (`directPrompt`, `streaming`, `fileMentions`, `getFavorites
 **Types — service:**
 - `ChatCommandService` — class [chat-command-service.ts:71](../../../../src/core/chat/chat-command-service.ts#L71)
 - `ChatCommandTab` — [chat-command-service.ts:58](../../../../src/core/chat/chat-command-service.ts#L58); tab structural constraint
-- `ChatCommandCallbacks` — [chat-command-service.ts:43](../../../../src/core/chat/chat-command-service.ts#L43)
+- `ChatCommandCallbacks` — [chat-command-service.ts](../../../../src/core/chat/chat-command-service.ts)
+- `ChatCommandOutcome` — optional `intent` / correlated `result` returned by the router
 
 **Types — intents:**
 - `ChatCommandIntent` — discriminated union [chat-command-service.ts:26](../../../../src/core/chat/chat-command-service.ts#L26)
@@ -46,6 +49,7 @@ The callback surface (`directPrompt`, `streaming`, `fileMentions`, `getFavorites
 **Attributes / markers:**
 - Slash prefix `/name` — reserved for tab renaming; parsed before prompt dispatch
 - Client message `renameTab` — toolbar-native rename intent routed through the same `handleName` callback as `/name`
+- Client message `getTranscriptPage` — backwards full-history request keyed by session id and entry cursor
 - Slash prefix `/compact` — reserved; parsed inside `ChatService.dispatchDirectPrompt`
 
 **Namespaces:**
@@ -72,3 +76,4 @@ The callback surface (`directPrompt`, `streaming`, `fileMentions`, `getFavorites
 - **Pitfall — do not call `publishState()` inside `applyQueueControl`.** The reducer returns; the service publishes. Mixing the two adds a hidden double publish for queue writes.
 - **Pattern — `handleName` callback exists because renaming has visual side effects on the host.** The service tells the host "the user wants the tab called X"; the host decides whether that also focuses the tab, updates the launcher, and so on.
 - **Pitfall — `getModels` emits from the *service*, not returns.** Model lists can be large; asynchronous emission avoids a `Promise<ModelInfo[]>` return type that would push the caller into `await` semantics.
+- **Pattern — transcript pages use request results, not server events.** Each page belongs to one scroll request and one panel-bound session identity; correlation prevents a late response from being treated as a broadcast state update.

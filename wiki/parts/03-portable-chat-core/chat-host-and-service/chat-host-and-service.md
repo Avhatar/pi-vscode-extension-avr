@@ -25,7 +25,9 @@ Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../
 
 [`dispatchDirectPrompt(tab, request, callbacks)`](../../../../src/core/chat/chat-service.ts#L346) is the entry point for user prompts — parses `/compact` inline, increments `turnCounter`, arms the notification gate, invokes `_runUserPrompt`. Streaming controls flow through [`dispatchStreamingCommand`](../../../../src/core/chat/chat-service.ts#L383) (abort / steer / follow-up). Queue lifecycle is [`applyQueueControl(tab, command)`](../../../../src/core/chat/chat-service.ts#L402), [`reserveQueuedDispatch()`](../../../../src/core/chat/chat-service.ts#L443), [`dispatchNextQueued()`](../../../../src/core/chat/chat-service.ts#L449).
 
-[`buildState(tab, context)`](../../../../src/core/chat/chat-service.ts#L607) is the projection layer. It produces `SerializedAgentState`: messages, model, tools, streaming / compacting flags, session metadata, context usage, file changes, cache mode, controls (todos, subagents, tool selection, feature toggles), pending tools, streaming buffers, queued messages. Every UI surface that needs "what does this tab look like right now?" calls it.
+[`buildState(tab, context)`](../../../../src/core/chat/chat-service.ts) is the projection layer. It produces `SerializedAgentState`: compact model-context messages, a latest-page full-transcript projection, model, tools, streaming / compacting flags, session metadata, context usage, file changes, cache mode, controls (todos, subagents, tool selection, feature toggles), pending tools, streaming buffers, queued messages. Runtime timing and provider-cost metadata is aligned from the compact assistant tail onto matching newest transcript assistants. Every UI surface that needs "what does this tab look like right now?" calls it.
+
+[`buildTranscriptPage`](../../../../src/core/chat/transcript-pagination.ts) pages any root-to-leaf entry sequence backwards by stable entry id. It counts projected entries rather than generated messages, skips metadata-only entries, never splits one entry's generated messages across pages, and marks a missing cursor so the client resets after a branch change.
 
 ## Role — files under src/core/chat
 
@@ -38,6 +40,7 @@ Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../
 - [turn-notification-gate.ts](../../../../src/core/chat/turn-notification-gate.ts) — arms / clears the "session is done, notify" latch
 - [chat-preferences.ts](../../../../src/core/chat/chat-preferences.ts) — user-preference bookkeeping across sessions
 - [launcher-projection.ts](../../../../src/core/chat/launcher-projection.ts) — projects host state into `LauncherState` for the launcher webview
+- [transcript-pagination.ts](../../../../src/core/chat/transcript-pagination.ts) — backwards current-branch transcript paging with stable entry cursors
 
 ## Keywords
 
@@ -52,6 +55,7 @@ Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../
 - `AgentEndAccounting` — optional Codex account-window and DeepSeek monetary deltas committed to the last assistant message
 - `TurnCompletionInfo` — result of `settleAgent`
 - `TurnCompletionOutcome` — `'completed' | 'stopped' | 'failed' | 'truncated'` from [chat-event-policy](../chat-event-policy/chat-event-policy.md)
+- `TranscriptPageItem<TMessage>`, `TranscriptPageSlice<TMessage>` — portable page records from [transcript-pagination.ts](../../../../src/core/chat/transcript-pagination.ts)
 
 **Methods — dispatch:**
 - `dispatch(message, sourceTabId?)` — [chat-host.ts:369](../../../../src/core/chat/chat-host.ts#L369)
@@ -61,7 +65,8 @@ Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../
 - `dispatchStreamingCommand(cmd, cb)` — [chat-service.ts:383](../../../../src/core/chat/chat-service.ts#L383)
 - `applyQueueControl(tab, cmd)` — [chat-service.ts:402](../../../../src/core/chat/chat-service.ts#L402)
 - `dispatchNextQueued()` — [chat-service.ts:449](../../../../src/core/chat/chat-service.ts#L449)
-- `buildState(tab, ctx)` — [chat-service.ts:607](../../../../src/core/chat/chat-service.ts#L607)
+- `buildState(tab, ctx)` — [chat-service.ts](../../../../src/core/chat/chat-service.ts)
+- `buildTranscriptPage(entries, project, options)` — [transcript-pagination.ts](../../../../src/core/chat/transcript-pagination.ts)
 
 **Methods — feature toggles (host-side):**
 - `setActiveTodoEnabled`, `setActiveSubagentsEnabled`, `setActivePlanModeEnabled`, `setActiveFileUndoViewEnabled` — [chat-host.ts:269](../../../../src/core/chat/chat-host.ts#L269)
@@ -101,3 +106,5 @@ Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../
 - **Pitfall — queue dispatch requires `agent_settled`, not `agent_end`.** The SDK still reports the session as busy until settlement; auto-dispatching earlier will be rejected. This is one of the load-bearing invariants from [AGENTS.md](../../../../AGENTS.md).
 - **Pitfall — do not share tab state.** Each tab owns its own `PiSessionManager`, `DiffManager`, `CheckpointManager`. Never introduce a static shared cache; you will race across tabs.
 - **Pattern — `buildState` is the single source of truth for UI.** Do not build ad-hoc partial projections in webviews. If a UI needs a value, add it to `SerializedAgentState`, thread it through `buildState`, and consume from there.
+- **Pattern — transcript cursors survive compaction.** Paging reads the full SDK branch, not `AgentSession.state.messages`; a compact only adds a summary entry and therefore does not invalidate earlier-message cursors. A cursor missing after a branch change returns a reset page instead of mixing sibling histories.
+- **Pattern — persisted auto names come from the full branch.** `ChatService.updateTabName` migrates an unnamed session from its first full-transcript user message into SDK `session_info`; compact context is never a title source.

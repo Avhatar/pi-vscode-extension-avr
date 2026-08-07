@@ -68,6 +68,12 @@ export const AgentClientMessageSchema = Type.Union([
     Type.Object({ type: Type.Literal('loadSession'), sessionPath: Type.String() }, StrictObject),
     Type.Object({ type: Type.Literal('getSessions') }, StrictObject),
     Type.Object({ type: Type.Literal('getState') }, StrictObject),
+    Type.Object({
+        type: Type.Literal('getTranscriptPage'),
+        sessionId: NonEmptyString,
+        beforeEntryId: NonEmptyString,
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+    }, StrictObject),
     Type.Object({ type: Type.Literal('renameTab'), name: NonEmptyString }, StrictObject),
     Type.Object({
         type: Type.Literal('undoFileChange'),
@@ -281,6 +287,19 @@ const AgentTabControlsSchema = Type.Object({
     subagents: SubagentSnapshotSchema,
     toolSelection: ToolSelectionSnapshotSchema,
 }, StrictObject);
+const TranscriptItemSchema = Type.Object({
+    id: NonEmptyString,
+    entryId: NonEmptyString,
+    message: Type.Unknown(),
+}, StrictObject);
+const TranscriptPageSchema = Type.Object({
+    sessionId: NonEmptyString,
+    items: Type.Array(TranscriptItemSchema),
+    beforeCursor: Type.Optional(NonEmptyString),
+    hasMoreBefore: Type.Boolean(),
+    totalUserMessages: Type.Integer({ minimum: 0 }),
+    reset: Type.Optional(Type.Boolean()),
+}, StrictObject);
 const SerializedAgentStateSchema = Type.Object({
     messages: Type.Array(Type.Unknown()),
     model: Type.Optional(ModelInfoSchema),
@@ -294,6 +313,7 @@ const SerializedAgentStateSchema = Type.Object({
     sessionId: Type.Optional(Type.String()),
     sessionName: Type.Optional(Type.String()),
     sessionPath: Type.Optional(Type.String()),
+    transcript: Type.Optional(TranscriptPageSchema),
     contextUsage: Type.Optional(ContextUsageInfoSchema),
     fileChanges: Type.Optional(Type.Array(FileChangeInfoSchema)),
     rollbackPoint: Type.Optional(Type.Union([Type.Number(), Type.Null()])),

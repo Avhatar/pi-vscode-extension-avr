@@ -25,7 +25,7 @@ describe('Protocol types', () => {
         const agentClientTypes = [
             'prompt', 'steer', 'followUp', 'abort', 'getModels', 'setModel', 'toggleFavorite',
             'setThinkingLevel', 'newSession', 'loadSession', 'getSessions', 'getState',
-            'renameTab', 'undoFileChange', 'restoreCheckpoint', 'redoCheckpoint', 'createTab', 'closeTab',
+            'getTranscriptPage', 'renameTab', 'undoFileChange', 'restoreCheckpoint', 'redoCheckpoint', 'createTab', 'closeTab',
             'switchTab', 'getSkills', 'searchWorkspaceFiles', 'queueMessage', 'editQueuedMessage',
             'removeQueuedMessage', 'cancelQueue', 'setCacheMode', 'setTodoEnabled',
             'setSubagentsEnabled', 'setPlanModeEnabled', 'setFileUndoViewEnabled',
@@ -64,7 +64,7 @@ describe('Protocol types', () => {
             ...agentClientTypes,
             ...platformClientTypes,
             ...vsCodeClientTypes,
-        ]).toHaveLength(39);
+        ]).toHaveLength(40);
         expect([
             ...agentServerTypes,
             ...platformServerTypes,

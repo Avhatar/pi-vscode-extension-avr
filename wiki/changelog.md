@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-05 — Persistent titles and full compacted-chat history
+
+- **Code:** Separated compact model context from a lazily paged full current-branch transcript, preserved scroll position while loading older messages, and persisted automatic chat titles in SDK session metadata with legacy unnamed-session migration.
+- **Wiki:** `message-protocol.md` documents transcript payloads and requests; `chat-host-and-service.md` and `chat-command-service.md` cover pagination and correlated results; `session-lifecycle.md` records the dual projections and durable title source; `webview-architecture.md` and `chat-panel-provider.md` describe upwards loading, stable-id reconciliation, and restore semantics.
+- **Escalations:** none — the change extends existing protocol, session, chat-core, and webview articles without introducing a separate subsystem article.
+
 ## 2026-08-04 — Aggregate foreground-subagent waiting state
 
 - **Code:** Parent chats now summarize pending foreground subagents in one waiting indicator, keep individual child cards visually quiet, and mark shared-workspace child file changes so they remain reviewable without rendering inline chat diffs.

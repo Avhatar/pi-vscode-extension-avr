@@ -10,7 +10,7 @@ import type { RawStoragePort } from '../core/ports/raw-storage';
 import type { RawRecorderRegistry } from '../core/raw/raw-recorder';
 import { DiffManager } from '../core/files/diff-manager';
 import { CheckpointManager } from '../core/files/checkpoint-manager';
-import { ChatService, countUserTurns } from '../core/chat/chat-service';
+import { ChatService } from '../core/chat/chat-service';
 import { parseNameCommand } from '../core/chat/chat-command-service';
 import {
     ChatHost,
@@ -261,7 +261,7 @@ export class ChatController implements vscode.Disposable {
             diffManager: initialDiffManager,
             checkpointManager: initialCheckpointManager,
             projectToolDefault: this._getProjectToolSelectionDefault(),
-            initialTurnCounter: countUserTurns(initialSession.getMessages()),
+            initialTurnCounter: initialSession.getTranscriptUserTurnCount(),
         });
         this._host.register(tab, { activate: true });
         this._subscribeTab(tab);
@@ -804,7 +804,7 @@ export class ChatController implements vscode.Disposable {
                 projectToolDefault: request.kind === 'new'
                     ? this._getProjectToolSelectionDefault()
                     : undefined,
-                initialTurnCounter: countUserTurns(session.getMessages()),
+                initialTurnCounter: session.getTranscriptUserTurnCount(),
             }));
             if (request.kind === 'sessionPath' && request.name) tab.name = request.name;
             return tab;
@@ -1572,6 +1572,7 @@ export class ChatController implements vscode.Disposable {
                 default: {
                     const result = await this._host.dispatch(msg, targetId);
                     if (!result.ok) return result;
+                    commandResult = result.result;
                     break;
                 }
             }

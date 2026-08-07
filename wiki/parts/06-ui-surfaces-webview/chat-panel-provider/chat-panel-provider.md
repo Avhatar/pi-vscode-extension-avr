@@ -77,8 +77,9 @@ A chat panel is a webview + a sink + a connection. The **panel** owns the `vscod
 
 - **Rule — one panel per tab.** Never share a `ChatPanel` between tabs. The sink's `tabFilter` is what makes multi-tab routing safe; violating it will mix state across chats.
 - **Rule — handshake first.** A webview must send `getState` before anything else. This lets the extension host validate its `clientId` claim and set up the sequencer before mutations start.
-- **Pattern — persisted state is a pointer.** `{ tabId?, sessionPath? }` — nothing else. The tab's actual serialized state comes from the controller after restoration.
+- **Pattern — persisted state is a pointer.** `{ tabId?, sessionPath? }` — nothing else. The tab's actual serialized state comes from the controller after restoration; the stable chat title is recovered from SDK `session_info`, not copied into serializer state.
 - **Pattern — buffer during handshake.** `publish` calls before the sequencer is installed go into a bounded buffer, then flush once the sequencer exists. Do not drop messages while waiting for the handshake.
 - **Pitfall — do not trust the persisted tabId.** Tabs can be closed / recreated between reloads; the serializer falls back through `sessionPath` → active tab → new tab.
+- **Pitfall — do not derive restored titles from visible messages.** Visible history is paged and model context may be compacted; restoration reads the durable session name, with one-time legacy migration from the first complete-branch user message.
 - **Pitfall — cross-tab envelope is not a hint, it's an error.** If a panel bound to tab A receives an envelope claiming tab B, do not "route it correctly" — reject. That mismatch means state got confused somewhere and rerouting would mask the bug.
 - **Pattern — CSS glow is inlined into the HTML.** `userMessageGlowColor` / `Opacity` are user config; the panel injects them at HTML-render time rather than passing through as messages, because they must be present before the first paint.

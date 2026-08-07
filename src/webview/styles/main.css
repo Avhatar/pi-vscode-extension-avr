@@ -385,6 +385,13 @@ body[data-mode="panel"] .tab-strip,
 .messages::-webkit-scrollbar-track { background: transparent; }
 .messages::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
 
+.transcript-history-status {
+    padding: 8px 16px 4px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    text-align: center;
+}
+
 .message {
     padding: 12px 16px;
 }

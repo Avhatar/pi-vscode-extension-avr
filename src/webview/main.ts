@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, DeepSeekUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion, PendingToolInfo } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, DeepSeekUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion, PendingToolInfo, TranscriptPage } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage';
 import { formatUsdAmount } from '../shared/deepseek-usage';
@@ -18,6 +18,12 @@ import {
     countForegroundSubagentTools,
     getTurnActivityIndicatorLabel,
 } from './turn-activity-indicator';
+import {
+    createTranscriptState,
+    mergeTranscriptTail,
+    prependTranscriptPage,
+    type ClientTranscriptState,
+} from './transcript-state';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: unknown): void;
@@ -245,6 +251,14 @@ const state: {
     cacheEffective: 'short',
 };
 
+let transcriptState: ClientTranscriptState = {
+    messages: [],
+    hasMoreBefore: false,
+    totalUserMessages: 0,
+};
+let transcriptInterrupted = false;
+let transcriptLoadInFlight = false;
+
 // ── Marked config ──
 
 const renderer = new marked.Renderer();
@@ -391,13 +405,27 @@ function applyStateSync(s: SerializedAgentState): void {
         draftFiles.set(prevTab, [...currentFileAttachments]);
     }
 
-    // Preserve locally-pushed error banners across server-driven state syncs
-    // and surface an idle persisted tail that cannot continue after a host
-    // restart. The interruption notice disappears when a new turn starts.
+    // The SDK's `messages` field is compact model context. Render the separate
+    // full-branch transcript page and retain any older pages already loaded by
+    // this webview. Legacy hosts without transcript support still use messages.
+    if (s.transcript) {
+        transcriptState = transcriptState.sessionId
+            ? mergeTranscriptTail(transcriptState, s.transcript)
+            : createTranscriptState(s.transcript);
+    } else {
+        transcriptState = {
+            sessionId: s.sessionId,
+            messages: s.messages ?? [],
+            hasMoreBefore: false,
+            totalUserMessages: (s.messages ?? []).filter((message: any) => message?.role === 'user').length,
+        };
+    }
+    transcriptInterrupted = s.interruptedTurn?.reason === 'incomplete_session_tail';
+    // Preserve locally-pushed error banners and represent an interrupted tail once.
     state.messages = mergeStateMessages(
-        s.messages ?? [],
+        transcriptState.messages,
         state.messages,
-        s.interruptedTurn?.reason === 'incomplete_session_tail',
+        transcriptInterrupted,
     );
     state.isStreaming = s.isStreaming;
     state.isCompacting = s.isCompacting ?? false;
@@ -489,6 +517,7 @@ function handleAgentEvent(event: any): void {
             }
             break;
         case 'agent_start':
+            transcriptInterrupted = false;
             // Drop error banners from the previous turn so a successful retry
             // doesn't leave a stale provider-error message stuck to the chat.
             state.messages = state.messages.filter((m: any) => m?.role !== 'error');
@@ -880,6 +909,14 @@ function updateMessages(): void {
 
     codeBlockId = 0;
 
+    if (transcriptState.hasMoreBefore || transcriptLoadInFlight) {
+        const historyStatus = el('div', 'transcript-history-status');
+        historyStatus.textContent = transcriptLoadInFlight
+            ? 'Loading earlier messages…'
+            : 'Scroll up to load earlier messages';
+        container.insertBefore(historyStatus, streamingEl);
+    }
+
     if (state.messages.length === 0 && !state.isStreaming) {
         container.insertBefore(buildWelcome(), streamingEl);
     } else {
@@ -951,6 +988,13 @@ function updateMessages(): void {
         lastScrollTop = container.scrollTop;
         userHasScrolled = true;
         pendingPinnedScrollTop = null;
+    }
+    if (
+        transcriptState.hasMoreBefore
+        && !transcriptLoadInFlight
+        && container.scrollHeight <= container.clientHeight + 1
+    ) {
+        queueMicrotask(() => void loadOlderTranscript());
     }
 }
 
@@ -2863,6 +2907,19 @@ function getToolLabel(name: string, args: any): string {
             return args?.url ? `Fetch: ${truncate(args.url, 50)}` : 'Fetch content';
         case 'get_search_content':
             return 'Get search results';
+        case 'mcp': {
+            const server = typeof args?.server === 'string' ? args.server : '';
+            const tool = typeof args?.tool === 'string' ? args.tool : '';
+            if (tool) {
+                return server ? `MCP: ${server}.${tool}` : `MCP: ${tool}`;
+            }
+            if (typeof args?.connect === 'string') return `MCP: connect ${args.connect}`;
+            if (typeof args?.search === 'string') return `MCP: search "${truncate(args.search, 40)}"`;
+            if (typeof args?.describe === 'string') return `MCP: describe ${args.describe}`;
+            if (server) return `MCP: ${server}`;
+            if (typeof args?.action === 'string') return `MCP: ${args.action}`;
+            return 'MCP';
+        }
         // LSP toolset — uniform "LSP: <tool_name>" header so the chat
         // shows what kind of LSP operation ran without the agent's
         // input dressing.
@@ -5269,6 +5326,7 @@ function parseSkillFromUserMessage(text: string): { skillName: string | null; us
 
 function extractText(msg: any): string {
     if (typeof msg.content === 'string') return msg.content;
+    if (typeof msg.summary === 'string') return msg.summary;
     if (Array.isArray(msg.content)) {
         return msg.content
             .filter((c: any) => c.type === 'text')
@@ -5388,6 +5446,74 @@ let userHasScrolled = false;
 let lastScrollTop = 0;
 let pendingPinnedScrollTop: number | null = null;
 
+function isTranscriptPage(value: unknown): value is TranscriptPage {
+    if (!value || typeof value !== 'object') return false;
+    const page = value as Partial<TranscriptPage>;
+    return typeof page.sessionId === 'string'
+        && Array.isArray(page.items)
+        && page.items.every((item) => Boolean(item)
+            && typeof item.id === 'string'
+            && typeof item.entryId === 'string'
+            && Object.prototype.hasOwnProperty.call(item, 'message'))
+        && typeof page.hasMoreBefore === 'boolean'
+        && typeof page.totalUserMessages === 'number';
+}
+
+async function loadOlderTranscript(): Promise<void> {
+    const sessionId = transcriptState.sessionId;
+    const beforeEntryId = transcriptState.beforeCursor;
+    if (transcriptLoadInFlight || !transcriptState.hasMoreBefore || !sessionId || !beforeEntryId) return;
+
+    transcriptLoadInFlight = true;
+    updateMessages();
+    const response = await connection.request({
+        type: 'getTranscriptPage',
+        sessionId,
+        beforeEntryId,
+        limit: 80,
+    });
+    if (!response.ok) {
+        transcriptLoadInFlight = false;
+        updateMessages();
+        if (response.error.code !== 'transport_closed') {
+            handleMessage({ type: 'error', message: response.error.message });
+        }
+        return;
+    }
+    if (!isTranscriptPage(response.result)) {
+        transcriptLoadInFlight = false;
+        updateMessages();
+        handleMessage({ type: 'error', message: 'Earlier chat history returned an invalid page.' });
+        return;
+    }
+    if (transcriptState.sessionId !== sessionId) {
+        transcriptLoadInFlight = false;
+        updateMessages();
+        return;
+    }
+
+    const container = document.getElementById('messages');
+    const previousHeight = container?.scrollHeight ?? 0;
+    const previousTop = container?.scrollTop ?? 0;
+    transcriptState = prependTranscriptPage(transcriptState, response.result);
+    state.messages = mergeStateMessages(
+        transcriptState.messages,
+        state.messages,
+        transcriptInterrupted,
+    );
+    transcriptLoadInFlight = false;
+    pendingPinnedScrollTop = null;
+    updateMessages();
+
+    const updatedContainer = document.getElementById('messages');
+    if (updatedContainer) {
+        updatedContainer.scrollTop = previousTop + Math.max(0, updatedContainer.scrollHeight - previousHeight);
+        lastScrollTop = updatedContainer.scrollTop;
+        userHasScrolled = true;
+        updateScrollButton();
+    }
+}
+
 function scrollToBottom(force = false): void {
     if (userHasScrolled && !force) return;
     const messages = document.getElementById('messages');
@@ -5460,6 +5586,9 @@ function bindScrollListener(): void {
         }
         lastScrollTop = currentScrollTop;
         updateScrollButton();
+        if (currentScrollTop <= 100 && transcriptState.hasMoreBefore) {
+            void loadOlderTranscript();
+        }
     });
 }
 

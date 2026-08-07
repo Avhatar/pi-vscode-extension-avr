@@ -19,6 +19,7 @@ export interface ChatCommandSession {
     setModel(provider: string, modelId: string): Promise<void>;
     setThinkingLevel(level: string): void;
     getSessions(): Promise<any[]>;
+    getTranscriptPage(sessionId: string, beforeEntryId: string, limit?: number): unknown;
     readonly session?: { readonly sessionId?: string };
     getSkills(): any[];
 }
@@ -53,6 +54,7 @@ export interface ChatCommandCallbacks {
 
 export interface ChatCommandOutcome {
     readonly intent?: ChatCommandIntent;
+    readonly result?: unknown;
 }
 
 export type ChatCommandTab = ChatServiceTab
@@ -150,6 +152,14 @@ export class ChatCommandService {
             case 'getState':
                 callbacks.publishState();
                 return {};
+            case 'getTranscriptPage':
+                return {
+                    result: tab.session.getTranscriptPage(
+                        message.sessionId,
+                        message.beforeEntryId,
+                        message.limit,
+                    ),
+                };
             case 'renameTab':
                 callbacks.handleName(`/name ${message.name}`, false);
                 return {};

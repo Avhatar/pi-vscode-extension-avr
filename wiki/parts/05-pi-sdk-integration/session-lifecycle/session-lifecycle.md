@@ -18,9 +18,15 @@ The session manager is a coordinator, not the SDK. It owns the *shape* of a sess
 - [`setModel(provider, modelId)`](../../../../src/pi/session.ts#L736), [`setThinkingLevel(level)`](../../../../src/pi/session.ts#L747) — runtime model / thinking control.
 - [`applyToolSelection(disabled)`](../../../../src/pi/session.ts#L260) — per-tab tool denylist via `session.setActiveToolsByName()`.
 - [`getSessions()`](../../../../src/pi/session.ts) — lists sessions on disk (long-running; hence the 120 s timeout floor documented in [Part II § protocol-runtime](../../02-shared-protocol-and-contracts/protocol-runtime/protocol-runtime.md)).
+- [`getTranscriptPage(sessionId, beforeEntryId?, limit?)`](../../../../src/pi/session.ts) — projects a lazy UI page from `SessionManager.getBranch()` through the SDK's `sessionEntryToContextMessages`; this deliberately bypasses compact model context without parsing JSONL directly.
+- [`getTranscriptUserTurnCount()`](../../../../src/pi/session.ts) / [`getFirstTranscriptUserMessage()`](../../../../src/pi/session.ts) — full-branch checkpoint ordinal and legacy title-migration helpers.
 - [`getSessionCost()`](../../../../src/pi/session.ts) — projects the SDK's cumulative billed session cost for provider-specific turn accounting.
 
-Turn-lifecycle bookkeeping uses `markTurnStarted() / markTurnCompleted()` at [session.ts:912/918](../../../../src/pi/session.ts#L912); interruption detection consults `getLatestTurnLifecycleStatus` + `hasIncompleteTurnTail` from [interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts).
+Turn-lifecycle bookkeeping uses `markTurnStarted() / markTurnCompleted()` in [session.ts](../../../../src/pi/session.ts); interruption detection consults `getLatestTurnLifecycleStatus` + `hasIncompleteTurnTail` from [interrupted-turn.ts](../../../../src/shared/interrupted-turn.ts).
+
+The session exposes two distinct message projections. `AgentSession.state.messages` remains the compact context used for model operations, rollback, and token accounting. UI history comes from the complete selected branch (`SessionManager.getBranch()`), is converted with the SDK's public `sessionEntryToContextMessages`, filters hidden custom messages, and is paged backwards by stable session-entry id. Compaction entries become visible summary markers but never replace earlier user-visible turns.
+
+SDK `session_info` is the durable chat-title source. Manual `/name` already writes it; unnamed legacy sessions are lazily migrated from the first user message on the complete branch. The compact tail is never consulted for title fallback, so reload or History open cannot rename a chat to a later prompt.
 
 During initialization, the manager obtains the process-wide runtime from [`getModelRuntime()`](../../../../src/pi/auth.ts), applies the SecretStorage bridge, prepares custom providers/metadata, and passes `modelRuntime` to `createAgentSession()`. It does not construct per-tab auth or model registries. The runtime is also passed into the subagent factory, so child model lookup and credentials remain synchronized with the parent.
 
@@ -50,6 +56,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 - `prompt`, `steer`, `followUp`, `compact`, `abort` — [session.ts:680–731](../../../../src/pi/session.ts#L680)
 - `newSession`, `initializeFromPath`, `loadSession`, `getSessions` — [session.ts:757–810](../../../../src/pi/session.ts#L757)
 - `setModel`, `setThinkingLevel`, `getSessionCost`, `applyToolSelection`, `getRegisteredToolNames`, `getRegisteredToolsInfo` — [session.ts](../../../../src/pi/session.ts)
+- `getTranscriptPage`, `getTranscriptUserTurnCount`, `getFirstTranscriptUserMessage` — full-current-branch UI projection and migration helpers [session.ts](../../../../src/pi/session.ts)
 - `markTurnStarted`, `markTurnCompleted` — [session.ts:912](../../../../src/pi/session.ts#L912)
 
 **Methods — internal:**
@@ -67,6 +74,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 **Attributes / markers:**
 - `_turnLifecycleOpen` — internal flag toggled between prompt start and completion
 - `additionalExtensionPaths` / `additionalSkillPaths` — resource loader options
+- `sessionEntryToContextMessages` — dynamically imported SDK projector cached for synchronous transcript state assembly
 - Process CWD change → happens before SDK session opens
 
 **Namespaces:**
@@ -106,6 +114,8 @@ Process CWD is changed to the workspace root before resource discovery [session.
 - **Rule — session lock before session open.** The session-creation path acquires the sidecar lock before `SessionManager.open()` reads the session file. Reversing the order opens a race with another host / window.
 - **Pattern — resource loader is a description, not a build step.** Extension factories, skill paths, package paths are handed to the SDK; the SDK is responsible for validating and loading them.
 - **Pattern — turn lifecycle is a marker on the session entry list.** Interrupted turns are detected by inspecting persisted entries (`getLatestTurnLifecycleStatus`) — not by looking at in-memory flags that reset on reload.
+- **Pattern — one branch, two projections.** Model calls use the SDK's compact `state.messages`; the UI uses paged `getBranch()` output. Never replace model context with expanded history or derive user-visible history from compact context.
+- **Pattern — auto titles become session metadata.** The first full-branch user message is sanitized once and appended as `session_info`; later compactions, restores, and prompts only read that persisted value.
 - **Pitfall — `process.cwd()` change is load-bearing.** MCP adapters expect to find `.mcp.json` at the workspace root; if the CWD isn't set correctly, they silently miss the file. Do not remove the `chdir` in `_buildResourceLoader`.
 - **Pitfall — `applyToolSelection` alone is not enough.** The MCP gateway can proxy to any registered tool; the `tool-selection-guard` extension enforces the denylist at gateway level.
 - **Pattern — `PiSessionRuntime.replace<State>()` is atomic.** It invalidates the current session (unbind, dispose, release lock) *before* installing the new one. Callers can rely on "at most one session bound at a time".
