@@ -12,6 +12,18 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-07 — Prune VSIX baggage: source maps and bundled-package assets
+
+- **Code:** Replaced the inert `*.map` rule in `.vscodeignore` with `**/*.map` (vsce bare patterns match root-level files only, so 10 050 source maps were shipping) and added narrow per-file globs dropping bundled-package assets (`pi-web-access` demo mp4 + banner + `test/**` + `skills/**`, `pi-mcp-adapter` banner + `cli.js`, `@mixmark-io/domino` test data). Zero functional files touched; `vsce ls` and the boundary script verified.
+- **Wiki:** `bundle-targets-and-esbuild.md` and `bundled-pi-packages.md` document the narrow-glob rule and the `**/*.map` vsce quirk.
+- **Escalations:** none — extends the two existing packaging articles.
+
+## 2026-08-07 — Hide bundled-package skills the project did not opt into
+
+- **Code:** Added `HIDDEN_BUNDLED_PACKAGE_SKILLS` + `filterBundledPackageSkills` in `bundled-packages.ts`, wired as `DefaultResourceLoader.skillsOverride` in `_buildResourceLoader`; the bundled `pi-web-access` `librarian` skill is no longer surfaced to agents while the package's web tools keep loading.
+- **Wiki:** `bundled-pi-packages.md` documents the exclusion mechanism, keywords, and the smoke-test note.
+- **Escalations:** none — extends the existing bundled-pi-packages article.
+
 ## 2026-08-07 — Prompt echo before first agent response
 
 - **Code:** Deferred the `message_end` name refresh and state publish in `ChatHost.handleEvent` by one microtask so the SDK's synchronous session-branch append lands before the transcript projection is read; the user's own prompt now appears immediately instead of lagging until the first assistant response.

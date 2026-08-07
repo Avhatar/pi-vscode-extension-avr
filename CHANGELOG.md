@@ -5,6 +5,12 @@ All notable changes to the Pi Code VS Code extension are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The installed extension is now smaller: source maps and bundled-package assets that were never used at runtime (demo video, package banners, test files, the hidden `librarian` skill) no longer ship in the VSIX.
+- The `librarian` research skill that ships inside the bundled `pi-web-access` extension is no longer offered to agents; its web search and page-fetching tools are unaffected.
+
 ## [0.67.8] - 2026-08-07
 
 ### Fixed

@@ -26,6 +26,7 @@ import { disposeModelRuntime, getModelRuntime, reloadCredentials } from './auth'
 import { findModel, getAvailableModels, prepareModelRuntime, refreshModelRuntime, resetModelRuntimeState } from './models';
 import { createCodexMonitorExtension } from './codex-monitor';
 import { getStandardSkillPaths } from './standard-resources';
+import { filterBundledPackageSkills } from './bundled-packages';
 import { createClaudeContextExtension } from './claude-compat/context-extension';
 import { getRootClaudeFiles } from './claude-compat/context';
 import { retainNativePiContextFiles } from './claude-compat/boundary';
@@ -667,6 +668,15 @@ export class PiSessionManager {
             settingsManager,
             extensionFactories: factories,
             additionalExtensionPaths: bundledPackagePaths,
+            // Bundled third-party packages can declare `pi.skills` the project
+            // did not opt into (pi-web-access ships a `librarian` research
+            // skill). Hide those at the loader boundary while keeping the
+            // package's extension tools; the SDK applies skillsOverride to the
+            // full merged skill set.
+            skillsOverride: ({ skills, diagnostics }) => ({
+                skills: filterBundledPackageSkills(skills),
+                diagnostics,
+            }),
             // Agent Skills recommends .agents/skills as the cross-client user
             // and project location. Keep Pi's native .pi/skills discovery as a legacy path.
             additionalSkillPaths: standardSkillPaths,

@@ -20,5 +20,17 @@ nul
 scripts/**
 .pi/**
 out/test/**
-*.map
+**/*.map
 *.vsix
+
+# Bundled-package baggage: presentation assets, tests, and inert files that
+# Pi's package-manager install UI would show but the VSIX never runs. These
+# are narrow per-file globs — they do NOT filter node_modules/** broadly and
+# never touch @earendil-works/** hoisted transitive deps.
+node_modules/pi-web-access/pi-web-fetch-demo.mp4
+node_modules/pi-web-access/banner.png
+node_modules/pi-web-access/test/**
+node_modules/pi-web-access/skills/**
+node_modules/pi-mcp-adapter/banner.png
+node_modules/pi-mcp-adapter/cli.js
+node_modules/@mixmark-io/domino/test/**
