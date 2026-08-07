@@ -387,6 +387,48 @@ describe('portable ChatHost', () => {
         expect(order).toEqual(['reserve', 'state:tab-1', 'event', 'dispatch']);
     });
 
+    it('defers the message_end state publish so the SDK branch append lands first', async () => {
+        const { host, chat, effects, order } = createHarness();
+        const tab = createTab('tab-1') as any;
+        host.register(tab, { activate: true });
+
+        // The SDK finalizes the message into the session branch only after its
+        // listeners have been invoked (`appendMessage` runs right after `_emit`
+        // in `_handleAgentEvent`). Mirror that ordering: the append happens
+        // synchronously after the event handler has been called, and the state
+        // publish must be deferred until the microtask queue so the transcript
+        // projection includes the just-appended message.
+        const branch: any[] = [];
+        chat.buildState.mockImplementation(() => ({ messages: [...branch] }));
+        chat.updateTabName.mockImplementation((t: any) => {
+            order.push(`name:${t.id}`);
+            return { changed: false, name: t.name };
+        });
+        effects.publishState.mockClear();
+        order.length = 0;
+
+        const pending = host.handleEvent(tab, { type: 'message_end', message: { role: 'user' } });
+        expect(order).toEqual([]);
+        branch.push({ role: 'user', content: 'hello' });
+        order.push('append');
+
+        await pending;
+        await Promise.resolve();
+
+        expect(order).toEqual(['append', `name:${tab.id}`, `state:${tab.id}`]);
+    });
+
+    it('keeps non-message_end state-sync events publishing synchronously', async () => {
+        const { host, effects } = createHarness();
+        const tab = createTab('tab-1') as any;
+        host.register(tab, { activate: true });
+        effects.publishState.mockClear();
+
+        const pending = host.handleEvent(tab, { type: 'agent_start' });
+        expect(effects.publishState).toHaveBeenCalledWith(tab.id);
+        await pending;
+    });
+
     it('mutates active-tab preferences with shared busy and tool-selection policy', async () => {
         const { host, preferences, effects } = createHarness();
         const tab = createTab('tab-1');

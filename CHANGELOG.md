@@ -5,7 +5,10 @@ All notable changes to the Pi Code VS Code extension are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.67.8] - 2026-08-07
+
+### Fixed
+- Your own prompt now appears in the chat immediately after sending it, instead of waiting for the agent's first response or tool action.
 
 ## [0.67.7] - 2026-08-07
 

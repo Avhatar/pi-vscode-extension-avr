@@ -498,7 +498,21 @@ export class ChatHost<TTab extends ChatHostTab> {
             });
         }
 
-        this.refreshTabName(tab);
+        if (event.type === 'message_end') {
+            // The SDK finalizes the message into the session branch only after
+            // its listeners have been invoked (`appendMessage` runs right after
+            // `_emit` in `_handleAgentEvent`). Reading the branch here
+            // (transcript projection and first-user-message title derivation)
+            // would see the message one step late, so the user's own prompt
+            // would not appear in the chat until the next sync. Deferring by
+            // one microtask lets the synchronous append land first.
+            queueMicrotask(() => {
+                this.refreshTabName(tab);
+                this._options.effects.publishState(tab.id);
+            });
+        } else {
+            this.refreshTabName(tab);
+        }
 
         if (dispatchQueuedAfterEvent && this.chat.reserveQueuedDispatch(runtime)) {
             queuedDispatchReserved = true;
@@ -510,10 +524,12 @@ export class ChatHost<TTab extends ChatHostTab> {
         eventEffects.emitAgentEvent(tab.id, safeSerialize(event));
 
         if (shouldSyncStateForEvent(event.type)) {
-            this._options.effects.publishState(tab.id);
-            if (tab.id !== this.activeTabId
-                && (event.type === 'agent_start' || event.type === 'agent_end')) {
-                this._options.effects.publishState(this.activeTabId);
+            if (event.type !== 'message_end') {
+                this._options.effects.publishState(tab.id);
+                if (tab.id !== this.activeTabId
+                    && (event.type === 'agent_start' || event.type === 'agent_end')) {
+                    this._options.effects.publishState(this.activeTabId);
+                }
             }
         }
 

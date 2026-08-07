@@ -2,7 +2,7 @@
   "name": "pi-code",
   "displayName": "Pi Code",
   "description": "Editor-tab UI for the Pi coding agent with multi-model chat, subagents, diffs, rollback, web/MCP tools, and Claude compatibility",
-  "version": "0.67.7",
+  "version": "0.67.8",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",

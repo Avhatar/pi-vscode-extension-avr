@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-07 — Prompt echo before first agent response
+
+- **Code:** Deferred the `message_end` name refresh and state publish in `ChatHost.handleEvent` by one microtask so the SDK's synchronous session-branch append lands before the transcript projection is read; the user's own prompt now appears immediately instead of lagging until the first assistant response.
+- **Wiki:** `chat-host-and-service.md` documents the deferral and the SDK append-after-emit pitfall in `handleEvent`.
+- **Escalations:** none — extends the existing chat-core article.
+
 ## 2026-08-05 — Persistent titles and full compacted-chat history
 
 - **Code:** Separated compact model context from a lazily paged full current-branch transcript, preserved scroll position while loading older messages, and persisted automatic chat titles in SDK session metadata with legacy unnamed-session migration.
