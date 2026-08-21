@@ -185,8 +185,9 @@ function setHistoryCollapsed(collapsed: boolean): void {
 // ── Plan Mode section ──
 //
 // A compact toggle row above ToDo. When ON, the agent studies the
-// task with read-only tools, proposes a plan, and asks clarifying
-// questions before executing. Simple toggle — no collapsible body.
+// task, presents a plan, and waits for the user to approve it before
+// executing. Prompt guidance only — tools are never restricted.
+// Simple toggle — no collapsible body.
 
 function renderPlanMode(): HTMLElement | undefined {
     // Only show when there's an active panel (planModeEnabled is defined).
@@ -198,7 +199,7 @@ function renderPlanMode(): HTMLElement | undefined {
     const section = el('div', 'section plan-mode-section');
 
     const heading = el('div', 'section-heading plan-mode-heading');
-    heading.title = 'When enabled, the agent studies your request with read-only tools and proposes a plan before making any changes.';
+    heading.title = 'When enabled, the agent studies your request, presents a plan, and waits for your approval before making any changes.';
     // Empty chevron-width spacer keeps the title aligned with the ToDo /
     // History headings, which start their text after a real chevron.
     heading.appendChild(el('span', 'section-chevron'));
@@ -219,7 +220,7 @@ function renderPlanModeToggle(enabled: boolean, disabled: boolean): HTMLElement 
         ? 'Wait for the agent to finish before toggling Plan Mode'
         : enabled
             ? 'Disable Plan Mode — agent executes immediately'
-            : 'Enable Plan Mode — agent plans before making changes';
+            : 'Enable Plan Mode — agent plans and waits for your approval before making changes';
 
     const input = el('input', 'todo-toggle-input') as HTMLInputElement;
     input.type = 'checkbox';

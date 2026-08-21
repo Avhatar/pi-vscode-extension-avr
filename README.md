@@ -28,7 +28,7 @@ In addition to those two structural changes, the fork has accumulated a number o
 - Workspace `@` file mentions in the chat input, with cached suggestions, configurable excludes, and inline highlighting of mentioned paths.
 - Conditional Claude project compatibility for instructions, rules, skills, commands, and tool-name adaptation. Ordinary projects receive no Claude-specific prompt content; native `AGENTS.md` handling remains unchanged.
 - Bundled MCP adapter that picks up servers from `.mcp.json` / `.pi/mcp.json` automatically, with no `pi install` step.
-- Per-chat **Plan Mode**: persistent prompt guidance asks the agent to study and outline change-heavy work before executing once the approach is clear, without restricting tools or adding execution phases.
+- Per-chat **Plan Mode**: persistent prompt guidance asks the agent to study change-heavy work, present a plan, and wait for your approval before executing, without restricting tools or adding execution phases.
 - Opt-in **Language Server tools** (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) that pull semantic information from the active VS Code language extension instead of relying on grep heuristics.
 - Opt-in **subagent orchestration** with named or ad-hoc child agents, exact cross-provider model selection, foreground/background execution, bounded concurrency, and Git-worktree isolation for parallel writers.
 - Optional **Windows turn-completion notifications** with native toast and standard system-sound toggles in the launcher.
@@ -98,7 +98,7 @@ Paste images directly into the chat input, drop them onto the chat panel, or pic
 When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer shows percent used in the 5-hour and weekly windows with colour cues at 50% and 90%. A tooltip details the plan, exact reset times, and remaining credit balance. Each assistant message footer also shows the per-turn delta (`5h +1.2% · week +0.3%`) so you can see how much each turn cost. Hidden for non-Codex models and for token-billed API key accounts.
 
 ### Plan Mode
-A per-chat toggle in the launcher sidebar (above ToDo) that prepends planning guidance to every prompt. Questions and information requests are answered directly; for code changes and multi-step work, the agent studies the relevant files, outlines an approach, and can execute it in the same turn once the plan is clear. It waits only when a genuine question requires your answer. Plan Mode does not restrict tools, maintain execution phases, or use control markers. Disabled by default for new chats; toggle it in the sidebar or set `pi-code.planMode.defaultEnabled`.
+A per-chat toggle in the launcher sidebar (above ToDo) that prepends planning guidance to every prompt. Questions and information requests are answered directly; for code changes and multi-step work, the agent studies the relevant files, presents a plan, and stops until you approve it. If you object or ask for changes instead of approving, it revises the plan and waits again. Once approved it carries out the whole plan, and your next request starts a fresh plan-and-approve cycle. Plan Mode does not restrict tools, maintain execution phases, or use control markers — it is prompt guidance, so a model can still get it wrong. Disabled by default for new chats; toggle it in the sidebar or set `pi-code.planMode.defaultEnabled`.
 
 ### Language Server Tools (opt-in)
 Nine semantic-navigation tools backed by the active VS Code language extension instead of grep heuristics, gated by `pi-code.lsp.enabled` (default **off**):
@@ -285,7 +285,7 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Additional glob patterns to exclude from `@` file mention suggestions |
 | `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum number of `@` file mention suggestions to show |
 | `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative JSON config file for `@` file mention indexing |
-| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable prompt-guided Plan Mode for new chats by default; it does not restrict tools or require a separate execution phase |
+| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable prompt-guided Plan Mode for new chats by default; the agent waits for your approval before executing, but tools are never restricted |
 | `pi-code.fileUndoView.defaultEnabled` | `boolean` | `false` | Show the changed-files Undo / Redo / Review bar by default for new chats |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat persistent ToDo for new chats by default |
 | `pi-code.subagents.defaultEnabled` | `boolean` | `false` | Expose subagent delegation to new chats by default; each chat keeps its own opt-in state |

@@ -18,19 +18,31 @@ export const PLAN_MODE_INSTRUCTIONS =
     '\n' +
     '- If the user is asking a question, requesting information, or\n' +
     '  discussing an approach: answer directly, no planning required.\n' +
-    '- If the user is asking for changes to code or a multi-step task:\n' +
-    '  first study the relevant files, then sketch a plan (use the todo\n' +
-    '  tool for multi-step work), then execute. Confirm the approach is\n' +
-    '  sound before doing anything invasive.\n' +
+    '- If the user is asking for changes to code, files, or configuration,\n' +
+    '  or for any multi-step task: first study the relevant files, then\n' +
+    '  present a plan (use the todo tool for multi-step work) and stop.\n' +
+    '\n' +
+    'After presenting a plan you must WAIT for the user to approve it.\n' +
+    'End your turn right after the plan and say plainly that you are\n' +
+    'waiting for approval before you start. Do not edit files, do not run\n' +
+    'state-changing commands, and do not delegate the work to a subagent\n' +
+    'until the user has approved.\n' +
+    '\n' +
+    'Approval is an explicit go-ahead from the user ("approved", "go\n' +
+    'ahead", "yes, do it"). A question, a comment, a correction, or\n' +
+    'silence is not approval. If the user objects, asks for changes, or\n' +
+    'answers something you raised: revise the plan, present it again, and\n' +
+    'wait again. Repeat until the user approves.\n' +
+    '\n' +
+    'Once approved, carry out the whole plan without asking again. Stop\n' +
+    'early only if you hit something the plan did not cover that the user\n' +
+    'has to decide. Every new request from the user starts a fresh cycle:\n' +
+    'plan first, then wait for approval again.\n' +
     '\n' +
     'When editing a file, oldText must match the current file\n' +
     'byte-for-byte (exact whitespace, indentation, line endings).\n' +
     'Re-read the target region if you are unsure — do not reconstruct\n' +
     'oldText from memory or from an earlier plan.\n' +
-    '\n' +
-    'You can execute the plan in the same turn once it is clear. Only\n' +
-    'stop and wait for the user if you have a genuinely open question\n' +
-    'they need to answer before you can proceed.\n' +
     '</plan-mode-instructions>';
 
 const AUTO_IDLE_GAP_THRESHOLD_MS = 2 * 60 * 1000;

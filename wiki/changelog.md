@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-12 — Plan Mode waits for plan approval
+
+- **Code:** Rewrote `PLAN_MODE_INSTRUCTIONS` so the agent stops after presenting a plan, states that it is waiting, revises and re-presents when the user objects instead of approving, executes the whole plan once approved, and restarts the cycle on each new user request; dropped the clause that allowed same-turn execution. Tool restriction was explicitly rejected — the active-tool set is still never touched. Launcher tooltips, the `pi-code.planMode.defaultEnabled` description, `README.md`, and `MARKETPLACE.md` no longer promise same-turn execution or read-only tools.
+- **Wiki:** `plan-mode-and-todos.md` gains a See-also pitfall recording that approval is guidance rather than a gate, plus the 0.33.0 (`1defd6d`) enforcement post-mortem — marker-driven transitions, the idle reset, and the in-memory saved tool set — as preconditions for any future gate.
+- **Escalations:** none — the mechanism (preamble prepended to direct prompts, per-session key) is unchanged, and instruction wording is already a declared non-goal of the chapter.
+
 ## 2026-08-10 — Require approval for dependency changes
 
 - **Code:** Added an `AGENTS.md` boundary forbidding dependency graph, lockfile, pin, override, or repair-script changes without explicit approval for a separate dependency change; reverted unapproved `undici`, `hono`, and `ip-address` hardening from the 0.67.9 release candidate while preserving the established `brace-expansion` workaround.

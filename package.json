@@ -179,7 +179,7 @@
         "pi-code.planMode.defaultEnabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable Plan Mode for new chats by default. When on, the agent studies the task and proposes a plan before making any changes. Each chat keeps its own toggle state."
+          "description": "Enable Plan Mode for new chats by default. When on, the agent studies the task, presents a plan, and waits for your approval before making any changes. Each chat keeps its own toggle state."
         },
         "pi-code.fileUndoView.defaultEnabled": {
           "type": "boolean",

@@ -23,7 +23,7 @@ A visual VS Code wrapper around the [Pi coding agent](https://pi.dev/) — built
 - **Claude Code-style ergonomics.** Chats are normal editor tabs — split, drag into another editor group, move into a separate window, restore across `Reload Window`. Multiple chats run in parallel, each with its own history, file changes, and checkpoints.
 - **Bring your own model.** Works with the major AI providers via API key, or sign in with your existing subscription — no separate setup, no second invoice.
 - **Web access and MCP servers out of the box.** Web search, page/PDF/YouTube fetch, and any MCP server you declare in `.mcp.json` work immediately after install. No CLI step — bundled extensions load from the VSIX without a global install step. Optionally import your Claude Code MCP servers with one checkbox.
-- **Plan-before-execute.** Optional Plan Mode gives the agent persistent guidance to study change-heavy tasks, outline an approach, and then execute once the plan is clear — while answering simple questions directly.
+- **Plan-before-execute.** Optional Plan Mode gives the agent persistent guidance to study change-heavy tasks, present a plan, and wait for your approval before executing — while answering simple questions directly.
 - **Semantic code navigation.** Opt-in Language Server tools let the agent ask your existing language extension (C#, rust-analyzer, Pylance, TypeScript, gopls, clangd) for references, definitions, implementations, call hierarchy, and workspace symbols instead of guessing from grep.
 - **Made for non-engineers too.** Inline diffs, per-turn checkpoints, image attachments, per-turn timing, and a per-chat ToDo make the agent legible — you can see exactly what it's doing and undo any step.
 
@@ -51,7 +51,7 @@ Optional always-visible bar above the prompt input that lists every file the age
 Every user message creates a checkpoint. Roll the workspace back to any earlier turn, then redo to bring changes back. The conversation history is preserved so you can branch from any point.
 
 ### Plan Mode
-Per-chat toggle in the launcher sidebar (above ToDo) that prepends planning guidance to every prompt. Questions and information requests are answered directly; for code changes and multi-step work, the agent studies the relevant files, outlines an approach, and can execute it in the same turn once the plan is clear. It waits only when a genuine question requires your answer. Plan Mode does not restrict tools, use execution phases, or require control markers. Disabled by default for new chats; enable it by default with `pi-code.planMode.defaultEnabled`.
+Per-chat toggle in the launcher sidebar (above ToDo) that prepends planning guidance to every prompt. Questions and information requests are answered directly; for code changes and multi-step work, the agent studies the relevant files, presents a plan, and stops until you approve it. If you object or ask for changes instead of approving, it revises the plan and waits again. Once approved it carries out the whole plan, and your next request starts a fresh plan-and-approve cycle. Plan Mode does not restrict tools, use execution phases, or require control markers. Disabled by default for new chats; enable it by default with `pi-code.planMode.defaultEnabled`.
 
 ### Language Server tools (opt-in)
 Nine semantic-navigation tools that ask your active language extension instead of guessing from grep: `find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_incoming`, and `call_hierarchy_outgoing`. Each tool returns authoritative `(file, line, column)` positions plus surrounding context, annotates results in external dependency sources (NuGet, cargo registry, `node_modules`) as `[external]`, and accepts either positional or symbol-name addressing. Off by default — enable with `pi-code.lsp.enabled` for projects where semantic accuracy is worth the extra system-prompt footprint (large Unity / Rust / TS codebases with name collisions, partial classes, overloaded methods). Requires a language extension for each file's language; for C# call hierarchy specifically, install **C# Dev Kit** (the OmniSharp-only extension does not implement it).
@@ -120,7 +120,7 @@ The extension warms up behind the scenes so the launcher sidebar and first chat 
 5. **Pick a model** with the picker at the bottom of the chat, then type your prompt and press Enter.
 6. **While the agent works:** review tool calls inline, queue follow-ups (Enter), or steer mid-stream (`Ctrl+Enter`).
 7. **Review and roll back:** click *Review* on a diff to open VS Code's diff editor, or use the per-message checkpoint button to roll the workspace back to that turn.
-8. **Optional:** toggle **Plan Mode** above ToDo in the sidebar for unfamiliar codebases or risky refactors — the agent will study and outline change-heavy work before executing once the approach is clear.
+8. **Optional:** toggle **Plan Mode** above ToDo in the sidebar for unfamiliar codebases or risky refactors — the agent will study change-heavy work, present a plan, and wait for your approval before executing.
 
 ## Supported Providers
 
@@ -168,7 +168,7 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.fileMentions.exclude` | `string[]` | `[]` | Extra glob patterns to exclude from `@` mention suggestions |
 | `pi-code.fileMentions.maxSuggestions` | `number` | `30` | Maximum `@` mention suggestions to show |
 | `pi-code.fileMentions.configPath` | `string` | `.pi/file-mentions.json` | Workspace-relative config file for `@` mention indexing |
-| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable prompt-guided Plan Mode for new chats by default; it does not restrict tools or require a separate execution phase |
+| `pi-code.planMode.defaultEnabled` | `boolean` | `false` | Enable prompt-guided Plan Mode for new chats by default; the agent waits for your approval before executing, but tools are never restricted |
 | `pi-code.fileUndoView.defaultEnabled` | `boolean` | `false` | Show the File Undo View (Undo / Redo / Review bar above the prompt) by default for new chats |
 | `pi-code.todo.defaultEnabled` | `boolean` | `true` | Enable the per-chat ToDo for new chats by default |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines for the ToDo tool |

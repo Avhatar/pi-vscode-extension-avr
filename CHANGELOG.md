@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Plan Mode now tells the agent to stop after presenting a plan and wait for your approval instead of executing it in the same turn. If you ask for changes rather than approving, the agent revises the plan and waits again; once approved it carries out the whole plan, and your next request starts a fresh plan-and-approve cycle. Tools are still never restricted, so this remains prompt guidance rather than an enforced gate.
+
 ## [0.67.9] - 2026-08-10
 
 ### Changed
