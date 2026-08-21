@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-17 — Remove the host cap on subagent turns
+
+- **Code:** `session.ts` no longer passes a `maxTurns` ceiling, so `resolveBoundedInteger` honours `pi-code.subagents.defaultMaxTurns` verbatim instead of silently clamping it to `100`; the setting's `maximum` was dropped from `package.json` and the settings-page number field, and the frontmatter parser accepts any `maxTurns` ≥ 1 (was 1–1000). Agent definitions were left untouched, so a definition's own `maxTurns` still outranks the setting.
+- **Wiki:** `agent-registry-and-resolution.md` documents the limit-resolution step, the absent turn ceiling versus the surviving 120-minute timeout ceiling, and that a definition's `maxTurns` outranks the setting; `subagent-manager-and-lifecycle.md` records the no-ceiling default and that one turn is one child assistant step.
+- **Escalations:** none — no new article, chapter, or appendix entry was needed.
+
 ## 2026-08-12 — Plan Mode waits for plan approval
 
 - **Code:** Rewrote `PLAN_MODE_INSTRUCTIONS` so the agent stops after presenting a plan, states that it is waiting, revises and re-presents when the user objects instead of approving, executes the whole plan once approved, and restarts the cycle on each new user request; dropped the clause that allowed same-turn execution. Tool restriction was explicitly rejected — the active-tool set is still never touched. Launcher tooltips, the `pi-code.planMode.defaultEnabled` description, `README.md`, and `MARKETPLACE.md` no longer promise same-turn execution or read-only tools.

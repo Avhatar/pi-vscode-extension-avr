@@ -176,7 +176,7 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.subagents.defaultModel` | `string` | `""` | Default child model in canonical `provider/id` format. Empty = use agent definition then parent model. |
 | `pi-code.subagents.allowedModels` | `string[]` | `[]` | Exact `provider/id` models allowed for child agents. Empty = allow all configured models. |
 | `pi-code.subagents.allowInvocationModelOverride` | `boolean` | `true` | Allow the parent to select an exact child provider/model in a subagent tool call. |
-| `pi-code.subagents.defaultMaxTurns` | `number` | `60` | Default maximum turns for a foreground child agent (1–100). |
+| `pi-code.subagents.defaultMaxTurns` | `number` | `60` | Default maximum turns for a foreground child agent. No upper cap. |
 | `pi-code.subagents.defaultTimeoutMinutes` | `number` | `30` | Default execution timeout in minutes for a child agent (1–120). |
 | `pi-code.subagents.maxConcurrentGlobal` | `number` | `4` | Maximum child agents running across all Pi Code chats (1–16). |
 | `pi-code.subagents.maxConcurrentPerChat` | `number` | `2` | Maximum child agents from one parent chat (1–8). |

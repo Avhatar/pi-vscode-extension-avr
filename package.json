@@ -218,8 +218,7 @@
           "type": "number",
           "default": 60,
           "minimum": 1,
-          "maximum": 100,
-          "description": "Default maximum number of turns for a foreground child agent."
+          "description": "Default maximum number of turns for a foreground child agent. Not capped by the host — the configured value is used verbatim unless the agent definition or the invocation sets its own limit."
         },
         "pi-code.subagents.defaultTimeoutMinutes": {
           "type": "number",

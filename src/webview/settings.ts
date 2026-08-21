@@ -126,8 +126,8 @@ function render(data: SettingsData): void {
             'Comma-separated provider/id allowlist. Leave empty to permit every configured model.'),
         buildToggle('subagents.allowInvocationModelOverride', 'Allow per-call model override', data.subagentsAllowInvocationModelOverride,
             'Allow the parent orchestrator to choose an exact child provider/model for each delegation.'),
-        buildNumberInput('subagents.defaultMaxTurns', 'Default maximum turns', data.subagentsDefaultMaxTurns, 1, 100,
-            'Maximum child turns unless a stricter agent or invocation value is used.'),
+        buildNumberInput('subagents.defaultMaxTurns', 'Default maximum turns', data.subagentsDefaultMaxTurns, 1, undefined,
+            'Maximum child turns unless the agent definition or the invocation sets its own limit. Not capped by the host — a turn is one child assistant step, so tool-heavy agents consume many.'),
         buildNumberInput('subagents.defaultTimeoutMinutes', 'Default timeout (minutes)', data.subagentsDefaultTimeoutMinutes, 1, 120,
             'Child execution timeout unless a stricter agent or invocation value is used.'),
         buildNumberInput('subagents.maxConcurrentGlobal', 'Global concurrent children', data.subagentsMaxConcurrentGlobal, 1, 16,
@@ -405,12 +405,13 @@ function buildTextarea(key: string, label: string, value: string, description: s
     return row;
 }
 
+/** `max` is optional: omit it for settings the host deliberately leaves unbounded. */
 function buildNumberInput(
     key: string,
     label: string,
     value: number,
     min: number,
-    max: number,
+    max: number | undefined,
     description: string,
 ): HTMLElement {
     const row = el('div', 'setting-row');
@@ -418,7 +419,7 @@ function buildNumberInput(
         <div class="setting-label-row">
             <label for="setting-${key}">${escHtml(label)}</label>
         </div>
-        <input type="number" id="setting-${key}" class="setting-input" data-key="${key}" value="${value}" min="${min}" max="${max}" step="1">
+        <input type="number" id="setting-${key}" class="setting-input" data-key="${key}" value="${value}" min="${min}"${max === undefined ? '' : ` max="${max}"`} step="1">
         <p class="setting-description">${escHtml(description)}</p>
     `;
     return row;

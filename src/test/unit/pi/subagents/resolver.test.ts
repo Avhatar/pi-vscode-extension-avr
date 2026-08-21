@@ -57,6 +57,15 @@ describe('subagent specification resolution', () => {
         expect(resolved.timeoutMinutes).toBe(30);
     });
 
+    it('honours the configured turn limit verbatim when the host declares no ceiling', () => {
+        const resolved = resolveAgentSpec({ get: () => undefined }, {
+            task: 'Investigate thoroughly.',
+        }, policy({ defaultMaxTurns: 100_000, maxTurns: undefined }));
+
+        expect(resolved.maxTurns).toBe(100_000);
+        expect(resolved.diagnostics.filter((diagnostic) => diagnostic.code === 'limit-clamped')).toHaveLength(0);
+    });
+
     it('combines named and ad-hoc instructions with invocation model precedence', () => {
         const resolved = resolveAgentSpec(lookup, {
             task: 'Investigate auth.',

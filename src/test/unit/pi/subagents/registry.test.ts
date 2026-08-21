@@ -86,6 +86,17 @@ describe('native subagent definition registry', () => {
         expect(parsedInvalid.diagnostics[0].message).toContain('Unknown frontmatter fields');
     });
 
+    it('accepts an arbitrarily large maxTurns in an agent definition', async () => {
+        const fixture = createFixture();
+        const generous = path.join(fixture.user, 'generous.md');
+        writeAgent(generous, ['name: generous', 'description: Generous', 'maxTurns: 100000']);
+
+        const parsed = await parseAgentFile(generous, 'user');
+
+        expect(parsed.diagnostics).toEqual([]);
+        expect(parsed.definition).toMatchObject({ maxTurns: 100_000 });
+    });
+
     it('applies runtime, project, user, and package precedence deterministically', async () => {
         const fixture = createFixture();
         writeAgent(path.join(fixture.user, 'review.md'), ['name: review', 'description: User review']);

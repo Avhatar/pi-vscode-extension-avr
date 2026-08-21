@@ -103,6 +103,7 @@ export interface SubagentResolutionPolicy {
     nonChildSafeTools?: readonly string[];
 
     defaultMaxTurns?: number;
+    /** Optional host ceiling. Omit it to honour the configured limit verbatim. */
     maxTurns?: number;
     defaultTimeoutMinutes?: number;
     maxTimeoutMinutes?: number;

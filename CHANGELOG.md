@@ -7,7 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- The maximum-turns setting for subagents is now used exactly as you set it, instead of being capped at 100 behind the scenes. An agent definition that declares its own `maxTurns` still takes precedence over the setting, as before.
+
 ### Changed
+- The subagent turn limit no longer has an upper bound in settings or in agent definitions — any value of 1 or more is accepted. Keep in mind that one turn is one step by the child agent, so tool-heavy work consumes turns quickly.
 - Plan Mode now tells the agent to stop after presenting a plan and wait for your approval instead of executing it in the same turn. If you ask for changes rather than approving, the agent revises the plan and waits again; once approved it carries out the whole plan, and your next request starts a fresh plan-and-approve cycle. Tools are still never restricted, so this remains prompt guidance rather than an enforced gate.
 
 ## [0.67.9] - 2026-08-10

@@ -49,7 +49,7 @@ export function resolveAgentSpec(
     const maxTurns = resolveBoundedInteger(
         'maxTurns',
         invocation.maxTurns ?? definition?.maxTurns ?? policy.defaultMaxTurns ?? 60,
-        policy.maxTurns ?? 100,
+        policy.maxTurns,
         diagnostics,
     );
     const timeoutMinutes = resolveBoundedInteger(
@@ -245,15 +245,18 @@ function resolveThinkingLevel(
     return requested;
 }
 
+/** Clamps only when the host declares a ceiling. An absent `maximum` means the
+ *  user-configured limit is honoured verbatim, however large. */
 function resolveBoundedInteger(
     label: string,
     requested: number,
-    maximum: number,
+    maximum: number | undefined,
     diagnostics: ResolutionDiagnostic[],
 ): number {
     if (!Number.isInteger(requested) || requested < 1) {
         throw new AgentResolutionError('invalid-limit', `${label} must be a positive integer.`);
     }
+    if (maximum === undefined) return requested;
     if (!Number.isInteger(maximum) || maximum < 1) {
         throw new AgentResolutionError('invalid-policy', `${label} policy maximum must be a positive integer.`);
     }

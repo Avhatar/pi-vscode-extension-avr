@@ -26,7 +26,7 @@ Parsing [registry.ts:158](../../../../src/pi/subagents/registry.ts#L158) — YAM
 - `model` — `'inherit'`, or a `{provider, id}` ref, or a string `'provider/id'`.
 - `tools` — allowlist (subset of `activeTools`).
 - `disallowedTools` — denylist.
-- `maxTurns`, `timeoutMinutes`, `background`, `isolation` (`'shared-workspace' | 'worktree'`), `contextMode`.
+- `maxTurns` (integer ≥ 1, no upper bound), `timeoutMinutes`, `background`, `isolation` (`'shared-workspace' | 'worktree'`), `contextMode`.
 
 Discovery hygiene: `discoverMarkdownFiles` [registry.ts:343](../../../../src/pi/subagents/registry.ts#L343) rejects symlinks and canonicalizes via `realpath` before parsing, so a malicious symlink cannot exfiltrate paths outside the trust boundary.
 
@@ -39,8 +39,9 @@ Resolver [resolver.ts:30](../../../../src/pi/subagents/resolver.ts#L30) — `res
 1. `resolveModel(invocation, definition, policy)` [resolver.ts:91](../../../../src/pi/subagents/resolver.ts#L91) — priority: `policy.forced > invocation.model > definition.model > policy.default > policy.parent`. Rejects if the result violates `policy.allowedModels`.
 2. `resolveTools(invocation, definition, policy)` [resolver.ts:168](../../../../src/pi/subagents/resolver.ts#L168) — starts from `policy.childSafeTools`, filters by `definition.tools` allowlist, then `invocation.tools`, subtracts `definition.disallowedTools`, `invocation.disallowedTools`, `policy.hardDeniedTools = ['subagent']`. The `'subagent'` denial enforces depth-1: children cannot spawn children.
 3. `resolveThinkingLevel(...)` [resolver.ts:238](../../../../src/pi/subagents/resolver.ts#L238) — invocation > definition > policy.defaultThinkingLevel > policy.parentThinkingLevel.
+4. `resolveBoundedInteger(...)` [resolver.ts:250](../../../../src/pi/subagents/resolver.ts#L250) — `maxTurns` and `timeoutMinutes`, each `invocation > definition > policy.default*`. A host ceiling (`policy.maxTurns`, `policy.maxTimeoutMinutes`) clamps the result and emits a `limit-clamped` diagnostic; when the ceiling is `undefined` the configured value is used verbatim. The host [session.ts:1233](../../../../src/pi/session.ts#L1233) deliberately passes **no** `maxTurns` ceiling, so `pi-code.subagents.defaultMaxTurns` is honoured at any size; `maxTimeoutMinutes` is still capped at `120`. Note that an agent definition's own `maxTurns` outranks the setting — a definition that pins a small value makes the user setting inert for that agent.
 
-`ToolResolutionTrace` [types.ts:125](../../../../src/pi/subagents/types.ts#L125) is the audit trail: `{ registered, active, childSafe, definitionAllowlist, invocationAllowlist, denied, effective }`. Surfaced to the parent for diagnostics.
+`ToolResolutionTrace` [types.ts:126](../../../../src/pi/subagents/types.ts#L126) is the audit trail: `{ registered, active, childSafe, definitionAllowlist, invocationAllowlist, denied, effective }`. Surfaced to the parent for diagnostics.
 
 ## Keywords
 
@@ -53,7 +54,7 @@ Resolver [resolver.ts:30](../../../../src/pi/subagents/resolver.ts#L30) — `res
 **Types — resolver:**
 - `SubagentInvocation` — [types.ts:71](../../../../src/pi/subagents/types.ts#L71)
 - `SubagentResolutionPolicy` — [types.ts:88](../../../../src/pi/subagents/types.ts#L88)
-- `ToolResolutionTrace` — [types.ts:125](../../../../src/pi/subagents/types.ts#L125)
+- `ToolResolutionTrace` — [types.ts:126](../../../../src/pi/subagents/types.ts#L126)
 - `RemoteAgentConfiguration` — [extensibility-policy.ts:1](../../../../src/pi/subagents/extensibility-policy.ts#L1); gated future feature
 
 **Types — diagnostics:**

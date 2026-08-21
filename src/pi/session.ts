@@ -1230,8 +1230,8 @@ export class PiSessionManager {
             ],
             childSafeTools: [...CHILD_SAFE_TOOLS, ...(this._childToolFactories?.listNames() ?? [])],
             nonChildSafeTools: ['subagent'],
+            // No host ceiling for turns: whatever the user configures is honoured verbatim.
             defaultMaxTurns: this._ports.settings.get('subagents.defaultMaxTurns', 60),
-            maxTurns: 100,
             defaultTimeoutMinutes: this._ports.settings.get('subagents.defaultTimeoutMinutes', 30),
             maxTimeoutMinutes: 120,
             defaultContextMode: 'fresh',

@@ -222,7 +222,7 @@ export async function parseAgentFile(
     const disallowedTools = optionalStringList(firstDefined(metadata, 'disallowedTools', 'disallowed-tools'), 'disallowedTools', issues);
     const skills = optionalStringList(metadata.skills, 'skills', issues);
     const mcpServers = optionalStringList(firstDefined(metadata, 'mcpServers', 'mcp-servers'), 'mcpServers', issues);
-    const maxTurns = optionalInteger(firstDefined(metadata, 'maxTurns', 'max-turns'), 'maxTurns', 1, 1000, issues);
+    const maxTurns = optionalInteger(firstDefined(metadata, 'maxTurns', 'max-turns'), 'maxTurns', 1, undefined, issues);
     const timeoutMinutes = optionalInteger(firstDefined(metadata, 'timeoutMinutes', 'timeout-minutes'), 'timeoutMinutes', 1, 1440, issues);
     const background = optionalBoolean(metadata.background, 'background', issues);
     const contextMode = optionalEnum(firstDefined(metadata, 'contextMode', 'context-mode'), 'contextMode', ['fresh', 'fork'] as const, issues);
@@ -455,11 +455,17 @@ function optionalInteger(
     value: unknown,
     label: string,
     minimum: number,
-    maximum: number,
+    maximum: number | undefined,
     issues: string[],
 ): number | undefined {
     if (value === undefined) return undefined;
-    if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    if (!Number.isInteger(value) || (value as number) < minimum) {
+        issues.push(maximum === undefined
+            ? `${label} must be an integer of at least ${minimum}.`
+            : `${label} must be an integer between ${minimum} and ${maximum}.`);
+        return undefined;
+    }
+    if (maximum !== undefined && (value as number) > maximum) {
         issues.push(`${label} must be an integer between ${minimum} and ${maximum}.`);
         return undefined;
     }
