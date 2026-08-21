@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-21 — Record completed tool timing
+
+- **Code:** `ChatService` now measures each completed tool call by stable call id, retains a bounded per-tab duration history, snapshots grouped per-tool totals onto the closing assistant message, and projects both per-call and per-turn timing into chat and transcript state for the webview.
+- **Wiki:** `chat-host-and-service.md` documents tool timing reduction and projection plus the shared helper types; `tab-registry-and-runtime.md` records the duration maps, message metadata snapshot, bounded-history rule, and reset lifecycle.
+- **Escalations:** none — the feature extends existing chat-service and tab-runtime accounting rather than creating a separate subsystem.
+
 ## 2026-08-17 — Remove the host cap on subagent turns
 
 - **Code:** `session.ts` no longer passes a `maxTurns` ceiling, so `resolveBoundedInteger` honours `pi-code.subagents.defaultMaxTurns` verbatim instead of silently clamping it to `100`; the setting's `maximum` was dropped from `package.json` and the settings-page number field, and the frontmatter parser accepts any `maxTurns` ≥ 1 (was 1–1000). Agent definitions were left untouched, so a definition's own `maxTurns` still outranks the setting.

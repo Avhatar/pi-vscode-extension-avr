@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Completed tool calls now show their wall-clock duration, and each finished assistant turn includes a collapsed per-tool breakdown with call counts and total time.
+
 ### Fixed
 - The maximum-turns setting for subagents is now used exactly as you set it, instead of being capped at 100 behind the scenes. An agent definition that declares its own `maxTurns` still takes precedence over the setting, as before.
 

@@ -872,6 +872,13 @@ body[data-mode="panel"] .tab-strip,
     50% { background: rgba(244, 135, 113, 0.34); }
 }
 .tool-status.done { background: rgba(115, 201, 145, 0.15); color: var(--success-fg); }
+/* Elapsed time of a finished live tool call; quiet, it is not a state badge. */
+.tool-status.duration {
+    background: var(--badge-bg);
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    cursor: help;
+}
 .tool-status.error { background: rgba(244, 135, 113, 0.15); color: var(--error-fg); }
 .tool-status.stale {
     background: var(--badge-bg);
@@ -1233,6 +1240,63 @@ body[data-mode="panel"] .tab-strip,
     border: none;
     border-radius: 0;
     user-select: none;
+}
+
+/* ── Turn tool-time breakdown ── */
+.turn-tool-stats {
+    padding: 0 16px 6px 48px;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.turn-tool-stats-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 0;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    opacity: 0.85;
+}
+
+.turn-tool-stats-summary::-webkit-details-marker {
+    display: none;
+}
+
+.turn-tool-stats-summary::before {
+    content: '\25B8';
+    display: inline-block;
+    font-size: 9px;
+    transition: transform 0.12s ease;
+}
+
+.turn-tool-stats[open] > .turn-tool-stats-summary::before {
+    transform: rotate(90deg);
+}
+
+.turn-tool-stats-summary:hover {
+    opacity: 1;
+    color: var(--fg);
+}
+
+.turn-tool-stats-list {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) max-content;
+    gap: 1px 12px;
+    margin-top: 3px;
+    padding-left: 13px;
+}
+
+.turn-tool-stats-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.turn-tool-stats-time {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
 }
 
 /* ── Thinking ── */

@@ -6,6 +6,7 @@ import type {
     DeepSeekTurnUsage,
 } from '../../shared/agent-protocol';
 import type { ProjectToolSelectionDefault } from '../../shared/project-tool-default';
+import type { ToolStatEntry } from '../../shared/tool-timing';
 
 export interface TabSessionResource {
     dispose(): void | Promise<void>;
@@ -22,7 +23,15 @@ export interface TabMessageMeta {
     deepSeekTurn?: DeepSeekTurnUsage;
     turnDurationMs?: number;
     totalTurnDurationMs?: number;
+    toolStats?: ToolStatEntry[];
 }
+
+/**
+ * Upper bound on remembered per-call tool durations. Only the chat cards still
+ * on screen read this map, so an old entry is dead weight; the cap keeps a
+ * long-lived tab from growing without limit.
+ */
+export const TOOL_DURATION_HISTORY_LIMIT = 5000;
 
 export interface TabRuntimeOptions<
     TSession extends TabSessionResource,
@@ -77,6 +86,10 @@ export class TabRuntime<
     maxIdleGapMs: number;
     cacheEffective: CacheEffective;
     readonly pendingTools: Map<string, { name: string; startTime: number; args?: unknown }>;
+    /** Wall-clock duration of every finished tool call, keyed by tool call id. */
+    readonly toolDurations: Map<string, number>;
+    /** Per-tool totals for the turn currently running, keyed by display name. */
+    readonly turnToolStats: Map<string, ToolStatEntry>;
     projectToolDefault?: ProjectToolSelectionDefault;
 
     private _subscriptions: Array<() => void> = [];
@@ -109,7 +122,24 @@ export class TabRuntime<
         this.maxIdleGapMs = 0;
         this.cacheEffective = 'short';
         this.pendingTools = new Map();
+        this.toolDurations = new Map();
+        this.turnToolStats = new Map();
         this.projectToolDefault = options.projectToolDefault;
+    }
+
+    /**
+     * Remember how long one tool call took and fold it into the running turn
+     * total. Oldest entries are evicted first once the history cap is reached.
+     */
+    recordToolDuration(toolCallId: string, durationMs: number): void {
+        const normalized = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
+        this.toolDurations.delete(toolCallId);
+        this.toolDurations.set(toolCallId, normalized);
+        while (this.toolDurations.size > TOOL_DURATION_HISTORY_LIMIT) {
+            const oldest = this.toolDurations.keys().next();
+            if (oldest.done) break;
+            this.toolDurations.delete(oldest.value);
+        }
     }
 
     addSubscription(unsubscribe: () => void): void {
@@ -154,6 +184,8 @@ export class TabRuntime<
         this.isStreamingLocal = false;
         this.isCompacting = false;
         this.messageMeta.clear();
+        this.toolDurations.clear();
+        this.turnToolStats.clear();
         this.turnNotificationGate.reset();
         this.queuedMessages = [];
         this.queuedRetryHead = undefined;

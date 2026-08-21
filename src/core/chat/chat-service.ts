@@ -15,6 +15,11 @@ import type { ProjectToolSelectionDefault } from '../../shared/project-tool-defa
 import type { TurnCompletionInfo, TurnCompletionOutcome } from '../../shared/turn-notification';
 import { safeSerialize } from '../../shared/safe-serialize';
 import {
+    accumulateToolStat,
+    toolStatDisplayName,
+    toolStatEntries,
+} from '../../shared/tool-timing';
+import {
     TabRuntime,
     type TabDisposableResource,
     type TabSessionResource,
@@ -193,6 +198,7 @@ export class ChatService {
             tab.isStreamingLocal = true;
             tab.errorReportedThisRun = false;
             tab.pendingTools.clear();
+            tab.turnToolStats.clear();
         }
 
         if (event.type === 'tool_execution_start' && event.toolCallId) {
@@ -204,7 +210,19 @@ export class ChatService {
         }
 
         if (event.type === 'tool_execution_end' && event.toolCallId) {
-            tab.pendingTools.delete(String(event.toolCallId));
+            const toolCallId = String(event.toolCallId);
+            const pending = tab.pendingTools.get(toolCallId);
+            tab.pendingTools.delete(toolCallId);
+            // Without a matching start there is no reliable origin to measure
+            // from, so the call is left out rather than reported as instant.
+            if (pending) {
+                const durationMs = Math.max(0, this._now() - pending.startTime);
+                tab.recordToolDuration(toolCallId, durationMs);
+                accumulateToolStat(tab.turnToolStats, {
+                    name: toolStatDisplayName(event.toolName ?? pending.name, pending.args),
+                    durationMs,
+                });
+            }
         }
 
         if (event.type === 'compaction_start') tab.isCompacting = true;
@@ -277,7 +295,14 @@ export class ChatService {
         accounting?: AgentEndAccounting,
     ): void {
         const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
-        if (lastOrdinal >= 0 && (accounting?.codexTurn || accounting?.deepSeekTurn || projection.turnDurationMs > 0)) {
+        const turnToolStats = toolStatEntries(tab.turnToolStats);
+        tab.turnToolStats.clear();
+        if (lastOrdinal >= 0 && (
+            accounting?.codexTurn
+            || accounting?.deepSeekTurn
+            || projection.turnDurationMs > 0
+            || turnToolStats.length > 0
+        )) {
             const meta = tab.messageMeta.get(lastOrdinal)
                 ?? { thinkingDurationSec: 0, messageEndTime: 0 };
             if (accounting?.codexTurn) meta.codexTurn = accounting.codexTurn;
@@ -286,6 +311,7 @@ export class ChatService {
                 meta.turnDurationMs = projection.turnDurationMs;
                 meta.totalTurnDurationMs = tab.totalTurnDurationMs;
             }
+            if (turnToolStats.length > 0) meta.toolStats = turnToolStats;
             tab.messageMeta.set(lastOrdinal, meta);
         }
 
@@ -668,6 +694,9 @@ export class ChatService {
                 }
                 if (meta.codexTurn) message._codexTurnUsage = meta.codexTurn;
                 if (meta.deepSeekTurn) message._deepSeekTurnUsage = meta.deepSeekTurn;
+                if (meta.toolStats && meta.toolStats.length > 0) {
+                    message._toolStats = meta.toolStats;
+                }
             }
             assistantOrdinal++;
         }
@@ -690,11 +719,34 @@ export class ChatService {
                 '_totalTurnDurationMs',
                 '_codexTurnUsage',
                 '_deepSeekTurnUsage',
+                '_toolStats',
             ]) {
                 if (contextMessage[key] !== undefined) transcriptMessage[key] = contextMessage[key];
             }
         }
+
+        // Tool results carry a stable call id, so per-action durations can be
+        // matched exactly instead of being aligned positionally.
+        annotateToolDurations(state.messages, tab.toolDurations);
+        annotateToolDurations(
+            state.transcript?.items.map((item) => item.message) ?? [],
+            tab.toolDurations,
+        );
         return state;
+    }
+}
+
+function annotateToolDurations(
+    messages: readonly any[],
+    durations: ReadonlyMap<string, number>,
+): void {
+    if (durations.size === 0) return;
+    for (const message of messages) {
+        if (!message || (message.role !== 'toolResult' && message.role !== 'tool')) continue;
+        const toolCallId = message.toolCallId;
+        if (typeof toolCallId !== 'string') continue;
+        const durationMs = durations.get(toolCallId);
+        if (durationMs !== undefined) message._toolDurationMs = durationMs;
     }
 }
 

@@ -177,6 +177,119 @@ describe('portable ChatService event and state projection', () => {
         expect(tab.cacheEffective).toBe('long');
     });
 
+    it('projects turn tool statistics and per-call durations onto the rendered messages', () => {
+        const service = new ChatService({ now: () => 1000 });
+        const tab = createTab();
+        const toolResult = {
+            role: 'toolResult',
+            toolCallId: 'call-7',
+            toolName: 'grep',
+            content: [{ type: 'text', text: 'hit' }],
+        };
+        const assistant = { role: 'assistant', content: [{ type: 'text', text: 'done' }] };
+        tab.session.messages = [{ role: 'user', content: 'task' }, toolResult, assistant];
+        vi.spyOn(tab.session, 'serializeState').mockImplementation(() => ({
+            messages: tab.session.messages.map((message) => ({ ...message })),
+            isStreaming: false,
+            tools: [],
+            transcript: {
+                sessionId: 'session-1',
+                items: tab.session.messages.map((message, index) => ({
+                    id: `item-${index}`,
+                    entryId: `entry-${index}`,
+                    message: { ...message },
+                })),
+                hasMoreBefore: false,
+                totalUserMessages: 1,
+            },
+        }));
+        tab.recordToolDuration('call-7', 452_000);
+        tab.messageMeta.set(0, {
+            thinkingDurationSec: 0,
+            messageEndTime: 900,
+            toolStats: [{ name: 'Grep', calls: 2, durationMs: 452_000 }],
+        });
+
+        const state = service.buildState(tab, {
+            activeTabId: 'tab-1',
+            getTabs: () => [] as TabInfo[],
+            cacheMode: 'auto',
+            getCacheEffective: () => 'short',
+            getFileUndoViewEnabled: () => false,
+        });
+
+        expect(state.messages[1]).toMatchObject({ _toolDurationMs: 452_000 });
+        expect(state.messages[2]).toMatchObject({
+            _toolStats: [{ name: 'Grep', calls: 2, durationMs: 452_000 }],
+        });
+        expect(state.transcript?.items[1].message).toMatchObject({ _toolDurationMs: 452_000 });
+        expect(state.transcript?.items[2].message).toMatchObject({
+            _toolStats: [{ name: 'Grep', calls: 2, durationMs: 452_000 }],
+        });
+        expect(isServerMessage({ type: 'stateSync', state })).toBe(true);
+    });
+
+    it('snapshots per-tool turn totals onto the closing assistant message', () => {
+        let clock = 0;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{ role: 'assistant', content: [{ type: 'text', text: 'done' }] }];
+
+        clock = 1000;
+        service.reduceEvent(tab, { type: 'agent_start' });
+        const calls: Array<{
+            toolCallId: string;
+            toolName: string;
+            durationMs: number;
+            args?: Record<string, unknown>;
+        }> = [
+            { toolCallId: 'a', toolName: 'grep', durationMs: 300_000 },
+            { toolCallId: 'b', toolName: 'grep', durationMs: 152_000 },
+            {
+                toolCallId: 'c',
+                toolName: 'mcp',
+                durationMs: 30_000,
+                args: { server: 'unity', tool: 'read_log' },
+            },
+        ];
+        for (const spec of calls) {
+            service.reduceEvent(tab, {
+                type: 'tool_execution_start',
+                toolCallId: spec.toolCallId,
+                toolName: spec.toolName,
+                ...(spec.args ? { args: spec.args } : {}),
+            });
+            clock += spec.durationMs;
+            service.reduceEvent(tab, {
+                type: 'tool_execution_end',
+                toolCallId: spec.toolCallId,
+                toolName: spec.toolName,
+            });
+        }
+
+        const projection = service.beginAgentEnd(tab, 'completed');
+        service.completeAgentEnd(tab, projection);
+
+        expect(tab.messageMeta.get(0)?.toolStats).toEqual([
+            { name: 'Grep', calls: 2, durationMs: 452_000 },
+            { name: 'MCP unity.read_log', calls: 1, durationMs: 30_000 },
+        ]);
+        expect(tab.turnToolStats.size).toBe(0);
+        expect(tab.toolDurations.get('c')).toBe(30_000);
+    });
+
+    it('ignores a tool end without a recorded start', () => {
+        const service = new ChatService({ now: () => 5000 });
+        const tab = createTab();
+
+        service.reduceEvent(tab, {
+            type: 'tool_execution_end', toolCallId: 'orphan', toolName: 'read',
+        });
+
+        expect(tab.toolDurations.size).toBe(0);
+        expect(tab.turnToolStats.size).toBe(0);
+    });
+
     it('removes a stale interrupted marker after projecting live streaming state', () => {
         const service = new ChatService({ now: () => 1000 });
         const tab = createTab();
@@ -215,6 +328,7 @@ describe('portable ChatService event and state projection', () => {
         const now = vi.fn()
             .mockReturnValueOnce(1000)
             .mockReturnValueOnce(2000)
+            .mockReturnValueOnce(2400)
             .mockReturnValueOnce(3000)
             .mockReturnValueOnce(6600)
             .mockReturnValueOnce(7000);
@@ -231,8 +345,14 @@ describe('portable ChatService event and state projection', () => {
             type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'read',
         });
         expect(tab.pendingTools.get('call-1')).toEqual({ name: 'read', startTime: 2000 });
-        service.reduceEvent(tab, { type: 'tool_execution_end', toolCallId: 'call-1' });
+        service.reduceEvent(tab, {
+            type: 'tool_execution_end', toolCallId: 'call-1', toolName: 'read',
+        });
         expect(tab.pendingTools.size).toBe(0);
+        expect(tab.toolDurations.get('call-1')).toBe(400);
+        expect([...tab.turnToolStats.values()]).toEqual([
+            { name: 'Read', calls: 1, durationMs: 400 },
+        ]);
 
         service.reduceEvent(tab, {
             type: 'message_update', assistantMessageEvent: { type: 'thinking_start' },

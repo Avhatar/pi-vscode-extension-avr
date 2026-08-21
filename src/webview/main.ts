@@ -5,6 +5,11 @@ import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage
 import { formatUsdAmount } from '../shared/deepseek-usage';
 import { shouldDisplayChatMessage } from '../shared/message-visibility';
 import {
+    formatToolDurationSeconds,
+    parseToolStatEntries,
+    totalToolStats,
+} from '../shared/tool-timing';
+import {
     VsCodeAgentConnection,
     requestInitialAgentState,
     type MessageEventSource,
@@ -2185,10 +2190,14 @@ function buildDiffCard(change: FileChangeInfo, msg?: any): HTMLElement {
 
     wrapper.appendChild(card);
 
+    const footerParts: string[] = [];
     const ts = msg?.timestamp;
-    if (ts) {
+    if (ts) footerParts.push(formatTimestamp(ts));
+    const durationMs = durationNumber(msg?._toolDurationMs);
+    if (durationMs > 0) footerParts.push(formatToolDurationSeconds(durationMs));
+    if (footerParts.length > 0) {
         const footer = el('div', 'tool-footer');
-        footer.textContent = formatTimestamp(ts);
+        footer.textContent = footerParts.join(' · ');
         wrapper.appendChild(footer);
     }
 
@@ -2410,8 +2419,12 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
     // Assistant messages: wrap in a styled container
     const thinking = extractThinking(msg);
     const text = extractText(msg);
+    const toolStats = buildTurnToolStats(msg, index);
 
-    if (!thinking && !text) {
+    // A turn can close on a tool-call-only assistant message (an abort, or a
+    // provider that returns no closing prose). Keep the turn summary reachable
+    // instead of hiding it along with the empty message body.
+    if (!thinking && !text && !toolStats) {
         const empty = el('div');
         empty.style.display = 'none';
         return empty;
@@ -2419,23 +2432,29 @@ function renderMessage(msg: any, index: number, turnNumber?: number, isStickyPro
 
     const group = el('div', 'message-group-assistant');
 
-    const wrapper = el('div', `message message-${role}`);
+    if (thinking || text) {
+        const wrapper = el('div', `message message-${role}`);
 
-    if (thinking) {
-        wrapper.appendChild(buildThinkingBlock(thinking, false, msg._thinkingDurationSec));
+        if (thinking) {
+            wrapper.appendChild(buildThinkingBlock(thinking, false, msg._thinkingDurationSec));
+        }
+
+        if (text) {
+            const content = el('div', 'message-content');
+            content.innerHTML = renderMarkdown(text);
+            wrapper.appendChild(content);
+        }
+
+        group.appendChild(wrapper);
     }
-
-    if (text) {
-        const content = el('div', 'message-content');
-        content.innerHTML = renderMarkdown(text);
-        wrapper.appendChild(content);
-    }
-
-    group.appendChild(wrapper);
 
     const footer = buildMessageFooter(msg, index);
     if (footer) {
         group.appendChild(footer);
+    }
+
+    if (toolStats) {
+        group.appendChild(toolStats);
     }
 
     return group;
@@ -3025,6 +3044,24 @@ function ensureToolTimerLoop(): void {
 }
 
 /**
+ * Freeze a live "running Ns" chip into the elapsed time of the finished call.
+ * The finalized transcript card repeats that number in its meta line, but only
+ * after the next state sync — and with parallel tool batches the SDK holds the
+ * tool-result messages back until every sibling call has completed.
+ */
+function markLiveToolFinished(card: HTMLElement, statusEl: Element | null): void {
+    if (!statusEl) return;
+    const startedAt = Number(card.dataset.startedAt ?? 0);
+    if (!startedAt) {
+        statusEl.remove();
+        return;
+    }
+    statusEl.textContent = formatToolDurationSeconds(Math.max(0, Date.now() - startedAt));
+    statusEl.className = 'tool-status duration';
+    statusEl.setAttribute('title', 'Wall-clock time this tool call took');
+}
+
+/**
  * Sweep tool chips that are still marked "running" after the turn ended.
  * The SDK owes us a `tool_execution_end` per `tool_execution_start`; if it
  * never fired, a stuck chip would otherwise stay yellow forever. We keep
@@ -3444,6 +3481,9 @@ function buildToolFooter(msg: any, allMessages: any[], msgIndex: number): HTMLEl
     const ts = msg.timestamp;
     if (ts) parts.push(formatTimestamp(ts));
 
+    const durationMs = durationNumber(msg._toolDurationMs);
+    if (durationMs > 0) parts.push(formatToolDurationSeconds(durationMs));
+
     const precedingAssistant = findPrecedingAssistant(allMessages, msgIndex);
     if (precedingAssistant?.usage) {
         const u = precedingAssistant.usage;
@@ -3712,8 +3752,12 @@ function renderToolEnd(event: any): void {
         }
         const statusEl = card.querySelector('.tool-status');
         if (statusEl) {
-            statusEl.textContent = event.isError ? 'error' : 'done';
-            statusEl.className = `tool-status ${event.isError ? 'error' : 'done'}`;
+            if (event.isError) {
+                statusEl.textContent = 'error';
+                statusEl.className = 'tool-status error';
+            } else {
+                markLiveToolFinished(card as HTMLElement, statusEl);
+            }
         }
         return;
     }
@@ -3729,13 +3773,13 @@ function renderToolEnd(event: any): void {
 
     if (hasBody) {
         const headerEl = card.querySelector('.tool-header') as HTMLElement | null;
-        const statusEl = headerEl?.querySelector('.tool-status');
+        const statusEl = headerEl?.querySelector('.tool-status') ?? null;
         if (statusEl) {
             if (event.isError) {
                 statusEl.textContent = 'error';
                 statusEl.className = 'tool-status error';
             } else {
-                statusEl.remove();
+                markLiveToolFinished(card as HTMLElement, statusEl);
             }
         }
         const nameHtml = headerEl?.innerHTML ?? '';
@@ -3780,7 +3824,7 @@ function renderToolEnd(event: any): void {
                 statusEl.textContent = 'error';
                 statusEl.className = 'tool-status error';
             } else {
-                statusEl.remove();
+                markLiveToolFinished(card as HTMLElement, statusEl);
             }
         }
     }
@@ -5218,7 +5262,11 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
     if (role === 'assistant') {
         if (msg._messageEndTime && msg.timestamp) {
             const startMs = msg.timestamp < 1e12 ? msg.timestamp * 1000 : msg.timestamp;
-            const durationSec = (msg._messageEndTime - startMs) / 1000;
+            const messageDurationMs = msg._messageEndTime - startMs;
+            const durationSec = messageDurationMs / 1000;
+            if (messageDurationMs > 0) {
+                parts.push(formatToolDurationSeconds(messageDurationMs));
+            }
             const usage = msg.usage;
             if (usage && usage.output > 0 && durationSec > 0) {
                 const tokPerSec = usage.output / durationSec;
@@ -5257,6 +5305,41 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
     const footer = el('div', 'message-footer');
     footer.textContent = parts.join(' · ');
     return footer;
+}
+
+/**
+ * Per-tool wall-clock breakdown for the turn that ends at this message.
+ * Collapsed by default: it is a diagnostic, not part of the reading flow.
+ */
+function buildTurnToolStats(msg: any, index: number): HTMLElement | null {
+    if ((msg?.role ?? '') !== 'assistant') return null;
+    const entries = parseToolStatEntries(msg._toolStats);
+    if (entries.length === 0) return null;
+
+    const total = totalToolStats(entries);
+    const details = document.createElement('details');
+    details.className = 'turn-tool-stats';
+    details.dataset.foldoutKey = `${state.activeTabId}:message:${index}:tool-stats`;
+
+    const summary = document.createElement('summary');
+    summary.className = 'turn-tool-stats-summary';
+    summary.title = 'Wall-clock time spent in tools during this turn';
+    summary.textContent = `Tool time ${formatToolDurationSeconds(total.durationMs)}`
+        + ` · ${total.calls} call${total.calls === 1 ? '' : 's'}`;
+    details.appendChild(summary);
+
+    const list = el('div', 'turn-tool-stats-list');
+    for (const entry of entries) {
+        const name = el('span', 'turn-tool-stats-name');
+        name.textContent = entry.calls > 1 ? `${entry.name} ×${entry.calls}` : entry.name;
+        name.title = entry.name;
+        const time = el('span', 'turn-tool-stats-time');
+        time.textContent = formatToolDurationSeconds(entry.durationMs);
+        list.appendChild(name);
+        list.appendChild(time);
+    }
+    details.appendChild(list);
+    return details;
 }
 
 function formatFullUsageParts(usage: any): string[] {

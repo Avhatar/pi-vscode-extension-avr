@@ -21,11 +21,11 @@ Nothing here imports `vscode`. Do not add such an import.
 
 [`ChatService<TTab>`](../../../../src/core/chat/chat-service.ts#L164) is the reducer. Its main entry [`reduceEvent(tab, event)`](../../../../src/core/chat/chat-service.ts#L171) mutates the tab runtime on `agent_start`, `tool_execution_start / end`, `compaction_start / end`, `message_end`, `message_update`; streams thinking / text tokens on `stream_chunk`; and forwards to the turn-notification gate on `agent_end` / `agent_settled`.
 
-Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../../../src/core/chat/chat-service.ts) records duration and arms the notification gate, [`completeAgentEnd(tab, projection, accounting?)`](../../../../src/core/chat/chat-service.ts) commits duration plus provider-specific Codex/DeepSeek message metadata and clears streaming state, and [`settleAgent(tab)`](../../../../src/core/chat/chat-service.ts) resolves the turn via `turnNotificationGate.onAgentSettled()`.
+Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../../../src/core/chat/chat-service.ts) records duration and arms the notification gate, [`completeAgentEnd(tab, projection, accounting?)`](../../../../src/core/chat/chat-service.ts) commits duration plus provider-specific Codex/DeepSeek message metadata and the per-tool timing snapshot, and [`settleAgent(tab)`](../../../../src/core/chat/chat-service.ts) resolves the turn via `turnNotificationGate.onAgentSettled()`. Tool wall-clock accounting starts from `pendingTools`, records each completed call by stable tool-call id, and groups the current turn by display name; MCP grouping includes the server and remote tool so unrelated MCP calls do not collapse into one row.
 
 [`dispatchDirectPrompt(tab, request, callbacks)`](../../../../src/core/chat/chat-service.ts#L346) is the entry point for user prompts — parses `/compact` inline, increments `turnCounter`, arms the notification gate, invokes `_runUserPrompt`. Streaming controls flow through [`dispatchStreamingCommand`](../../../../src/core/chat/chat-service.ts#L383) (abort / steer / follow-up). Queue lifecycle is [`applyQueueControl(tab, command)`](../../../../src/core/chat/chat-service.ts#L402), [`reserveQueuedDispatch()`](../../../../src/core/chat/chat-service.ts#L443), [`dispatchNextQueued()`](../../../../src/core/chat/chat-service.ts#L449).
 
-[`buildState(tab, context)`](../../../../src/core/chat/chat-service.ts) is the projection layer. It produces `SerializedAgentState`: compact model-context messages, a latest-page full-transcript projection, model, tools, streaming / compacting flags, session metadata, context usage, file changes, cache mode, controls (todos, subagents, tool selection, feature toggles), pending tools, streaming buffers, queued messages. Runtime timing and provider-cost metadata is aligned from the compact assistant tail onto matching newest transcript assistants. Every UI surface that needs "what does this tab look like right now?" calls it.
+[`buildState(tab, context)`](../../../../src/core/chat/chat-service.ts) is the projection layer. It produces `SerializedAgentState`: compact model-context messages, a latest-page full-transcript projection, model, tools, streaming / compacting flags, session metadata, context usage, file changes, cache mode, controls (todos, subagents, tool selection, feature toggles), pending tools, streaming buffers, queued messages. Runtime timing, per-call tool durations, per-turn tool statistics, and provider-cost metadata are aligned from the compact assistant tail onto matching newest transcript assistants. Every UI surface that needs "what does this tab look like right now?" calls it.
 
 [`buildTranscriptPage`](../../../../src/core/chat/transcript-pagination.ts) pages any root-to-leaf entry sequence backwards by stable entry id. It counts projected entries rather than generated messages, skips metadata-only entries, never splits one entry's generated messages across pages, and marks a missing cursor so the client resets after a branch change.
 
@@ -56,6 +56,8 @@ Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../
 - `TurnCompletionInfo` — result of `settleAgent`
 - `TurnCompletionOutcome` — `'completed' | 'stopped' | 'failed' | 'truncated'` from [chat-event-policy](../chat-event-policy/chat-event-policy.md)
 - `TranscriptPageItem<TMessage>`, `TranscriptPageSlice<TMessage>` — portable page records from [transcript-pagination.ts](../../../../src/core/chat/transcript-pagination.ts)
+- `ToolCallDuration` — one completed tool call's display name and wall-clock duration from [tool-timing.ts](../../../../src/shared/tool-timing.ts)
+- `ToolStatEntry` — per-display-name call count and summed duration for one turn from [tool-timing.ts](../../../../src/shared/tool-timing.ts)
 
 **Methods — dispatch:**
 - `dispatch(message, sourceTabId?)` — [chat-host.ts:369](../../../../src/core/chat/chat-host.ts#L369)
@@ -67,6 +69,7 @@ Turn accounting is a three-step protocol: [`beginAgentEnd(tab, outcome)`](../../
 - `dispatchNextQueued()` — [chat-service.ts:449](../../../../src/core/chat/chat-service.ts#L449)
 - `buildState(tab, ctx)` — [chat-service.ts](../../../../src/core/chat/chat-service.ts)
 - `buildTranscriptPage(entries, project, options)` — [transcript-pagination.ts](../../../../src/core/chat/transcript-pagination.ts)
+- `accumulateToolStat`, `toolStatEntries`, `toolStatDisplayName` — [tool-timing.ts](../../../../src/shared/tool-timing.ts)
 
 **Methods — feature toggles (host-side):**
 - `setActiveTodoEnabled`, `setActiveSubagentsEnabled`, `setActivePlanModeEnabled`, `setActiveFileUndoViewEnabled` — [chat-host.ts:269](../../../../src/core/chat/chat-host.ts#L269)

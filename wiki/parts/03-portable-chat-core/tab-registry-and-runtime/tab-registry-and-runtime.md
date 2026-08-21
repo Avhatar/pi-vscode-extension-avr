@@ -18,10 +18,10 @@ Invariants: **deterministic insertion order**; **at most one active tab**; **no 
 - Identity: `id`, `name`.
 - Managers: `session`, `diffManager`, `checkpointManager`.
 - Turn accounting: `turnCounter`, `suspendedMessages`, `streamingText`, `streamingThinking`, `isThinking`, `thinkingStartTime`, `streamingThinkingDuration`.
-- Timing: `agentStartTime`, `totalTurnDurationMs`, `lastTurnEndAt`, `maxIdleGapMs`.
+- Timing: `agentStartTime`, `totalTurnDurationMs`, `lastTurnEndAt`, `maxIdleGapMs`, bounded `toolDurations: Map<callId, durationMs>`, and current-turn `turnToolStats: Map<displayName, ToolStatEntry>`.
 - Queue: `queuedMessages[]`, `queuedRetryHead`, `queuedRetryAttempts`.
 - Streaming flags: `isStreamingLocal`, `isCompacting`, `errorReportedThisRun`, `hasNotification`.
-- Metadata: `messageMeta: Map<ordinal, TabMessageMeta>`, `turnNotificationGate`, `pendingTools: Map<callId, PendingToolInfo>`, Codex account-window baselines, the DeepSeek session-cost baseline, `projectToolDefault`.
+- Metadata: `messageMeta: Map<ordinal, TabMessageMeta>` (including the optional completed-turn `toolStats` snapshot), `turnNotificationGate`, `pendingTools: Map<callId, PendingToolInfo>`, Codex account-window baselines, the DeepSeek session-cost baseline, `projectToolDefault`.
 - Cache: `cacheEffective`.
 
 Two lifecycle methods matter. [`addSubscription(unsub)`](../../../../src/core/chat/tab-runtime.ts#L107) collects callbacks (session listeners, diff listeners); [`unsubscribe()`](../../../../src/core/chat/tab-runtime.ts#L111) runs all of them and rethrows the first error so a single bad listener doesn't silently skip its peers. [`disposeResources()`](../../../../src/core/chat/tab-runtime.ts#L157) is the top-level teardown: unsubscribe, then dispose `session`, `diffManager`, `checkpointManager` in that order; each disposal is guarded so a failure in one doesn't skip the next.
@@ -46,7 +46,8 @@ The `ApplicationTab` interface at [chat-application.ts:4](../../../../src/core/c
 
 **Types — runtime:**
 - `TabRuntime<TSession, TDiff, TCheckpoint>` — [tab-runtime.ts:38](../../../../src/core/chat/tab-runtime.ts#L38)
-- `TabMessageMeta` — same file; `thinkingDurationSec`, `messageEndTime`, `codexTurn?`, `deepSeekTurn?`, `turnDurationMs?`, `totalTurnDurationMs?`
+- `TabMessageMeta` — same file; `thinkingDurationSec`, `messageEndTime`, `codexTurn?`, `deepSeekTurn?`, `turnDurationMs?`, `totalTurnDurationMs?`, `toolStats?`
+- `ToolStatEntry` — [src/shared/tool-timing.ts](../../../../src/shared/tool-timing.ts); grouped call count and wall-clock duration
 - `PendingToolInfo` — [src/shared/agent-protocol.ts:107](../../../../src/shared/agent-protocol.ts#L107)
 - `TurnNotificationGate` — [chat/turn-notification-gate.ts](../../../../src/core/chat/turn-notification-gate.ts)
 
@@ -62,6 +63,7 @@ The `ApplicationTab` interface at [chat-application.ts:4](../../../../src/core/c
 - `unsubscribe()` — [tab-runtime.ts:111](../../../../src/core/chat/tab-runtime.ts#L111)
 - `resetSessionProjection(projectToolDefault?, initialTurnCounter?)` — [tab-runtime.ts:131](../../../../src/core/chat/tab-runtime.ts#L131)
 - `disposeResources()` — [tab-runtime.ts:157](../../../../src/core/chat/tab-runtime.ts#L157)
+- `recordToolDuration(toolCallId, durationMs)` — records one completed call and evicts the oldest entry above `TOOL_DURATION_HISTORY_LIMIT`
 
 **Methods — application:**
 - `register(tab, options?)`, `activate(tabId, options?)`, `remove(tabId)`, `isBusy(tab)`, `getTabInfos()` — [chat-application.ts:22](../../../../src/core/chat/chat-application.ts#L22)
@@ -93,3 +95,4 @@ The `ApplicationTab` interface at [chat-application.ts:4](../../../../src/core/c
 - **Pattern — `resetSessionProjection` is not `disposeResources`.** It clears transient state so the same tab can host a different session (e.g. `loadSession` from history). The managers (`session`, `diffManager`, `checkpointManager`) are recreated externally by the host after this call; the runtime does not.
 - **Pitfall — do not race active-tab pointer changes with UI updates.** The active pointer may transiently become `undefined` between `remove` and the next `activate`. UI code must handle the null case.
 - **Pattern — every `Map`-backed field starts empty and grows only within one tab.** No cross-tab sharing. Never introduce a static map indexed by session path.
+- **Rule — completed tool history is bounded.** `toolDurations` keeps at most `TOOL_DURATION_HISTORY_LIMIT` entries and evicts insertion-order oldest calls; `turnToolStats` is cleared at each agent start and after its snapshot is attached to the closing assistant message.
