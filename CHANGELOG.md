@@ -7,9 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.67.9] - 2026-08-10
+
 ### Changed
-- The installed extension is now smaller: source maps and bundled-package assets that were never used at runtime (demo video, package banners, test files, the hidden `librarian` skill) no longer ship in the VSIX.
-- The `librarian` research skill that ships inside the bundled `pi-web-access` extension is no longer offered to agents; its web search and page-fetching tools are unaffected.
+- The installed extension is now smaller: source maps and bundled-package demo videos, banners, and test files that are never used at runtime no longer ship in the VSIX.
+- The bundled web tools no longer offer the unrequested `librarian` research skill to agents; web search and page-fetching tools are unaffected.
+
+### Fixed
+- Content-fetch completion text now stays aligned with the assistant timeline instead of drifting left into the rail.
 
 ## [0.67.8] - 2026-08-07
 

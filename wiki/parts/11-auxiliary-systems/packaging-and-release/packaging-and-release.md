@@ -23,7 +23,7 @@ Manifest scripts [package.json](../../../../package.json):
 - `src/**` excluded **except** `!src/webview/styles/**` — CSS must ship for runtime loading
 - `vitest.config.ts`, `tsconfig*.json`, `esbuild.js` — excluded
 - `AGENTS.md`, `CLAUDE.md`, `README.md` — excluded (README replaced at package time)
-- `*.map`, `*.vsix` — excluded
+- `**/*.map`, `*.vsix` — excluded; source maps require the recursive glob because a bare `*.map` matches only the package root
 - **Never filter `node_modules/**`** — hoisted transitive deps must remain intact (see [Part I § bundle-targets-and-esbuild](../../01-extension-host-substrate/bundle-targets-and-esbuild/bundle-targets-and-esbuild.md))
 
 Version bump [scripts/bump-version.js:1](../../../../scripts/bump-version.js#L1):
@@ -62,7 +62,7 @@ Deploy chain (all `deploy:*` scripts):
 5. `npm install` — restore devDeps and rerun the deterministic runtime repair through `postinstall`.
 6. `code --install-extension pi-code-<version>.vsix --force` — local install for smoke test.
 
-Pruning guarantees that only production dependencies remain; it does not make the package small by itself. The current bundled SDK, provider integrations, web tooling, and native helpers produce a compressed VSIX of roughly 120 MB, and dependency upgrades can change that size.
+Pruning guarantees that only production dependencies remain; it does not make the package small by itself. After source-map and bundled-package baggage exclusions, the current SDK, provider integrations, web tooling, and native helpers produce a compressed VSIX of roughly 90 MB; dependency upgrades can change that size.
 
 Marketplace publication is a separate explicit maintainer action after the installed-VSIX smoke test:
 
@@ -118,3 +118,4 @@ After publishing, verify the intended version on the Marketplace page or Gallery
 - **Pattern — deploy is local by default.** The `deploy:*` scripts install the VSIX into local VS Code; publishing requires an explicit `vsce publish --packagePath ...` maintainer action after smoke testing.
 - **Rule — release tags must match the manifest.** The GitHub workflow accepts only `v<package.json version>` tags before packaging and creating a GitHub Release.
 - **Rule — package the physically resolved dependency tree, not audit metadata alone.** Pi SDK 0.82.1 shrinkwraps vulnerable `brace-expansion` 5.0.7. Install-time repair removes that nested copy, and packaging aborts unless Pi resolves root 5.0.9; the upstream lock metadata can continue to trigger an `npm audit` advisory until its shrinkwrap is updated.
+- **Rule — dependency changes require separate approval.** Release preparation and audit review may report dependency advisories and propose a tested upgrade, but must not change dependency versions, pins, overrides, lockfiles, or repair logic without the user's explicit approval for that separate change.

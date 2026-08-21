@@ -143,7 +143,7 @@ npm prune --omit=dev
 **Required** because `vsce` packages everything in `node_modules/`.
 Pruning guarantees the VSIX contains only the runtime tree. With the current
 bundled SDK, provider integrations, web tooling, and native helper binaries,
-the compressed VSIX is roughly 120 MB; dependency updates can change this.
+the compressed VSIX is roughly 90 MB; dependency updates can change this.
 
 **Do NOT** add `node_modules/**` to `.vscodeignore` with selective `!` exceptions —
 that strips hoisted transitive deps and breaks activation.

@@ -15,6 +15,8 @@ interface FakeSession {
     prompt(text: string): Promise<void>;
     compact(instructions?: string): Promise<void>;
     getMessages(): any[];
+    getFirstTranscriptUserMessage(): undefined;
+    setSessionName(name: string): void;
     getCurrentModel(): undefined;
     serializeState(): any;
     setSubagentParentTabId(tabId: string): void;
@@ -313,6 +315,8 @@ function createFakeSession(): FakeSession {
         },
         compact: vi.fn(async () => undefined),
         getMessages: () => [],
+        getFirstTranscriptUserMessage: () => undefined,
+        setSessionName: vi.fn(),
         getCurrentModel: () => undefined,
         serializeState: () => ({ messages: [], isStreaming: isBusy }),
         setSubagentParentTabId: vi.fn(),

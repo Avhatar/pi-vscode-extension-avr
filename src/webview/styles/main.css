@@ -536,7 +536,7 @@ body[data-mode="panel"] .tab-strip,
 .message-assistant {
     padding: 0;
 }
-.message-assistant > .message-content {
+.message-group-assistant > .message > .message-content {
     padding: 8px 16px 16px 48px;
 }
 

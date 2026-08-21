@@ -43,7 +43,9 @@ The fork tracks the upstream `@earendil-works/pi-coding-agent` SDK as a regular 
 - **Raw Mode** — opt-in developer diagnostics that record complete unredacted provider payloads and agent events to local VS Code global storage. The recording stays local, is disabled by default, and opens with **Pi Code: Open Raw View for Active Chat**.
 - **Faster startup and restoration** — Pi SDK warm-up removes the first dynamic-import delay, an optional full prewarm (`pi-code.prewarm.full`) completes session bring-up at startup, and the Codex model catalog is cached across reloads. Chat panels show a loading overlay and VS Code status progress while new or restored sessions prepare.
 - **Claude compatibility controls** — a master switch (`pi-code.claudeCompat.enabled`) and per-workspace mode (`auto` / `on` / `off`) control when the Claude bridge activates. Restored chat and Raw View tabs reconnect after `Reload Window` without waiting for the sidebar.
-- **Reliability fixes** — streaming preserves your reading position, attachment and file-mention scaffolding stays out of visible prompts, queued messages wait for full agent settlement, and long-running compaction no longer shows a misleading request timeout.
+- **Usage and activity clarity** — DeepSeek chats show remaining balance and turn/session spend, MCP actions identify the server and tool being called, and timeline activity stays aligned and visibly active throughout long turns.
+- **Reliability fixes** — streaming preserves your reading position, prompts appear immediately after sending, compacted chats retain names and full current-branch history, queued messages wait for full agent settlement, and internal attachment/file-mention scaffolding stays out of visible prompts.
+- **Smaller installed package** — source maps and unused bundled-package assets, tests, and the unrequested `librarian` skill no longer ship in the VSIX; bundled web search and content-fetch tools are unchanged.
 - **Pi SDK 0.82.1** — updated model runtime, provider authentication, retry behaviour, and model catalog support.
 
 ## Features
@@ -79,7 +81,7 @@ Pick from any model available through the Pi coding agent's model registry via a
 A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API keys, default model and thinking level, ToDo behaviour, subagents, Claude compatibility controls, Raw Mode recording, performance diagnostics and prewarm, Claude Code MCP import, file-mention indexing, and chat appearance. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
 
 ### Bundled Pi Extensions
-Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `fetch_content`, and `get_search_content` — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files — plus its accompanying skill. Search uses OpenAI when suitable and available, then falls back through Exa, Brave, Parallel, Tavily, Perplexity, and Gemini; Exa MCP works without an API key. The bundled `pi-mcp-adapter` discovers project servers declared in `.mcp.json` or `.pi/mcp.json`. Enable `pi-code.mcp.importClaudeCode` to add a managed reference to user-level Claude Code MCP servers; definitions and credentials stay in Claude Code's config. No `pi install` step is required.
+Selected Pi ecosystem extensions ship inside the VSIX and are loaded automatically at session start. The bundled `pi-web-access` package adds `web_search`, `fetch_content`, and `get_search_content` — covering web pages, GitHub repos, YouTube transcripts, PDFs, and local video files. Search uses OpenAI when suitable and available, then falls back through Exa, Brave, Parallel, Tavily, Perplexity, and Gemini; Exa MCP works without an API key. The bundled `pi-mcp-adapter` discovers project servers declared in `.mcp.json` or `.pi/mcp.json`. Enable `pi-code.mcp.importClaudeCode` to add a managed reference to user-level Claude Code MCP servers; definitions and credentials stay in Claude Code's config. No `pi install` step is required.
 
 ### Workspace File Mentions
 Type `@` in the chat input to open a suggestion menu that fuzzy-matches files from the opened workspace. Selected mentions are highlighted in blue inside the input and sent to the agent as path references it can choose to inspect — this is **not** an attachment mechanism, file contents are not inlined or uploaded. Indexing respects VS Code's standard search excludes plus a built-in pattern set (skip `node_modules`, build artefacts, lockfiles), and can be further tuned via the `pi-code.fileMentions.*` settings or a workspace-local `.pi/file-mentions.json`.
@@ -220,12 +222,14 @@ Then press **F5** in VS Code to launch an Extension Development Host with the ex
 ### As a VSIX Package
 
 ```bash
+npm run test:unit
+npm run compile
 npm prune --omit=dev
 npm run package
 npm install
 ```
 
-Pruning first is required so the VSIX contains only runtime dependencies; reinstall afterward to restore development dependencies. This produces a `.vsix` file you can install via **Extensions > Install from VSIX...** in VS Code. Use `npm run deploy` to compile, prune, package, restore dependencies, and install the current version automatically.
+Run tests and compile before pruning, because pruning removes the development dependencies they require. Pruning then ensures the VSIX contains only runtime dependencies; reinstall afterward to restore the development tree. This produces a `.vsix` file you can install via **Extensions > Install from VSIX...** in VS Code. Use `npm run deploy` to compile, prune, package, restore dependencies, and install the current version automatically.
 
 ## Usage
 

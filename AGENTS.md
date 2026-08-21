@@ -33,7 +33,7 @@ The prune step is required because `vsce` packages everything in
 non-trivial to walk only production dependencies. Pruning first
 guarantees the VSIX contains exactly the runtime tree. With the current
 bundled SDK, provider integrations, web tooling, and native helper binaries,
-the compressed VSIX is roughly 120 MB; dependency updates can change this.
+the compressed VSIX is roughly 90 MB; dependency updates can change this.
 
 Install the resulting `.vsix` with `code --install-extension <file>
 --force` or via the **Extensions: Install from VSIX...** command.
@@ -56,6 +56,18 @@ the shrinkwrapped copy, `npm run package` repairs once more and then verifies th
 physical resolution before creating a VSIX. Until the upstream shrinkwrap is
 updated, `npm audit` can still report the removed nested copy from lock metadata;
 do not suppress the package-time verifier or remove the direct fallback.
+
+**Dependency-change approval boundary.** Never add, remove, upgrade, downgrade,
+pin, override, deduplicate, or introduce repair logic for any production or
+development dependency without the user's explicit approval for that separate
+dependency change. This applies during release preparation, audit review,
+build/package troubleshooting, and unrelated feature work. Report advisories,
+proposed versions, compatibility risk, and test scope, then stop before editing
+`package.json`, lockfiles, dependency repair scripts, or the resolved dependency
+graph. Routine install/prune/restore commands that preserve the already-approved
+dependency graph remain part of the documented build pipeline. Existing approved
+workarounds, such as the `brace-expansion` repair above, are not blanket
+permission for additional dependency changes.
 
 ## Standalone Desktop (private submodule)
 

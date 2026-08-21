@@ -13,7 +13,9 @@ A visual VS Code wrapper around the [Pi coding agent](https://pi.dev/) — built
 - **Raw Mode** — opt-in developer diagnostics that record complete unredacted provider payloads and agent events to local VS Code global storage. The recording stays local, is disabled by default, and opens with **Pi Code: Open Raw View for Active Chat**.
 - **Faster startup and restoration** — Pi SDK warm-up removes the first dynamic-import delay, an optional full prewarm (`pi-code.prewarm.full`) completes session bring-up at startup, and the Codex model catalog is cached across reloads. Chat panels show a loading overlay and VS Code status progress while new or restored sessions prepare.
 - **Claude compatibility controls** — a master switch (`pi-code.claudeCompat.enabled`) and per-workspace mode (`auto` / `on` / `off`) control when the Claude bridge activates. Restored chat and Raw View tabs reconnect after `Reload Window` without waiting for the sidebar.
-- **Reliability fixes** — streaming preserves your reading position, attachment and file-mention scaffolding stays out of visible prompts, queued messages wait for full agent settlement, and long-running compaction no longer shows a misleading request timeout.
+- **Usage and activity clarity** — DeepSeek chats show remaining balance and turn/session spend, MCP actions identify the server and tool being called, and timeline activity stays aligned and visibly active throughout long turns.
+- **Reliability fixes** — streaming preserves your reading position, prompts appear immediately after sending, compacted chats retain names and full current-branch history, queued messages wait for full agent settlement, and internal attachment/file-mention scaffolding stays out of visible prompts.
+- **Smaller installed package** — source maps and unused bundled-package assets, tests, and the unrequested `librarian` skill no longer ship in the VSIX; bundled web search and content-fetch tools are unchanged.
 - **Pi SDK 0.82.1** — updated model runtime, provider authentication, retry behaviour, and model catalog support.
 
 ## Why Pi Code?

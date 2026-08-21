@@ -58,4 +58,10 @@ describe('action timeline rail termination', () => {
 
         expect(rule).toMatch(/\banimation\s*:\s*none\s*!important\s*;/);
     });
+
+    it('aligns non-assistant text rendered on the assistant timeline rail', () => {
+        const rule = ruleBodyContaining('.message-group-assistant > .message > .message-content');
+
+        expect(rule).toMatch(/\bpadding\s*:\s*8px\s+16px\s+16px\s+48px\s*;/);
+    });
 });

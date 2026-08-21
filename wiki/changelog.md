@@ -12,6 +12,12 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-10 — Require approval for dependency changes
+
+- **Code:** Added an `AGENTS.md` boundary forbidding dependency graph, lockfile, pin, override, or repair-script changes without explicit approval for a separate dependency change; reverted unapproved `undici`, `hono`, and `ip-address` hardening from the 0.67.9 release candidate while preserving the established `brace-expansion` workaround.
+- **Wiki:** `packaging-and-release.md` records the approval boundary and restores the approved brace-only repair facts; its current roughly 90 MB package-size and recursive source-map guidance remain synchronized.
+- **Escalations:** none — this tightens the existing release workflow without changing wiki taxonomy.
+
 ## 2026-08-07 — Prune VSIX baggage: source maps and bundled-package assets
 
 - **Code:** Replaced the inert `*.map` rule in `.vscodeignore` with `**/*.map` (vsce bare patterns match root-level files only, so 10 050 source maps were shipping) and added narrow per-file globs dropping bundled-package assets (`pi-web-access` demo mp4 + banner + `test/**` + `skills/**`, `pi-mcp-adapter` banner + `cli.js`, `@mixmark-io/domino` test data). Zero functional files touched; `vsce ls` and the boundary script verified.
