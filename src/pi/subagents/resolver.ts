@@ -46,12 +46,7 @@ export function resolveAgentSpec(
     const { model, source: modelSource } = resolveModel(definition, invocation, policy, diagnostics);
     const { tools, trace } = resolveTools(definition, invocation, policy, diagnostics);
 
-    const maxTurns = resolveBoundedInteger(
-        'maxTurns',
-        invocation.maxTurns ?? definition?.maxTurns ?? policy.defaultMaxTurns ?? 60,
-        policy.maxTurns,
-        diagnostics,
-    );
+    const maxTurns = resolveTurnBudget(definition, invocation, policy, diagnostics);
     const timeoutMinutes = resolveBoundedInteger(
         'timeoutMinutes',
         invocation.timeoutMinutes ?? definition?.timeoutMinutes ?? policy.defaultTimeoutMinutes ?? 30,
@@ -243,6 +238,41 @@ function resolveThinkingLevel(
     const requested = invocation.thinkingLevel ?? definition?.thinkingLevel ?? policy.defaultThinkingLevel;
     if (!requested || requested === 'inherit') return policy.parentThinkingLevel;
     return requested;
+}
+
+/**
+ * Resolves the child turn budget, treating an agent definition's `maxTurns` as
+ * a floor rather than a value the caller may silently undercut.
+ *
+ * A "turn" is one provider round-trip, so every tool call the child makes
+ * spends one. Orchestrators routinely under-budget that, and a definition
+ * author's explicit number is the better-informed one: it was written with the
+ * agent's real working style in mind, while an invocation number is guessed per
+ * call. The invocation may still raise the budget — only lowering it below the
+ * definition is rejected, and the diagnostic records that it happened.
+ */
+function resolveTurnBudget(
+    definition: AgentDefinition | undefined,
+    invocation: SubagentInvocation,
+    policy: SubagentResolutionPolicy,
+    diagnostics: ResolutionDiagnostic[],
+): number {
+    const requested = resolveBoundedInteger(
+        'maxTurns',
+        invocation.maxTurns ?? definition?.maxTurns ?? policy.defaultMaxTurns ?? 60,
+        policy.maxTurns,
+        diagnostics,
+    );
+    if (invocation.maxTurns === undefined || definition?.maxTurns === undefined) return requested;
+    if (definition.maxTurns <= invocation.maxTurns) return requested;
+    const floor = resolveBoundedInteger('maxTurns', definition.maxTurns, policy.maxTurns, diagnostics);
+    if (floor <= requested) return requested;
+    diagnostics.push({
+        code: 'limit-raised',
+        message: `maxTurns was raised from the requested ${invocation.maxTurns} to ${floor}, `
+            + `the budget declared by agent definition ${definition.name}.`,
+    });
+    return floor;
 }
 
 /** Clamps only when the host declares a ceiling. An absent `maximum` means the

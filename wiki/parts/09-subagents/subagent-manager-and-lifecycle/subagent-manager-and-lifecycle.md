@@ -35,6 +35,13 @@ Executing a run [manager.ts:323](../../../../src/pi/subagents/manager.ts#L323):
 4. Enforce timeout via `AbortController`.
 5. On completion, populate `SubagentRun.result`, retain terminally, persist.
 
+Turn-budget handling [manager.ts:364](../../../../src/pi/subagents/manager.ts#L364) is a two-stage wind-down, because a hard stop at the ceiling used to discard the whole run:
+
+- **One turn left** — when `spec.maxTurns - turnCount === 1` and the child is still calling tools, the manager steers it once with `windDownMessage(...)` [manager.ts:26](../../../../src/pi/subagents/manager.ts#L26): stop investigating, call `complete_subagent` now with whatever you have. `ActiveRun.windDownSent` keeps it to a single nudge. The child cannot see its own turn accounting, so without this it has no way to know it is about to be cut off.
+- **Budget spent** — the run is aborted with reason `max-turns`. The resulting `SubagentRunError` carries `partialResult` (the child's last assistant text), and [tool.ts](../../../../src/pi/subagents/tool.ts) appends it to the parent-facing failure so a stranded child's work is recoverable instead of being re-run from scratch.
+
+The completion is read *before* the abort is honoured [manager.ts:466](../../../../src/pi/subagents/manager.ts#L466). A child that called `complete_subagent` on its final turn has already delivered, and the budget abort or a user stop can land in the same tick; checking the abort first would fail a finished run.
+
 `SubagentRun` [types.ts:135](../../../../src/pi/subagents/types.ts#L135) — the durable record:
 
 - `agentId`, `parentSessionId`, `parentTabId`
@@ -86,6 +93,7 @@ Mutation routing [mutations.ts:1](../../../../src/pi/subagents/mutations.ts#L1) 
 - Default terminal retention: 10 minutes, 20-slot LRU
 - Default maxTurns: `60` (no host ceiling), default timeoutMinutes: `30` (host ceiling `120`)
 - One turn is one child assistant step, counted per `turn-ended` — a tool call costs a turn
+- Wind-down steer fires once, one turn before the budget is spent; `max-turns` failures carry `partialResult`
 - Status values: `queued | running | completed | failed | aborted | timed-out`
 
 **Namespaces:**
@@ -119,6 +127,7 @@ Mutation routing [mutations.ts:1](../../../../src/pi/subagents/mutations.ts#L1) 
 - **Pattern — the parent turn summary reports delegated time separately.** The parent books its own `subagent` tool call, which for a foreground spawn covers the child's run and for a background spawn covers almost nothing. Per-run wall clock, outcome, and child tool time therefore live in their own section of the turn breakdown rather than being merged into the parent tool rows. See [Part III § chat-host-and-service](../../03-portable-chat-core/chat-host-and-service/chat-host-and-service.md).
 - **Pattern — aggregate foreground waiting in chat.** Once the parent has no other tool running, pending foreground `spawn` and `resume` calls are counted into one terminal "Waiting for N subagents" indicator; background spawns and lifecycle controls are excluded. Individual child activity remains in the launcher, and child edits remain reviewable without becoming inline chat noise.
 - **Pattern — coordinator signal composition.** `schedule(op, signal)` combines the caller's abort signal with the coordinator's shutdown signal — either abort cancels the operation cleanly.
+- **Pitfall — a turn ceiling that hard-aborts throws away the whole run.** Before the wind-down, ~96% of observed child failures were `max-turns`, every one at `turnCount === maxTurns + 1` (the abort is async, so one further `turn_end` still lands). The parent got a one-line reason and no output, and re-spawned the same task with a bigger number. Keep the wind-down steer and `partialResult` salvage together — either alone leaves the expensive half of the problem in place.
 - **Pitfall — abort mid-execution races persistence.** The `persist()` chain [manager.ts:599](../../../../src/pi/subagents/manager.ts#L599) is serialized in a Promise tail; aborting during a persist call does not corrupt the file. Do not add "fast abort" shortcuts.
 - **Pitfall — `runBackground` returns before spawning.** The caller gets the persistent agentId; the actual spawn happens async. If the parent needs to serialize on child spawn, wait on the state transition to `running`, not on the function return.
 - **Pattern — `SubagentRunStore` cleanup rides `deleteHistorySession`.** When the parent session is deleted, its subagent records are wiped by `deleteByParentSessionPath`. Do not add a separate garbage collector.

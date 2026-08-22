@@ -239,6 +239,50 @@ describe('subagent specification resolution', () => {
         }))).toThrowError(expect.objectContaining({ code: 'model-unavailable' }));
     });
 
+    it('treats a definition turn budget as a floor the invocation cannot lower', () => {
+        const resolved = resolveAgentSpec(lookup, {
+            task: 'Implement the settled slice.',
+            agent: 'research',
+            maxTurns: 10,
+        }, policy({ maxTurns: undefined }));
+
+        expect(resolved.maxTurns).toBe(80);
+        expect(resolved.diagnostics).toContainEqual({
+            code: 'limit-raised',
+            message: 'maxTurns was raised from the requested 10 to 80, '
+                + 'the budget declared by agent definition research.',
+        });
+    });
+
+    it('lets an invocation raise the budget above the definition', () => {
+        const resolved = resolveAgentSpec(lookup, {
+            task: 'Implement the settled slice.',
+            agent: 'research',
+            maxTurns: 200,
+        }, policy({ maxTurns: undefined }));
+
+        expect(resolved.maxTurns).toBe(200);
+        expect(resolved.diagnostics.filter((diagnostic) => diagnostic.code === 'limit-raised')).toHaveLength(0);
+    });
+
+    it('keeps a small invocation budget when no definition declares one', () => {
+        const resolved = resolveAgentSpec({ get: () => undefined }, {
+            task: 'Answer one question.',
+            maxTurns: 3,
+        }, policy({ maxTurns: undefined }));
+
+        expect(resolved.maxTurns).toBe(3);
+        expect(resolved.diagnostics.filter((diagnostic) => diagnostic.code === 'limit-raised')).toHaveLength(0);
+    });
+
+    it('still rejects an invalid invocation budget even when a definition floor exists', () => {
+        expect(() => resolveAgentSpec(lookup, {
+            task: 'Implement the settled slice.',
+            agent: 'research',
+            maxTurns: 0,
+        }, policy({ maxTurns: undefined }))).toThrowError(expect.objectContaining({ code: 'invalid-limit' }));
+    });
+
     it('reports unknown named definitions clearly', () => {
         expect(() => resolveAgentSpec(lookup, {
             task: 'Investigate.',

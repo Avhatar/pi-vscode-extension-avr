@@ -34,6 +34,7 @@ export interface SessionSettingValues {
     'subagents.defaultModel': string;
     'subagents.allowedModels': string[];
     'subagents.allowInvocationModelOverride': boolean;
+    'subagents.allowChildBash': boolean;
     'subagents.defaultMaxTurns': number;
     'subagents.defaultTimeoutMinutes': number;
     'subagents.maxConcurrentPerChat': number;

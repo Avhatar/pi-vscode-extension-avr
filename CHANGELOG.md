@@ -7,12 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Child agents can now use the read-only Language Server tools — find references, go to definition, hover, document and workspace symbols, implementations, type definitions, and call hierarchy — whenever `Language Server tools` is enabled. A child can answer "where is this used" in one call instead of a long grep-and-read sequence, which is also the single biggest saving on its turn budget.
+- New `Allow shell access for children` setting (off by default) grants child agents the `bash` tool. Worktree isolation bounds a child's file edits, not what a shell can reach, so this hands children the same machine access the parent has without the parent's review step — but it lets read-only children answer with one `git diff` or `rg` instead of many turns.
+
 ### Fixed
 - A chat whose window crashed, was killed, or lost power can be opened again. Its session file kept an exclusive write lock that was never reclaimed, so the chat stayed permanently unopenable from history and had to be unblocked by deleting a `.pi-code.lock` file by hand. Pi Code now reclaims a lock whose owner is provably gone — a process that no longer exists, or a lock written before the machine last booted — and does so immediately instead of after a five-minute delay. A chat genuinely open elsewhere is still protected.
 - A session left locked by a power loss is no longer blocked forever when the operating system hands the crashed process's id to an unrelated program after the reboot. Locks now record the boot they were taken in, which settles that case without guessing.
 - A session lock file truncated mid-write — the usual result of pulling the plug — no longer blocks its chat permanently; it is reclaimed once it is old enough to be certain nobody is writing to it.
 - Session lock errors now identify the owner, say whether that process is still running, and name the lock file to remove when the owner is on a machine this one cannot check.
 - Delegated subagent transcripts are covered by the same recovery, so a resumable child run does not become unreachable after its parent crashes.
+- Child agents no longer fail en masse with "exceeded its maximum turn count". A turn is one model response including every tool call it makes, and nothing in the delegation tool said so, so orchestrators routinely handed children budgets sized like conversation turns and the children were stopped mid-task. The tool now spells out what a turn costs, an agent definition's own `maxTurns` acts as a floor that a per-call value cannot lower, and each child is told its budget up front.
+- A child that is about to run out of turns is now asked to wrap up and return what it has, one turn before the budget is spent, instead of being cut off mid-tool-call.
+- When a child is stopped anyway — turn budget or timeout — its last message now comes back with the failure, so the parent can finish from where the child stopped instead of re-running the whole task from scratch.
+- A child that delivered its result at the very end of its budget is no longer reported as failed when the stop lands in the same moment as the result.
 
 ## [0.68.0] - 2026-08-21
 

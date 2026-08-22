@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { registerSubagentTool } from '../../../../pi/subagents/tool';
+import { SubagentRunError } from '../../../../pi/subagents/runtime';
 
 describe('parent subagent tool', () => {
     it('registers one parallel tool with delegation guidelines and named catalog', () => {
@@ -167,5 +168,47 @@ describe('parent subagent tool', () => {
         expect(result.content).toEqual([{ type: 'text', text: 'Review complete.' }]);
         expect(result.details).toMatchObject({ status: 'completed', model: { provider: 'deepseek', id: 'reasoner' } });
         expect(updates.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('documents what a turn costs so the caller does not under-budget the child', () => {
+        const registerTool = vi.fn();
+        registerSubagentTool({ registerTool } as any, { definitions: [], execute: vi.fn() });
+
+        const tool = registerTool.mock.calls[0][0];
+        expect(tool.parameters.properties.maxTurns.description)
+            .toContain('one turn is one model response together with every tool call it makes');
+        expect(tool.promptGuidelines.join('\n')).toContain('Leave `maxTurns` unset');
+    });
+
+    it('surfaces a stranded child partial output instead of only the failure reason', async () => {
+        let tool: any;
+        registerSubagentTool({ registerTool(value: any) { tool = value; } } as any, {
+            definitions: [],
+            execute: vi.fn(async () => {
+                throw new SubagentRunError(
+                    'max-turns',
+                    'Subagent exceeded its maximum turn count.',
+                    'stranded-1',
+                    'Refactored CardData and started on CardView.',
+                );
+            }),
+        });
+
+        await expect(tool.execute('call-1', { task: 'Refactor.' }, undefined, undefined, {}))
+            .rejects.toThrowError(expect.objectContaining({
+                message: expect.stringContaining('Refactored CardData and started on CardView.'),
+            }));
+    });
+
+    it('leaves a failure without salvage untouched', async () => {
+        let tool: any;
+        const failure = new SubagentRunError('runtime-error', 'Child runtime exploded.', 'broken-1');
+        registerSubagentTool({ registerTool(value: any) { tool = value; } } as any, {
+            definitions: [],
+            execute: vi.fn(async () => { throw failure; }),
+        });
+
+        await expect(tool.execute('call-1', { task: 'Refactor.' }, undefined, undefined, {}))
+            .rejects.toBe(failure);
     });
 });

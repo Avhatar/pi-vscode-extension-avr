@@ -46,7 +46,9 @@ Plus `RemoteAgentConfiguration` [extensibility-policy.ts:1](../../../../src/pi/s
 
 **Pi child session factory** [pi-child-session.ts:23](../../../../src/pi/subagents/pi-child-session.ts#L23):
 
-- Constants: `CHILD_SAFE_TOOLS = ['read', 'grep', 'find', 'ls', 'edit', 'write']`, `READ_ONLY_CHILD_TOOLS = ['read', 'grep', 'find', 'ls']`.
+- Constants: `CHILD_SAFE_TOOLS = ['read', 'grep', 'find', 'ls', 'edit', 'write']`, `READ_ONLY_CHILD_TOOLS = ['read', 'grep', 'find', 'ls']`, `CHILD_BASH_TOOL = 'bash'`.
+- Beyond the baseline, a child's reach is assembled by [`PiSessionManager._childSafeToolNames()`](../../../../src/pi/session.ts) from three sources: the constants above, `bash` when `pi-code.subagents.allowChildBash` is on (passed to the factory as `allowBash`, which is also what the `unsafeTools` guard consults), and everything in the `ChildToolFactoryRegistry`.
+- The registry's standing contributor is the read-only LSP surface [lsp/child-tools.ts](../../../../src/pi/lsp/child-tools.ts) — see [Part XI § lsp-tools](../../11-auxiliary-systems/lsp-tools/lsp-tools.md).
 - `PiChildSessionFactory.create(spec)` [pi-child-session.ts:40](../../../../src/pi/subagents/pi-child-session.ts#L40) — prepares write lease, creates a `SessionManager` (persistent or in-memory), acquires session lock if persistent, wires up ChildSessionHandle.
 
 **Smoke scenarios** [src/pi/subagents/smoke/scenarios/](../../../../src/pi/subagents/smoke/scenarios/):
@@ -74,7 +76,8 @@ Plus `RemoteAgentConfiguration` [extensibility-policy.ts:1](../../../../src/pi/s
 **Types — child tools:**
 - `ChildToolFactory` — [child-tools.ts](../../../../src/pi/subagents/child-tools.ts)
 - `ChildToolFactoryRegistry` — [child-tools.ts:19](../../../../src/pi/subagents/child-tools.ts#L19)
-- `CHILD_SAFE_TOOLS`, `READ_ONLY_CHILD_TOOLS` — [pi-child-session.ts:23](../../../../src/pi/subagents/pi-child-session.ts#L23)
+- `CHILD_SAFE_TOOLS`, `READ_ONLY_CHILD_TOOLS`, `CHILD_BASH_TOOL` — [pi-child-session.ts:22](../../../../src/pi/subagents/pi-child-session.ts#L22)
+- `registerLspChildTools(registry, {enabled})`, `CHILD_SAFE_LSP_TOOLS` — [lsp/child-tools.ts](../../../../src/pi/lsp/child-tools.ts)
 
 **Types — completion:**
 - `createCompleteSubagentTool(options)` — [completion-tool.ts:14](../../../../src/pi/subagents/completion-tool.ts#L14)
@@ -112,12 +115,15 @@ Plus `RemoteAgentConfiguration` [extensibility-policy.ts:1](../../../../src/pi/s
 
 **Used by:**
 - [agent-registry-and-resolution](../agent-registry-and-resolution/agent-registry-and-resolution.md) — model refs / policy / child-tool factories.
+- [lsp-tools](../../11-auxiliary-systems/lsp-tools/lsp-tools.md) — `ChildToolFactoryRegistry` receives the child-safe LSP surface.
 - [subagent-manager-and-lifecycle](../subagent-manager-and-lifecycle/subagent-manager-and-lifecycle.md) — child tool factories, model refs, gating.
 
 ## See also
 
 - **Rule — do not lift the deferred decisions without updating the policy file.** Removing `nestedDelegation: 'disabled-max-depth-one'` requires changes elsewhere (`resolveTools` hard-deny, gating). Update all three together.
-- **Rule — child tools default to a safe subset.** `CHILD_SAFE_TOOLS` is the maximum reach for a general child; `READ_ONLY_CHILD_TOOLS` is the safer default. Do not expand the list without deliberation.
+- **Rule — child tools default to a safe subset.** `CHILD_SAFE_TOOLS` plus the registry is the reach of a general child; `READ_ONLY_CHILD_TOOLS` is the safer default. Do not expand the list without deliberation. Read-only query tools (the LSP surface) enter through the registry; anything that writes or executes needs its own gate.
+- **Rule — `bash` for children is a separate, host-level grant.** It is not part of `CHILD_SAFE_TOOLS` and defaults off. Worktree isolation bounds a child's *edits*, not what a shell can reach, so shell access hands a child the parent's own machine access minus the parent's review step. Keep it behind `pi-code.subagents.allowChildBash`; do not promote it into the baseline constant.
+- **Pattern — child-safe capability is opt-in per tool, not inherited from the parent.** A tool being registered and active in the parent grants a child nothing; it must also appear in the baseline, the registry, or an explicit grant. Every LSP tool a child may hold is listed by name in `CHILD_SAFE_LSP_TOOLS` rather than derived from whatever the LSP extension registers, so a future write-capable LSP tool cannot reach children by merely existing.
 - **Pattern — the capability gate is the launcher toggle's back end.** UI toggles → `setEnabled` → `composeDisabledTools` at session-init. No other wire path.
 - **Pattern — model refs are two-shape.** Accept either the string or the object; canonicalize to `{provider, id}` internally. UI code passes strings; programmatic API passes objects.
 - **Pitfall — MCP tool names use hyphens; child-tools registry uses underscores.** `registerChildSafeMcpTool` normalizes. Direct registration without normalization produces a name that fails the validator.

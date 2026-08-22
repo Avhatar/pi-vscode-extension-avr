@@ -43,6 +43,8 @@ Two addressing modes on every tool:
 - **Explicit**: `file`, `line` (1-based), `column` (1-based).
 - **Symbol**: `symbol` name only; resolved via workspace symbol search with ambiguity fallback.
 
+Child surface [child-tools.ts](../../../../src/pi/lsp/child-tools.ts) — `registerLspChildTools(registry, { enabled })` contributes all nine tools to the subagent `ChildToolFactoryRegistry`, so isolated children can query the language server instead of reconstructing the same answer from `grep` and `read`. The definitions are collected by running `createLspExtension({enabled: true})` against a capture-only `registerTool` shim: `ToolDefinition` is the same shape a child session accepts as `customTools`, so parent and child hold identical tools with no second copy of the nine descriptions. `CHILD_SAFE_LSP_TOOLS` lists the permitted names explicitly. Registration is wired in [extension.ts](../../../../src/extension.ts) behind the same `pi-code.lsp.enabled` gate as the parent tools, and is disposed and re-created when that setting changes.
+
 ## Keywords
 
 **Types — public:**
@@ -89,6 +91,7 @@ Two addressing modes on every tool:
 - [Part V § session-lifecycle](../../05-pi-sdk-integration/session-lifecycle/session-lifecycle.md) — the extension factory is one of the resource-loader factories.
 - [Part I § configuration-and-secrets](../../01-extension-host-substrate/configuration-and-secrets/configuration-and-secrets.md) — `pi-code.lsp.enabled` setting.
 - [Part IV § vscode-session-platform](../../04-platform-adapters/vscode-session-platform/vscode-session-platform.md) — `SessionExtensionPort.createLspExtension` calls this factory.
+- [Part IX § subagent-extensibility](../../09-subagents/subagent-extensibility/subagent-extensibility.md) — `ChildToolFactoryRegistry` receives the child-safe LSP surface.
 ## See also
 
 - **Rule — 1-based coordinates on the agent side.** LSP internally is 0-based; the boundary conversion is `helpers.resolveExplicitPosition`. Do not slip 0-based coordinates into tool inputs or outputs.
@@ -97,4 +100,5 @@ Two addressing modes on every tool:
 - **Pattern — `no-provider` is distinct from empty results.** `detectProviderStatus` checks whether a language extension is actually installed; agents can distinguish "no references found" from "language server missing" and give a useful message.
 - **Pitfall — `includeAccessKind` is N+1.** `executeDocumentHighlights` is one call per file grouping. On large ref sets (100+ files), this dominates. Do not enable by default; document the cost in the tool schema.
 - **Pitfall — call hierarchy is two-step.** `prepareCallHierarchy` must succeed before the `provide*Calls` call; a symbol that doesn't produce a call hierarchy item returns an empty list, not an error.
-- **Pattern — the tool list is stable.** Adding a tenth tool means a new file under [src/pi/lsp/tools/](../../../../src/pi/lsp/tools/), a `register*Tool` factory, and a mention in the setting description.
+- **Pattern — the tool list is stable.** Adding a tenth tool means a new file under [src/pi/lsp/tools/](../../../../src/pi/lsp/tools/), a `register*Tool` factory, and a mention in the setting description. If children should hold it too, add the name to `CHILD_SAFE_LSP_TOOLS` — the child grant is an explicit allowlist, not "whatever the factory registers".
+- **Pitfall — child LSP answers come from the workspace, not the child's cwd.** These tools resolve against the VS Code workspace, so a worktree-isolated child sees the parent workspace's symbol graph rather than its own uncommitted edits. That is the right trade for reconnaissance, but a child cannot use them to verify changes it just made.

@@ -214,6 +214,11 @@
           "default": true,
           "description": "Allow the parent orchestrator to select an exact child provider/model in a subagent tool call."
         },
+        "pi-code.subagents.allowChildBash": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Grant child agents the `bash` tool. Off by default: worktree isolation bounds a child's file edits, not what a shell can reach, so this gives children the same machine access the parent has without the parent's review step. Turning it on lets read-only children answer with one `git diff` or `rg` instead of many read/grep turns."
+        },
         "pi-code.subagents.defaultMaxTurns": {
           "type": "number",
           "default": 60,

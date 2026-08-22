@@ -2,7 +2,12 @@ import type { AgentToolUpdateCallback } from '@earendil-works/pi-agent-core';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import type { AgentDefinition, ModelRef, SubagentInvocation, SubagentRunStatus } from './types';
-import type { SubagentExecutionResult } from './runtime';
+import { SubagentRunError, type SubagentExecutionResult } from './runtime';
+
+/** Upper bound for the salvaged tail appended to a failure message. Large
+ *  enough to carry a real partial answer, small enough that a stranded child
+ *  cannot flood the parent context with a failed run's transcript. */
+const PARTIAL_RESULT_LIMIT = 8_000;
 
 export const SUBAGENT_TOOL_NAME = 'subagent';
 
@@ -29,7 +34,13 @@ export const SubagentParamsSchema = Type.Object({
     model: Type.Optional(ModelSchema),
     thinkingLevel: Type.Optional(Type.String()),
     tools: Type.Optional(Type.Array(Type.String(), { description: 'Optional narrowing allowlist of child-safe tools.' })),
-    maxTurns: Type.Optional(Type.Integer({ minimum: 1 })),
+    maxTurns: Type.Optional(Type.Integer({
+        minimum: 1,
+        description: 'Turn budget for the child, where one turn is one model response together with every tool call it makes. '
+            + 'A single file read, grep, or edit costs a turn, so a routine implementation slice spends dozens. '
+            + 'Omit this to use the configured default; only set it to raise the ceiling for unusually long work. '
+            + 'A named agent definition\'s own budget is treated as a floor and is never lowered by this field.',
+    })),
     timeoutMinutes: Type.Optional(Type.Integer({ minimum: 1 })),
     background: Type.Optional(Type.Boolean({ description: 'Return a persistent agentId immediately and notify the parent session when the child settles.' })),
     isolation: Type.Optional(Type.Union([
@@ -111,6 +122,7 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
             'Keep fan-out to the minimum useful number, normally two or three children, and do not delegate work whose coordination cost exceeds doing it directly.',
             'Give each child a self-contained outcome, relevant paths, invariants, acceptance criteria, expected report, and a narrow child-safe tool allowlist when practical; the child does not see the parent conversation.',
             'Use exact `provider/id` model references, or `model: "inherit"` for an explicit parent-model clone. An unavailable explicit model fails and never silently falls back.',
+            'Leave `maxTurns` unset unless the work genuinely needs more than the configured default. One turn is one model response including its tool calls, so a child that reads six files and edits two has already spent eight; budgets sized like conversation turns strand the child mid-task.',
             'Use worktree isolation for parallel or background writers. Do not send overlapping write tasks to siblings unless the parent is prepared to resolve their conflicts.',
             'Use lifecycle actions only with an agentId returned by an earlier call; stale IDs fail explicitly.',
             'Call `review` to retrieve and inspect the child\'s isolated raw diff before requesting `apply`.',
@@ -135,15 +147,16 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
             if (action !== 'spawn') {
                 if (!params.agentId?.trim()) throw new Error(`Subagent action ${action} requires agentId.`);
                 if (!services.control) throw new Error('Subagent lifecycle controls are unavailable.');
-                const controlled = await services.control(action, params, signal, publish);
+                const controlled = await withSalvagedPartial(() => services.control!(action, params, signal, publish));
                 return {
                     content: [{ type: 'text', text: controlled.text }],
                     details: controlled.details,
                 };
             }
-            if (!params.task?.trim()) throw new Error('Subagent spawn requires a non-empty task.');
-            const result = await services.execute({
-                task: params.task,
+            const task = params.task;
+            if (!task?.trim()) throw new Error('Subagent spawn requires a non-empty task.');
+            const result = await withSalvagedPartial(() => services.execute({
+                task,
                 ...(params.name ? { name: params.name } : {}),
                 ...(params.agent ? { agent: params.agent } : {}),
                 ...(params.instructions ? { instructions: params.instructions } : {}),
@@ -154,7 +167,7 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
                 ...(params.timeoutMinutes !== undefined ? { timeoutMinutes: params.timeoutMinutes } : {}),
                 ...(params.background !== undefined ? { background: params.background } : {}),
                 ...(params.isolation ? { isolation: params.isolation } : {}),
-            }, signal, publish);
+            }, signal, publish));
             if (result.background) {
                 const details: SubagentToolDetails = {
                     agentId: result.agentId,
@@ -185,6 +198,35 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
             };
         },
     });
+}
+
+/**
+ * Keeps a stranded child's work reachable by the parent.
+ *
+ * A run that hits its turn budget or timeout is a real failure, so the status
+ * stays `failed` — but the child's last message is often most of the delegated
+ * answer. Throwing the bare reason forces the parent to re-spawn the whole task
+ * from scratch, which is the expensive part of a failure. Appending the salvage
+ * lets the parent finish the work, or at least resume from where the child
+ * stopped, without paying for the run twice.
+ */
+async function withSalvagedPartial<Result>(operation: () => Promise<Result>): Promise<Result> {
+    try {
+        return await operation();
+    } catch (error) {
+        if (!(error instanceof SubagentRunError)) throw error;
+        const partial = error.partialResult?.trim();
+        if (!partial) throw error;
+        const bounded = partial.length > PARTIAL_RESULT_LIMIT
+            ? `${partial.slice(0, PARTIAL_RESULT_LIMIT)}\n… salvaged output truncated …`
+            : partial;
+        throw new Error(
+            `${error.message}\n\n`
+            + 'The child produced this before it stopped. It is unverified and may be incomplete, '
+            + 'but it is real work — use it instead of re-running the same task from scratch:\n'
+            + bounded,
+        );
+    }
 }
 
 function publishUpdate(

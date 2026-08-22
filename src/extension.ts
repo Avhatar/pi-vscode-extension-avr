@@ -33,6 +33,7 @@ import { SubagentCoordinator } from './pi/subagents/coordinator';
 import { SubagentRunStore } from './pi/subagents/persistence';
 import { WriteIsolationManager } from './pi/subagents/write-isolation';
 import { ChildToolFactoryRegistry } from './pi/subagents/child-tools';
+import { registerLspChildTools } from './pi/lsp/child-tools';
 import { WorkspaceFileMentions } from './workspace/file-mentions';
 import { PerfLoggerImpl } from './core/perf/perf-logger-impl';
 import { NOOP_PERF_LOGGER, type PerfLogger } from './core/ports/perf-logger';
@@ -77,6 +78,19 @@ export async function activate(context: vscode.ExtensionContext) {
             (message) => outputChannel.appendLine(message),
         );
         const childToolFactories = new ChildToolFactoryRegistry();
+        // Child-safe LSP tools follow the same `pi-code.lsp.enabled` gate as the
+        // parent-side tools, and must be revocable while the window stays open.
+        const isLspEnabled = (): boolean => vscode.workspace
+            .getConfiguration('pi-code').get<boolean>('lsp.enabled', false);
+        let lspChildTools = registerLspChildTools(childToolFactories, { enabled: isLspEnabled() });
+        context.subscriptions.push(
+            vscode.workspace.onDidChangeConfiguration((event) => {
+                if (!event.affectsConfiguration('pi-code.lsp.enabled')) return;
+                lspChildTools.dispose();
+                lspChildTools = registerLspChildTools(childToolFactories, { enabled: isLspEnabled() });
+            }),
+            { dispose: () => lspChildTools.dispose() },
+        );
         const externalUrls = new ExternalUrlService(new VsCodeExternalUrlPort());
         const sessionLogger = new VsCodeOutputChannelLogger(outputChannel);
         const sessionSecrets = new VsCodeSecretStore(context.secrets);

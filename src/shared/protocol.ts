@@ -75,6 +75,7 @@ export interface SettingsData {
     subagentsDefaultModel: string;
     subagentsAllowedModels: string[];
     subagentsAllowInvocationModelOverride: boolean;
+    subagentsAllowChildBash: boolean;
     subagentsDefaultMaxTurns: number;
     subagentsDefaultTimeoutMinutes: number;
     subagentsMaxConcurrentGlobal: number;

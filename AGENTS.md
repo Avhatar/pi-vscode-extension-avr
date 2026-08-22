@@ -239,7 +239,8 @@ Prefer delegating at least one suitable implementation slice during non-trivial 
 ### Execution and integration
 
 - Use foreground execution when the parent needs the result before continuing. Use background execution only for genuinely independent work.
-- Narrow read-only investigations to `read`, `grep`, `find`, and `ls`.
+- Narrow read-only investigations to `read`, `grep`, `find`, and `ls`, plus the read-only Language Server query tools when they are enabled.
+- Leave the child turn budget alone unless the work genuinely needs more than the default. One turn is one child response including its tool calls, so budgets sized like conversation turns strand the child mid-task. An agent definition's own `maxTurns` is a floor a per-call value cannot lower.
 - Write-capable background runs require `isolation: worktree`. Worktree isolation is also the preferred default for substantial child edits. Parallel/background writes must be rejected in non-Git workspaces until an equivalent isolation strategy exists.
 - The parent owns all child lifecycle decisions. Inspect results, steer or stop when needed, review isolated diffs, apply accepted patches, run verification, and clean preserved worktrees without asking the user to manage these steps.
 - Never apply a worktree patch before reviewing it. Never treat a child's claim that tests pass as evidence; children do not have `bash`, and the parent must run the relevant commands.

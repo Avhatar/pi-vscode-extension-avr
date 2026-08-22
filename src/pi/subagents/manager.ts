@@ -16,6 +16,18 @@ interface ActiveRun {
     controller: AbortController;
     child?: ChildSessionHandle;
     reason?: SubagentTerminationReason;
+    /** Set once the child has been asked to finalize before its budget runs out. */
+    windDownSent?: boolean;
+}
+
+/** Steering text injected one turn before the budget is spent. The child cannot
+ *  see its own turn accounting, so without this it is stopped mid-tool-call and
+ *  its work is lost. One turn is enough to call `complete_subagent`. */
+function windDownMessage(maxTurns: number): string {
+    return 'You have one turn left of your '
+        + `${maxTurns}-turn budget. Stop investigating and call complete_subagent now, by itself, `
+        + 'with everything you have established so far. If the task is unfinished, say so in the result '
+        + 'and describe precisely what remains — a partial result is far more useful to the parent than being cut off.';
 }
 
 export interface SubagentManagerOptions {
@@ -363,6 +375,20 @@ export class SubagentManager {
                                 });
                                 if (
                                     !child?.getCompletion()
+                                    && !active.windDownSent
+                                    && spec.maxTurns - run.turnCount === 1
+                                    && event.hasToolCalls !== false
+                                    && !signal.aborted
+                                ) {
+                                    active.windDownSent = true;
+                                    this.log(`[subagent wind-down] agentId=${run.agentId} turn=${run.turnCount}/${spec.maxTurns}`);
+                                    this.updateRun(run, { activity: 'One turn left; asked the child to finalize' });
+                                    void child?.steer(windDownMessage(spec.maxTurns)).catch((error) => this.log(
+                                        `[subagent wind-down failed] agentId=${run.agentId} error=${String(error)}`,
+                                    ));
+                                }
+                                if (
+                                    !child?.getCompletion()
                                     && run.turnCount >= spec.maxTurns
                                     && event.hasToolCalls !== false
                                     && !signal.aborted
@@ -433,8 +459,12 @@ export class SubagentManager {
                     }, spec.timeoutMinutes * 60_000);
 
                     await child.prompt(spec.task);
-                    if (signal.aborted) throw this.abortFailure(active, run);
+                    // Read the completion before honouring the abort: a child that
+                    // called complete_subagent on its final turn has already
+                    // delivered, and the wind-down/budget abort can land in the same
+                    // tick. Failing that run would discard a finished result.
                     let completion = child.getCompletion();
+                    if (!completion && signal.aborted) throw this.abortFailure(active, run);
                     let recoveredPlainText = false;
                     if (!completion) {
                         if (run.turnCount >= spec.maxTurns) {
@@ -455,8 +485,8 @@ export class SubagentManager {
                                 'Your previous response did not call complete_subagent. ' +
                                 'Call complete_subagent now, by itself, with the complete final result. Do not call any other tool.',
                             );
-                            if (signal.aborted) throw this.abortFailure(active, run);
                             completion = child.getCompletion();
+                            if (!completion && signal.aborted) throw this.abortFailure(active, run);
                         }
                     }
                     if (!completion?.result.trim()) {

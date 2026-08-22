@@ -24,6 +24,14 @@ export const CHILD_SAFE_TOOLS = ['read', 'grep', 'find', 'ls', 'edit', 'write'] 
 export const READ_ONLY_CHILD_TOOLS = CHILD_SAFE_TOOLS.slice(0, 4);
 const CHILD_SAFE_TOOL_SET = new Set<string>(CHILD_SAFE_TOOLS);
 
+/**
+ * Shell access for children is a separate capability grant, not part of the
+ * child-safe baseline. Worktree isolation bounds a child's *edits*, not what a
+ * shell can reach, so `bash` in a child is effectively the parent's own trust
+ * level minus the parent's review step. It is opt-in per host and defaults off.
+ */
+export const CHILD_BASH_TOOL = 'bash';
+
 export interface PiChildSessionFactoryOptions {
     cwd: string;
     workspaceTrusted: boolean;
@@ -33,6 +41,8 @@ export interface PiChildSessionFactoryOptions {
     writeIsolation?: WriteIsolationManager;
     childToolFactories?: ChildToolFactoryRegistry;
     sessionLocks?: SessionLockPort;
+    /** Grants children the `bash` tool. See {@link CHILD_BASH_TOOL}. */
+    allowBash?: boolean;
     log?: (message: string) => void;
 }
 
@@ -138,7 +148,9 @@ export class PiChildSessionFactory implements ChildSessionFactory {
         sessionLock?: SessionLockHandle,
     ): Promise<ChildSessionHandle> {
         const contributedToolNames = new Set(this.options.childToolFactories?.listNames() ?? []);
-        const unsafeTools = spec.tools.filter((tool) => !CHILD_SAFE_TOOL_SET.has(tool) && !contributedToolNames.has(tool));
+        const unsafeTools = spec.tools.filter((tool) => !CHILD_SAFE_TOOL_SET.has(tool)
+            && !contributedToolNames.has(tool)
+            && !(this.options.allowBash && tool === CHILD_BASH_TOOL));
         if (unsafeTools.length > 0) {
             throw new Error(`Unsupported child tools: ${unsafeTools.join(', ')}.`);
         }
@@ -356,6 +368,9 @@ function buildChildSystemInstructions(spec: ResolvedAgentSpec): string {
         spec.tools.some((tool) => tool === 'edit' || tool === 'write')
             ? `Write access is enabled with ${spec.isolation} isolation. Modify only files required by the delegated task.`
             : 'This child is read-only. Do not attempt to modify files or repository state.',
+        `You have a budget of ${spec.maxTurns} turns. One turn is one of your responses together with every tool call it `
+        + 'makes, so each file you read or edit spends a turn. Plan the work to fit, and call complete_subagent before the '
+        + 'budget runs out — a partial result you deliver yourself is far more useful than being stopped mid-task.',
         'When finished, call complete_subagent exactly once and by itself. Put the complete parent-facing answer in result.',
         spec.instructions ? `\nSpecialized instructions:\n${spec.instructions}` : '',
         '</subagent-instructions>',

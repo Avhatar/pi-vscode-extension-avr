@@ -119,7 +119,7 @@ export type ModelResolutionSource =
     | 'parent';
 
 export interface ResolutionDiagnostic {
-    code: 'default-model-skipped' | 'tool-unavailable' | 'limit-clamped';
+    code: 'default-model-skipped' | 'tool-unavailable' | 'limit-clamped' | 'limit-raised';
     message: string;
 }
 

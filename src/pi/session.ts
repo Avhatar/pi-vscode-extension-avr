@@ -46,7 +46,7 @@ import { createToolSelectionGuard } from './tool-selection-guard';
 import { isContextUsageEstimated } from './context-usage';
 import type { SubagentCoordinator } from './subagents/coordinator';
 import { SubagentManager } from './subagents/manager';
-import { PiChildSessionFactory, CHILD_SAFE_TOOLS } from './subagents/pi-child-session';
+import { PiChildSessionFactory, CHILD_BASH_TOOL, CHILD_SAFE_TOOLS } from './subagents/pi-child-session';
 import { PiSessionRuntime, type PiSessionRuntimeState } from './session-runtime';
 import { AgentRegistry } from './subagents/registry';
 import { resolveAgentSpec } from './subagents/resolver';
@@ -601,10 +601,7 @@ export class PiSessionManager {
         } else if (claudeCompatMode === 'off') {
             this._outputChannel.appendLine('Claude compatibility disabled: pi-code.claudeCompat.mode=off');
         }
-        const availableChildTools = [
-            ...CHILD_SAFE_TOOLS,
-            ...(this._childToolFactories?.listNames() ?? []),
-        ];
+        const availableChildTools = this._childSafeToolNames();
         const claudeAgents = claudeInfrastructure.active
             ? await this._perf.time('session.buildResourceLoader.indexClaudeAgents', () => indexClaudeAgents({
                 cwd,
@@ -1203,6 +1200,23 @@ export class PiSessionManager {
         this._subagentManager?.setParentTabId(tabId);
     }
 
+    /**
+     * Every tool name a child may hold: the built-in child-safe baseline, the
+     * host-contributed factories (child-safe LSP tools and classified MCP
+     * tools), and `bash` only when the host has explicitly granted it.
+     */
+    private _childSafeToolNames(): string[] {
+        return [
+            ...CHILD_SAFE_TOOLS,
+            ...(this._allowChildBash() ? [CHILD_BASH_TOOL] : []),
+            ...(this._childToolFactories?.listNames() ?? []),
+        ];
+    }
+
+    private _allowChildBash(): boolean {
+        return this._ports.settings.get('subagents.allowChildBash', false);
+    }
+
     private async _executeSubagentInvocation(
         registry: AgentRegistry,
         invocation: SubagentInvocation,
@@ -1242,7 +1256,7 @@ export class PiSessionManager {
                 ...session.getActiveToolNames(),
                 ...(this._childToolFactories?.listNames() ?? []),
             ],
-            childSafeTools: [...CHILD_SAFE_TOOLS, ...(this._childToolFactories?.listNames() ?? [])],
+            childSafeTools: this._childSafeToolNames(),
             nonChildSafeTools: ['subagent'],
             // No host ceiling for turns: whatever the user configures is honoured verbatim.
             defaultMaxTurns: this._ports.settings.get('subagents.defaultMaxTurns', 60),
@@ -1425,6 +1439,7 @@ export class PiSessionManager {
             ...(parentSessionPath ? { parentSessionPath } : {}),
             ...(this._writeIsolation ? { writeIsolation: this._writeIsolation } : {}),
             ...(this._childToolFactories ? { childToolFactories: this._childToolFactories } : {}),
+            allowBash: this._allowChildBash(),
             sessionLocks: this._ports.sessionLocks,
             log: (message) => this._outputChannel.appendLine(message),
         });

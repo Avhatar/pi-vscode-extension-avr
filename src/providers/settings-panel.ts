@@ -258,6 +258,7 @@ export class SettingsPanel {
             subagentsDefaultModel: config.get<string>('subagents.defaultModel', ''),
             subagentsAllowedModels: config.get<string[]>('subagents.allowedModels', []),
             subagentsAllowInvocationModelOverride: config.get<boolean>('subagents.allowInvocationModelOverride', true),
+            subagentsAllowChildBash: config.get<boolean>('subagents.allowChildBash', false),
             subagentsDefaultMaxTurns: config.get<number>('subagents.defaultMaxTurns', 60),
             subagentsDefaultTimeoutMinutes: config.get<number>('subagents.defaultTimeoutMinutes', 30),
             subagentsMaxConcurrentGlobal: config.get<number>('subagents.maxConcurrentGlobal', 4),
