@@ -217,13 +217,11 @@ Subagents are implementation hands owned by the parent agent. The user defines r
 - Use exact `provider/id` model references or explicit parent-model inheritance. Never silently fall back when a named definition or invocation selected an unavailable model.
 - Keep delegation depth at one: child agents never receive the `subagent` tool.
 
-### Current project agent
+### Current project agents
 
-| Agent | Use when | Do not use when | Canonical file |
-|---|---|---|---|
-| `deepseek-v4-implementer` | A non-trivial task has already been decomposed into one small, concrete implementation change with explicit target paths, constraints, and acceptance criteria. Good examples: a localized bug fix, one focused refactor, a test addition, protocol plumbing after the parent designed it, or a mechanical documentation/code update. | Architecture is undecided, requirements are ambiguous, the change is cross-cutting, security policy must be designed, or the task is so trivial that delegation costs more than doing it directly. | `.agents/agents/deepseek-v4-implementer.md` |
+This repository currently ships **no** project-scoped named-agent definitions in `.agents/agents/`. The parent therefore routes to user-level definitions, adapted harness resources, bundled package agents, or synthesizes an ad-hoc role, following the discovery rules above.
 
-When more named agents are added, extend this table with a precise routing boundary. Keep the agent file's description and this table consistent.
+When a project-scoped agent is added, document it here in a table with columns `Agent | Use when | Do not use when | Canonical file`, stating a precise routing boundary. Keep the agent file's `description` and that table consistent.
 
 ### Delegation contract
 
