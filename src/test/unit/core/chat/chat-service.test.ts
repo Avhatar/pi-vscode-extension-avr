@@ -386,6 +386,223 @@ describe('portable ChatService event and state projection', () => {
         expect(tab.toolDurations.get('c')).toBe(30_000);
     });
 
+    it('measures non-tool turn time as a union of intervals, not a sum', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4008, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        // Two overlapping tool calls, as a single assistant message runs them:
+        // busy from 3000 to 9000 is 6s of wall clock, while the two 4s
+        // durations sum to 8s. Subtracting the sum would understate the wait.
+        clock = 3000;
+        service.reduceEvent(tab, { type: 'tool_execution_start', toolCallId: 'a', toolName: 'bash' });
+        clock = 5000;
+        service.reduceEvent(tab, { type: 'tool_execution_start', toolCallId: 'b', toolName: 'bash' });
+        clock = 7000;
+        service.reduceEvent(tab, { type: 'tool_execution_end', toolCallId: 'a', toolName: 'bash' });
+        clock = 9000;
+        service.reduceEvent(tab, { type: 'tool_execution_end', toolCallId: 'b', toolName: 'bash' });
+
+        clock = 21_000;
+        const projection = service.beginAgentEnd(tab, 'completed');
+        service.completeAgentEnd(tab, projection);
+
+        expect(projection.turnDurationMs).toBe(20_000);
+        expect(tab.messageMeta.get('4008')?.toolStats)
+            .toEqual([{ name: 'Bash', calls: 2, durationMs: 8000 }]);
+        // 20s turn − 6s busy, not 20s − 8s.
+        expect(tab.messageMeta.get('4008')?.modelWaitMs).toBe(14_000);
+    });
+
+    it('closes an abandoned tool interval at the turn boundary', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4009, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        clock = 5000;
+        service.reduceEvent(tab, { type: 'tool_execution_start', toolCallId: 'stuck', toolName: 'bash' });
+        // No matching end — the SDK abandoned the call.
+        clock = 15_000;
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'stopped'));
+
+        // Busy 5000→15000 is 10s of the 14s turn, so 4s of model wait remains
+        // instead of the whole turn being credited to waiting.
+        expect(tab.messageMeta.get('4009')?.modelWaitMs).toBe(4000);
+    });
+
+    it('takes in-turn compaction out of the model residual', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4010, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        clock = 5000;
+        service.reduceEvent(tab, { type: 'compaction_start' });
+        clock = 25_000;
+        service.reduceEvent(tab, { type: 'compaction_end' });
+        clock = 41_000;
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        const meta = tab.messageMeta.get('4010');
+        expect(meta?.compactionMs).toBe(20_000);
+        // 40s turn − 20s compaction, so compaction is reported once, not twice.
+        expect(meta?.modelWaitMs).toBe(20_000);
+    });
+
+    it('charges pre-prompt compaction to the next turn without shrinking its residual', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4011, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        // The overflow check runs before the prompt is sent, so no turn is open.
+        service.reduceEvent(tab, { type: 'compaction_start' });
+        clock = 9000;
+        service.reduceEvent(tab, { type: 'compaction_end' });
+        expect(tab.pendingCompactionMs).toBe(8000);
+
+        clock = 10_000;
+        service.reduceEvent(tab, { type: 'agent_start' });
+        clock = 20_000;
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        const meta = tab.messageMeta.get('4011');
+        expect(meta?.compactionMs).toBe(8000);
+        // The whole 10s turn is still residual: the compaction happened before it.
+        expect(meta?.modelWaitMs).toBe(10_000);
+        expect(tab.pendingCompactionMs).toBe(0);
+    });
+
+    it('reports the time delegated runs waited for a concurrency slot', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4012, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        clock = 30_000;
+        service.syncSubagentRuns(tab, [
+            {
+                agentId: 'a1', name: 'Explorer', status: 'completed',
+                queuedAt: 1000, startedAt: 1000, finishedAt: 11_000, queueWaitMs: 0,
+            },
+            // Waited for the first to release its slot; queueWaitMs is authoritative.
+            {
+                agentId: 'a2', name: 'Explorer', status: 'completed',
+                queuedAt: 1000, startedAt: 11_000, finishedAt: 20_000, queueWaitMs: 10_000,
+            },
+            // No explicit metric — derived from the queued/started pair.
+            {
+                agentId: 'a3', name: 'Auditor', status: 'failed',
+                queuedAt: 1000, startedAt: 4000, finishedAt: 5000,
+            },
+        ]);
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        expect(tab.messageMeta.get('4012')?.subagentStats?.map((entry) => ({
+            agentId: entry.agentId,
+            durationMs: entry.durationMs,
+            queueWaitMs: entry.queueWaitMs,
+        }))).toEqual([
+            { agentId: 'a1', durationMs: 10_000, queueWaitMs: 0 },
+            { agentId: 'a2', durationMs: 9000, queueWaitMs: 10_000 },
+            { agentId: 'a3', durationMs: 1000, queueWaitMs: 3000 },
+        ]);
+    });
+
+    it('folds child tool time into a combined breakdown without the delegation wrapper', () => {
+        let clock = 0;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4006, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        clock = 1000;
+        service.reduceEvent(tab, { type: 'agent_start' });
+
+        // The parent greps once, then delegates; the child greps twice.
+        service.reduceEvent(tab, {
+            type: 'tool_execution_start', toolCallId: 'p1', toolName: 'grep',
+        });
+        clock = 3000;
+        service.reduceEvent(tab, {
+            type: 'tool_execution_end', toolCallId: 'p1', toolName: 'grep',
+        });
+        service.reduceEvent(tab, {
+            type: 'tool_execution_start', toolCallId: 'p2', toolName: 'subagent',
+        });
+        for (const [callId, endClock] of [['a:c1', 8000], ['a:c2', 20_000]] as const) {
+            service.recordSubagentToolEvent(tab, {
+                type: 'tool_execution_start', agentId: 'a', toolCallId: callId, toolName: 'grep',
+            });
+            clock = endClock;
+            service.recordSubagentToolEvent(tab, {
+                type: 'tool_execution_end', agentId: 'a', toolCallId: callId, toolName: 'grep',
+            });
+        }
+        clock = 31_000;
+        service.reduceEvent(tab, {
+            type: 'tool_execution_end', toolCallId: 'p2', toolName: 'subagent',
+        });
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        const meta = tab.messageMeta.get('4006');
+        // Only orchestrator tools time — own calls, delegation wrapper included.
+        expect(meta?.toolStats).toEqual([
+            { name: 'Subagent', calls: 1, durationMs: 28_000 },
+            { name: 'Grep', calls: 1, durationMs: 2000 },
+        ]);
+        // Only subagents tools time — the children's calls on their own.
+        expect(meta?.childToolStats).toEqual([
+            { name: 'Grep', calls: 2, durationMs: 17_000 },
+        ]);
+        // Total — the child greps merge into the parent's Grep row, and the 28s
+        // wrapper is gone so its seconds are not counted twice.
+        expect(meta?.combinedToolStats).toEqual([
+            { name: 'Grep', calls: 3, durationMs: 19_000 },
+        ]);
+    });
+
+    it('omits the child and combined breakdowns when no child tool ran', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4007, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.reduceEvent(tab, {
+            type: 'tool_execution_start', toolCallId: 'p1', toolName: 'grep',
+        });
+        clock = 3000;
+        service.reduceEvent(tab, {
+            type: 'tool_execution_end', toolCallId: 'p1', toolName: 'grep',
+        });
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        const meta = tab.messageMeta.get('4007');
+        expect(meta?.toolStats).toEqual([{ name: 'Grep', calls: 1, durationMs: 2000 }]);
+        expect(meta?.childToolStats).toBeUndefined();
+        expect(meta?.combinedToolStats).toBeUndefined();
+    });
+
     it('accounts delegated runs against the spawning turn, failures included', () => {
         let clock = 0;
         const service = new ChatService({ now: () => clock });
@@ -422,6 +639,7 @@ describe('portable ChatService event and state projection', () => {
                 name: 'Explorer',
                 status: 'completed',
                 durationMs: 20_000,
+                queueWaitMs: 0,
                 toolDurationMs: 5000,
                 toolCalls: 1,
             },
@@ -430,6 +648,7 @@ describe('portable ChatService event and state projection', () => {
                 name: 'Implementer',
                 status: 'failed',
                 durationMs: 3000,
+                queueWaitMs: 0,
                 toolDurationMs: 0,
                 toolCalls: 0,
             },

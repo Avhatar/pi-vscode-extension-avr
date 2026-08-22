@@ -9,6 +9,7 @@ import {
     parseSubagentStatEntries,
     parseToolStatEntries,
     sortSubagentStats,
+    subagentNonToolTime,
     totalSubagentStats,
     totalToolStats,
     type SubagentStatEntry,
@@ -5321,18 +5322,30 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
 function buildTurnToolStats(msg: any, index: number): HTMLElement | null {
     if ((msg?.role ?? '') !== 'assistant') return null;
     const toolEntries = parseToolStatEntries(msg._toolStats);
+    const childEntries = parseToolStatEntries(msg._childToolStats);
+    const combinedEntries = parseToolStatEntries(msg._combinedToolStats);
     const subagentEntries = sortSubagentStats(parseSubagentStatEntries(msg._subagentStats));
-    if (toolEntries.length === 0 && subagentEntries.length === 0) return null;
+    if (toolEntries.length === 0 && combinedEntries.length === 0 && subagentEntries.length === 0) {
+        return null;
+    }
 
     const toolTotal = totalToolStats(toolEntries);
+    const combinedTotal = totalToolStats(combinedEntries);
     const subagentTotal = totalSubagentStats(subagentEntries);
     const summaryParts: string[] = [];
     if (toolEntries.length > 0) {
-        summaryParts.push(`Tools ${formatToolDurationSeconds(toolTotal.durationMs)}`);
-        summaryParts.push(`${toolTotal.calls} call${toolTotal.calls === 1 ? '' : 's'}`);
+        const label = combinedEntries.length > 0 ? 'Orchestrator' : 'Tools';
+        summaryParts.push(`${label} ${formatToolDurationSeconds(toolTotal.durationMs)}`);
+        if (combinedEntries.length === 0) {
+            summaryParts.push(`${toolTotal.calls} call${toolTotal.calls === 1 ? '' : 's'}`);
+        }
+    }
+    if (combinedEntries.length > 0) {
+        summaryParts.push(
+            `with subagents ${formatToolDurationSeconds(combinedTotal.durationMs)}`,
+        );
     }
     if (subagentEntries.length > 0) {
-        summaryParts.push(`Subagents ${formatToolDurationSeconds(subagentTotal.durationMs)}`);
         summaryParts.push(`${subagentTotal.runs} run${subagentTotal.runs === 1 ? '' : 's'}`);
         if (subagentTotal.failed > 0) summaryParts.push(`${subagentTotal.failed} failed`);
         if (subagentTotal.cancelled > 0) summaryParts.push(`${subagentTotal.cancelled} cancelled`);
@@ -5350,7 +5363,132 @@ function buildTurnToolStats(msg: any, index: number): HTMLElement | null {
     details.appendChild(summary);
 
     const list = el('div', 'turn-tool-stats-list');
-    for (const entry of toolEntries) {
+    // A turn with no delegation shows one unlabelled breakdown, as it did before
+    // delegated accounting existed. Once anything was delegated, every section
+    // is named so no total can be mistaken for another.
+    const delegated = childEntries.length > 0 || subagentEntries.length > 0;
+    appendToolStatSection(
+        list,
+        delegated ? 'Only orchestrator tools time' : undefined,
+        toolEntries,
+        'Tools this agent called itself, including the subagent delegation calls',
+    );
+    const modelWaitMs = durationNumber(msg._modelWaitMs);
+    if (modelWaitMs > 0) {
+        appendDerivedStatRow(
+            list,
+            'Model await',
+            modelWaitMs,
+            'Turn time with no tool running and no compaction: provider round-trips'
+                + ' plus agent-loop overhead. Tool rows are per-tool sums and overlap'
+                + ' when a message runs its calls in parallel, so they need not add'
+                + ' up to the turn.',
+        );
+    }
+    const compactionMs = durationNumber(msg._compactionMs);
+    if (compactionMs > 0) {
+        appendDerivedStatRow(
+            list,
+            'Context compaction',
+            compactionMs,
+            'Summarizing the context into a shorter one — a provider request over'
+                + ' the whole context, so it is often the largest single cost in a'
+                + ' turn. Counted here whether it ran inside the turn or as the'
+                + ' overflow check before the prompt was sent.',
+        );
+    }
+    appendToolStatSection(
+        list,
+        'Only subagents tools time',
+        childEntries,
+        'Tools called inside delegated runs, summed per tool across every child',
+    );
+    appendToolStatSection(
+        list,
+        'Total with subagents tools time',
+        combinedEntries,
+        'Orchestrator and child tool time in one breakdown. The delegation calls'
+            + ' are left out here because their wall clock is the child runs,'
+            + ' already represented by the child rows.',
+    );
+    if (subagentEntries.length > 0) {
+        list.appendChild(buildToolStatHeading(
+            'Subagents total time and status',
+            'Wall clock and outcome per delegated run. This is the whole run, not'
+                + ' just its tools — see the model & startup row below.',
+        ));
+        for (const entry of subagentEntries) {
+            list.appendChild(buildSubagentStatName(entry));
+            const time = el('span', 'turn-tool-stats-time');
+            time.textContent = formatToolDurationSeconds(entry.durationMs);
+            list.appendChild(time);
+        }
+        // Reconcile the two subagent figures: run time minus tool time is
+        // provider round-trips and child session startup, so the reader is not
+        // left wondering which actions went unrecorded.
+        const nonToolMs = subagentNonToolTime(subagentEntries);
+        if (nonToolMs > 0) {
+            appendDerivedStatRow(
+                list,
+                'Model await & startup',
+                nonToolMs,
+                'Delegated wall clock that is not tool execution: provider'
+                    + ' round-trips and child session startup. Subagent tool time'
+                    + ' plus this equals the run totals above.',
+            );
+        }
+        if (subagentTotal.queueWaitMs > 0) {
+            appendDerivedStatRow(
+                list,
+                'Queued before start',
+                subagentTotal.queueWaitMs,
+                'Time delegated runs spent waiting for a concurrency slot. This is'
+                    + ' on top of the run totals above, which start when a run does.'
+                    + ' Raise the per-chat concurrency limit to shrink it.',
+            );
+        }
+    }
+    details.appendChild(list);
+    return details;
+}
+
+/**
+ * A row that is computed rather than measured per call — non-tool time. Styled
+ * quieter than the rows it explains so it is not read as a tool.
+ */
+function appendDerivedStatRow(
+    list: HTMLElement,
+    label: string,
+    durationMs: number,
+    title: string,
+): void {
+    const name = el('span', 'turn-tool-stats-name turn-tool-stats-derived');
+    const text = el('span', 'turn-tool-stats-label');
+    text.textContent = label;
+    name.appendChild(text);
+    name.title = title;
+    list.appendChild(name);
+    const time = el('span', 'turn-tool-stats-time turn-tool-stats-derived');
+    time.textContent = formatToolDurationSeconds(durationMs);
+    list.appendChild(time);
+}
+
+function buildToolStatHeading(text: string, title: string): HTMLElement {
+    const heading = el('span', 'turn-tool-stats-heading');
+    heading.textContent = text;
+    heading.title = title;
+    return heading;
+}
+
+function appendToolStatSection(
+    list: HTMLElement,
+    heading: string | undefined,
+    entries: readonly { name: string; calls: number; durationMs: number }[],
+    title: string,
+): void {
+    if (entries.length === 0) return;
+    if (heading) list.appendChild(buildToolStatHeading(heading, title));
+    for (const entry of entries) {
         const name = el('span', 'turn-tool-stats-name');
         name.title = entry.name;
         const label = el('span', 'turn-tool-stats-label');
@@ -5361,19 +5499,6 @@ function buildTurnToolStats(msg: any, index: number): HTMLElement | null {
         time.textContent = formatToolDurationSeconds(entry.durationMs);
         list.appendChild(time);
     }
-    if (subagentEntries.length > 0) {
-        const heading = el('span', 'turn-tool-stats-heading');
-        heading.textContent = 'Subagents';
-        list.appendChild(heading);
-        for (const entry of subagentEntries) {
-            list.appendChild(buildSubagentStatName(entry));
-            const time = el('span', 'turn-tool-stats-time');
-            time.textContent = formatToolDurationSeconds(entry.durationMs);
-            list.appendChild(time);
-        }
-    }
-    details.appendChild(list);
-    return details;
 }
 
 function buildSubagentStatName(entry: SubagentStatEntry): HTMLElement {
@@ -5391,7 +5516,10 @@ function buildSubagentStatName(entry: SubagentStatEntry): HTMLElement {
         ? `tools ${formatToolDurationSeconds(entry.toolDurationMs)}`
             + ` across ${entry.toolCalls} call${entry.toolCalls === 1 ? '' : 's'}`
         : 'no tool calls recorded';
-    name.title = `${entry.name} — ${statusLabel}, ${toolSummary}`;
+    const queueSummary = entry.queueWaitMs > 0
+        ? `, queued ${formatToolDurationSeconds(entry.queueWaitMs)} first`
+        : '';
+    name.title = `${entry.name} — ${statusLabel}, ${toolSummary}${queueSummary}`;
     return name;
 }
 

@@ -36,6 +36,8 @@ export interface SubagentStatEntry {
     status: SubagentStatStatus;
     /** Wall clock from run start to settle, or to the last observation. */
     durationMs: number;
+    /** Time spent waiting for a concurrency slot before the run started. */
+    queueWaitMs: number;
     /** Share of `durationMs` the child spent inside its own tool calls. */
     toolDurationMs: number;
     toolCalls: number;
@@ -91,6 +93,35 @@ export function toolStatEntries(source: ReadonlyMap<string, ToolStatEntry>): Too
     );
 }
 
+/** Sum several breakdowns into one, matching rows by display name. */
+export function mergeToolStats(
+    ...sources: ReadonlyArray<readonly ToolStatEntry[]>
+): ToolStatEntry[] {
+    const merged = new Map<string, ToolStatEntry>();
+    for (const source of sources) {
+        for (const entry of source) {
+            const previous = merged.get(entry.name);
+            merged.set(entry.name, previous
+                ? {
+                    name: entry.name,
+                    calls: previous.calls + entry.calls,
+                    durationMs: previous.durationMs + entry.durationMs,
+                }
+                : entry);
+        }
+    }
+    return toolStatEntries(merged);
+}
+
+/**
+ * The delegation wrapper is not a unit of work: its wall clock is the child's
+ * run, which the combined breakdown already represents through the child's own
+ * tool rows. Counting both would double-report the same seconds.
+ */
+export function isDelegationToolName(toolName: unknown): boolean {
+    return typeof toolName === 'string' && toolName.trim().toLowerCase() === 'subagent';
+}
+
 export function totalToolStats(
     entries: readonly ToolStatEntry[],
 ): { calls: number; durationMs: number } {
@@ -140,6 +171,7 @@ export function totalSubagentStats(entries: readonly SubagentStatEntry[]): {
     durationMs: number;
     toolDurationMs: number;
     toolCalls: number;
+    queueWaitMs: number;
     active: number;
     failed: number;
     cancelled: number;
@@ -147,6 +179,7 @@ export function totalSubagentStats(entries: readonly SubagentStatEntry[]): {
     let durationMs = 0;
     let toolDurationMs = 0;
     let toolCalls = 0;
+    let queueWaitMs = 0;
     let active = 0;
     let failed = 0;
     let cancelled = 0;
@@ -154,6 +187,7 @@ export function totalSubagentStats(entries: readonly SubagentStatEntry[]): {
         durationMs += entry.durationMs;
         toolDurationMs += entry.toolDurationMs;
         toolCalls += entry.toolCalls;
+        queueWaitMs += entry.queueWaitMs;
         if (entry.status === 'active') active++;
         if (entry.status === 'failed') failed++;
         if (entry.status === 'cancelled') cancelled++;
@@ -163,10 +197,24 @@ export function totalSubagentStats(entries: readonly SubagentStatEntry[]): {
         durationMs,
         toolDurationMs,
         toolCalls,
+        queueWaitMs,
         active,
         failed,
         cancelled,
     };
+}
+
+/**
+ * The part of delegated wall clock that is not tool execution: provider
+ * round-trips and child session startup.
+ *
+ * Without this the panel does not add up — a child that spends eight seconds
+ * thinking and forty milliseconds running `ls` looks like it did nothing, and
+ * the reader is left guessing whether some action went unrecorded.
+ */
+export function subagentNonToolTime(entries: readonly SubagentStatEntry[]): number {
+    const total = totalSubagentStats(entries);
+    return Math.max(0, total.durationMs - total.toolDurationMs);
 }
 
 /** Narrow an untrusted `_subagentStats` payload coming from serialized state. */
@@ -183,6 +231,7 @@ export function parseSubagentStatEntries(value: unknown): SubagentStatEntry[] {
             name: typeof record.name === 'string' && record.name ? record.name : agentId,
             status: subagentStatStatus(record.status),
             durationMs: nonNegative(record.durationMs),
+            queueWaitMs: nonNegative(record.queueWaitMs),
             toolDurationMs: nonNegative(record.toolDurationMs),
             toolCalls: Math.trunc(nonNegative(record.toolCalls)),
         });

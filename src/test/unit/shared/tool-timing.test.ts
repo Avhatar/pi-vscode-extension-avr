@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
     accumulateToolStat,
     formatToolDurationSeconds,
+    isDelegationToolName,
+    mergeToolStats,
     parseSubagentStatEntries,
     parseToolStatEntries,
     sortSubagentStats,
+    subagentNonToolTime,
     subagentStatStatus,
     toolStatDisplayName,
     toolStatEntries,
@@ -20,6 +23,7 @@ function subagentStat(overrides: Partial<SubagentStatEntry> = {}): SubagentStatE
         name: 'Explorer',
         status: 'completed',
         durationMs: 1000,
+        queueWaitMs: 0,
         toolDurationMs: 400,
         toolCalls: 2,
         ...overrides,
@@ -84,6 +88,36 @@ describe('tool timing aggregation', () => {
     });
 });
 
+describe('tool breakdown merging', () => {
+    it('sums matching rows across breakdowns and re-sorts the result', () => {
+        expect(mergeToolStats(
+            [{ name: 'Grep', calls: 1, durationMs: 2000 }],
+            [
+                { name: 'Grep', calls: 2, durationMs: 17_000 },
+                { name: 'Read', calls: 1, durationMs: 500 },
+            ],
+        )).toEqual([
+            { name: 'Grep', calls: 3, durationMs: 19_000 },
+            { name: 'Read', calls: 1, durationMs: 500 },
+        ]);
+    });
+
+    it('passes a single breakdown through and tolerates empty ones', () => {
+        const only = [{ name: 'Grep', calls: 1, durationMs: 2000 }];
+        expect(mergeToolStats(only, [])).toEqual(only);
+        expect(mergeToolStats()).toEqual([]);
+        expect(mergeToolStats([], [])).toEqual([]);
+    });
+
+    it('recognises only the delegation wrapper as delegation', () => {
+        expect(isDelegationToolName('subagent')).toBe(true);
+        expect(isDelegationToolName(' Subagent ')).toBe(true);
+        for (const name of ['grep', 'read', 'mcp', 'subagents', '', undefined, 42]) {
+            expect(isDelegationToolName(name)).toBe(false);
+        }
+    });
+});
+
 describe('tool duration formatting', () => {
     it('reports seconds, with one decimal below ten seconds', () => {
         expect(formatToolDurationSeconds(2400)).toBe('2.4s');
@@ -141,10 +175,30 @@ describe('delegated run statistics', () => {
             durationMs: 4700,
             toolDurationMs: 550,
             toolCalls: 4,
+            queueWaitMs: 0,
             active: 1,
             failed: 1,
             cancelled: 1,
         });
+    });
+
+    it('reports delegated wall clock that was not tool execution', () => {
+        // A child that thinks for eight seconds and runs `ls` for 40ms.
+        expect(subagentNonToolTime([
+            subagentStat({ durationMs: 8800, toolDurationMs: 40 }),
+        ])).toBe(8760);
+        expect(subagentNonToolTime([
+            subagentStat({ agentId: 'a1', durationMs: 8800, toolDurationMs: 40 }),
+            subagentStat({ agentId: 'a2', durationMs: 7900, toolDurationMs: 60 }),
+        ])).toBe(16_600);
+    });
+
+    it('never reports negative non-tool time when a duration snapshot lags', () => {
+        // A background run whose tool events landed after its last run sync.
+        expect(subagentNonToolTime([
+            subagentStat({ durationMs: 100, toolDurationMs: 5000 }),
+        ])).toBe(0);
+        expect(subagentNonToolTime([])).toBe(0);
     });
 
     it('repairs serialized rows and drops the ones without an agent id', () => {
@@ -159,6 +213,7 @@ describe('delegated run statistics', () => {
                 name: 'Explorer',
                 status: 'failed',
                 durationMs: 3000,
+                queueWaitMs: 0,
                 toolDurationMs: 1,
                 toolCalls: 1,
             },
@@ -167,6 +222,7 @@ describe('delegated run statistics', () => {
                 name: 'a2',
                 status: 'active',
                 durationMs: 0,
+                queueWaitMs: 0,
                 toolDurationMs: 0,
                 toolCalls: 0,
             },

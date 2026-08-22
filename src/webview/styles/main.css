@@ -1304,7 +1304,8 @@ body[data-mode="panel"] .tab-strip,
     white-space: nowrap;
 }
 
-/* Section label separating delegated runs from the agent's own tool calls. */
+/* Section label separating the four turn breakdowns. Wraps rather than clips:
+   in a narrow panel a truncated "TOTAL WITH SUBAGENTS…" would be unreadable. */
 .turn-tool-stats-heading {
     grid-column: 1 / -1;
     margin-top: 4px;
@@ -1312,6 +1313,11 @@ body[data-mode="panel"] .tab-strip,
     letter-spacing: 0.05em;
     font-size: 9px;
     opacity: 0.75;
+    overflow-wrap: anywhere;
+}
+
+.turn-tool-stats-heading:first-child {
+    margin-top: 0;
 }
 
 .turn-tool-stats-status {
@@ -1336,6 +1342,13 @@ body[data-mode="panel"] .tab-strip,
 .turn-tool-stats-time {
     text-align: right;
     font-variant-numeric: tabular-nums;
+}
+
+/* Derived reconciliation row — not a measured tool or run, so it reads quieter
+   than the rows it explains. */
+.turn-tool-stats-derived {
+    font-style: italic;
+    opacity: 0.7;
 }
 
 /* ── Thinking ── */

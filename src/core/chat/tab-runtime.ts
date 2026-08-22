@@ -25,6 +25,30 @@ export interface TabMessageMeta {
     totalTurnDurationMs?: number;
     toolStats?: ToolStatEntry[];
     /**
+     * Turn time in which no tool was running: provider round-trips plus
+     * agent-loop overhead. Derived from the turn duration minus the union of
+     * tool-execution intervals, so it stays correct under parallel tool calls.
+     */
+    modelWaitMs?: number;
+    /**
+     * Context compaction charged to this turn: a full summarization request over
+     * the whole context, so it is routinely the largest single cost in a turn
+     * and used to hide inside `modelWaitMs`.
+     */
+    compactionMs?: number;
+    /**
+     * What the turn's delegated runs called, grouped by tool rather than by
+     * child. Absent when no child tool ran.
+     */
+    childToolStats?: ToolStatEntry[];
+    /**
+     * Orchestrator and delegated work in one breakdown: own calls minus
+     * delegation wrappers, plus every tool the children ran. Absent when no
+     * child tool ran in the turn, because it would then just repeat
+     * `toolStats`.
+     */
+    combinedToolStats?: ToolStatEntry[];
+    /**
      * Live entries owned by `TabRuntime.subagentStats`. Held by reference on
      * purpose: a background child settles after its turn closed, and the turn
      * summary has to pick that up without rewriting history.
@@ -107,12 +131,39 @@ export class TabRuntime<
     readonly toolDurations: Map<string, number>;
     /** Per-tool totals for the turn currently running, keyed by display name. */
     readonly turnToolStats: Map<string, ToolStatEntry>;
+    /** Same, excluding delegation wrappers, so child work can replace them. */
+    readonly turnDirectToolStats: Map<string, ToolStatEntry>;
+    /**
+     * Wall clock in which at least one tool was executing this turn. Tracked as
+     * a union of intervals rather than a sum because Pi executes a message's
+     * tool calls in parallel by default, so summed durations exceed real time.
+     */
+    turnToolBusyMs: number;
+    /** Tools currently executing; the union above closes when this hits zero. */
+    turnToolInFlight: number;
+    /** Start of the currently open busy interval, or 0 when idle. */
+    turnToolBusySince: number;
+    /** Start of the compaction in progress, or 0 when none is running. */
+    compactionStartedAt: number;
+    /**
+     * Compaction that overlapped the running turn. Inside `turnDurationMs`, so
+     * it is subtracted from the non-tool residual.
+     */
+    turnCompactionMs: number;
+    /**
+     * Compaction that finished with no turn active — the pre-prompt overflow
+     * check. Charged to the next turn for display but **not** subtracted from
+     * its residual, because it happened outside that turn's measured span.
+     */
+    pendingCompactionMs: number;
+    /** Per-tool totals of everything the turn's delegated runs called. */
+    readonly turnChildToolStats: Map<string, ToolStatEntry>;
     /** Delegated runs observed in this tab, keyed by agent id. Mutated in place. */
     readonly subagentStats: Map<string, SubagentStatEntry>;
     /** Agent ids first observed during the turn currently running. */
     readonly turnSubagentIds: Set<string>;
-    /** Start time of in-flight child tool calls, keyed by namespaced call id. */
-    readonly pendingSubagentTools: Map<string, number>;
+    /** In-flight child tool calls, keyed by namespaced call id. */
+    readonly pendingSubagentTools: Map<string, { startTime: number; name: string }>;
     projectToolDefault?: ProjectToolSelectionDefault;
 
     private _subscriptions: Array<() => void> = [];
@@ -147,6 +198,14 @@ export class TabRuntime<
         this.pendingTools = new Map();
         this.toolDurations = new Map();
         this.turnToolStats = new Map();
+        this.turnDirectToolStats = new Map();
+        this.turnChildToolStats = new Map();
+        this.turnToolBusyMs = 0;
+        this.turnToolInFlight = 0;
+        this.turnToolBusySince = 0;
+        this.compactionStartedAt = 0;
+        this.turnCompactionMs = 0;
+        this.pendingCompactionMs = 0;
         this.subagentStats = new Map();
         this.turnSubagentIds = new Set();
         this.pendingSubagentTools = new Map();
@@ -176,6 +235,7 @@ export class TabRuntime<
             name: name || agentId,
             status: 'active',
             durationMs: 0,
+            queueWaitMs: 0,
             toolDurationMs: 0,
             toolCalls: 0,
         };
@@ -264,6 +324,8 @@ export class TabRuntime<
         this.messageMeta.clear();
         this.toolDurations.clear();
         this.turnToolStats.clear();
+        this.turnDirectToolStats.clear();
+        this.turnChildToolStats.clear();
         this.subagentStats.clear();
         this.turnSubagentIds.clear();
         this.pendingSubagentTools.clear();

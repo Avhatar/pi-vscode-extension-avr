@@ -16,6 +16,8 @@ import type { TurnCompletionInfo, TurnCompletionOutcome } from '../../shared/tur
 import { safeSerialize } from '../../shared/safe-serialize';
 import {
     accumulateToolStat,
+    isDelegationToolName,
+    mergeToolStats,
     subagentStatStatus,
     toolStatDisplayName,
     toolStatEntries,
@@ -103,6 +105,7 @@ export interface SubagentRunTiming {
     readonly queuedAt?: number;
     readonly startedAt?: number;
     readonly finishedAt?: number;
+    readonly queueWaitMs?: number;
 }
 
 const FILE_BLOCK_TITLE_RE = /\[File:\s*(.+?)\]\s*(?:\(binary file\))?[\s\S]*?\[\/File\]\s*\n?/g;
@@ -224,13 +227,24 @@ export class ChatService {
             tab.errorReportedThisRun = false;
             tab.pendingTools.clear();
             tab.turnToolStats.clear();
+            tab.turnDirectToolStats.clear();
+            tab.turnChildToolStats.clear();
+            tab.turnToolBusyMs = 0;
+            tab.turnToolInFlight = 0;
+            tab.turnToolBusySince = 0;
+            // `pendingCompactionMs` deliberately survives: a pre-prompt compaction
+            // was caused by this turn's prompt and is charged to it.
+            tab.turnCompactionMs = 0;
             tab.turnSubagentIds.clear();
         }
 
         if (event.type === 'tool_execution_start' && event.toolCallId) {
+            const startTime = this._now();
+            if (tab.turnToolInFlight === 0) tab.turnToolBusySince = startTime;
+            tab.turnToolInFlight++;
             tab.pendingTools.set(String(event.toolCallId), {
                 name: String(event.toolName ?? '?'),
-                startTime: this._now(),
+                startTime,
                 ...(event.args === undefined ? {} : { args: safeSerialize(event.args) }),
             });
         }
@@ -242,17 +256,42 @@ export class ChatService {
             // Without a matching start there is no reliable origin to measure
             // from, so the call is left out rather than reported as instant.
             if (pending) {
-                const durationMs = Math.max(0, this._now() - pending.startTime);
-                tab.recordToolDuration(toolCallId, durationMs);
-                accumulateToolStat(tab.turnToolStats, {
-                    name: toolStatDisplayName(event.toolName ?? pending.name, pending.args),
+                const endTime = this._now();
+                tab.turnToolInFlight = Math.max(0, tab.turnToolInFlight - 1);
+                if (tab.turnToolInFlight === 0 && tab.turnToolBusySince > 0) {
+                    tab.turnToolBusyMs += Math.max(0, endTime - tab.turnToolBusySince);
+                    tab.turnToolBusySince = 0;
+                }
+                const durationMs = Math.max(0, endTime - pending.startTime);
+                const rawName = event.toolName ?? pending.name;
+                const sample = {
+                    name: toolStatDisplayName(rawName, pending.args),
                     durationMs,
-                });
+                };
+                tab.recordToolDuration(toolCallId, durationMs);
+                accumulateToolStat(tab.turnToolStats, sample);
+                if (!isDelegationToolName(rawName)) {
+                    accumulateToolStat(tab.turnDirectToolStats, sample);
+                }
             }
         }
 
-        if (event.type === 'compaction_start') tab.isCompacting = true;
-        if (event.type === 'compaction_end') tab.isCompacting = false;
+        if (event.type === 'compaction_start') {
+            tab.isCompacting = true;
+            tab.compactionStartedAt = this._now();
+        }
+        if (event.type === 'compaction_end') {
+            tab.isCompacting = false;
+            if (tab.compactionStartedAt > 0) {
+                const durationMs = Math.max(0, this._now() - tab.compactionStartedAt);
+                tab.compactionStartedAt = 0;
+                // Pi checks for overflow both after an assistant message (inside
+                // the run) and before sending a new prompt (outside it). Only the
+                // former sits inside `turnDurationMs`.
+                if (tab.isStreamingLocal) tab.turnCompactionMs += durationMs;
+                else tab.pendingCompactionMs += durationMs;
+            }
+        }
 
         if (event.type === 'message_end' && event.message?.role === 'assistant') {
             // The event carries the finalized message, so its identity is exact
@@ -313,16 +352,26 @@ export class ChatService {
 
         if (event.type === 'tool_execution_start') {
             tab.subagentStat(agentId);
-            tab.pendingSubagentTools.set(toolCallId, this._now());
+            // The name is resolved at start, where the arguments that qualify an
+            // MCP call are guaranteed to be present.
+            tab.pendingSubagentTools.set(toolCallId, {
+                startTime: this._now(),
+                name: toolStatDisplayName(event.toolName, event.args),
+            });
             return;
         }
 
-        const startTime = tab.pendingSubagentTools.get(toolCallId);
+        const pending = tab.pendingSubagentTools.get(toolCallId);
         tab.pendingSubagentTools.delete(toolCallId);
-        if (startTime === undefined) return;
+        if (pending === undefined) return;
+        const durationMs = Math.max(0, this._now() - pending.startTime);
         const entry = tab.subagentStat(agentId);
-        entry.toolDurationMs += Math.max(0, this._now() - startTime);
+        entry.toolDurationMs += durationMs;
         entry.toolCalls += 1;
+        accumulateToolStat(tab.turnChildToolStats, {
+            name: pending.name || toolStatDisplayName(event.toolName, event.args),
+            durationMs,
+        });
     }
 
     /**
@@ -342,6 +391,13 @@ export class ChatService {
             entry.durationMs = start === undefined
                 ? 0
                 : Math.max(0, (run.finishedAt ?? now) - start);
+            // `durationMs` starts at the run, so time spent waiting for a
+            // concurrency slot is reported separately rather than lost.
+            entry.queueWaitMs = run.queueWaitMs !== undefined
+                ? Math.max(0, run.queueWaitMs)
+                : run.startedAt !== undefined && run.queuedAt !== undefined
+                    ? Math.max(0, run.startedAt - run.queuedAt)
+                    : 0;
         }
     }
 
@@ -368,8 +424,33 @@ export class ChatService {
         accounting?: AgentEndAccounting,
     ): void {
         const key = assistantMetaKey(lastAssistantMessage(tab.session.getMessages()));
+        // A tool abandoned by the SDK leaves its interval open; close it at the
+        // turn boundary so the residual cannot absorb time the tool was using.
+        if (tab.turnToolInFlight > 0 && tab.turnToolBusySince > 0) {
+            tab.turnToolBusyMs += Math.max(0, projection.turnEndAt - tab.turnToolBusySince);
+        }
+        // Only in-turn compaction comes out of the residual; the pre-prompt kind
+        // is extra time beyond `turnDurationMs`, so subtracting it would shrink
+        // the residual below what actually elapsed.
+        const turnModelWaitMs = projection.turnDurationMs > 0
+            ? Math.max(0, projection.turnDurationMs - tab.turnToolBusyMs - tab.turnCompactionMs)
+            : 0;
+        const turnCompactionMs = tab.turnCompactionMs + tab.pendingCompactionMs;
+        tab.turnToolInFlight = 0;
+        tab.turnToolBusySince = 0;
+        tab.turnToolBusyMs = 0;
+        tab.turnCompactionMs = 0;
+        tab.pendingCompactionMs = 0;
         const turnToolStats = toolStatEntries(tab.turnToolStats);
+        const turnChildToolStats = toolStatEntries(tab.turnChildToolStats);
+        // Only worth reporting when a child actually ran something; otherwise it
+        // is `turnToolStats` again under a second heading.
+        const turnCombinedToolStats = turnChildToolStats.length > 0
+            ? mergeToolStats(toolStatEntries(tab.turnDirectToolStats), turnChildToolStats)
+            : [];
         tab.turnToolStats.clear();
+        tab.turnDirectToolStats.clear();
+        tab.turnChildToolStats.clear();
         // Live rows on purpose: a background child keeps running past this
         // point and the turn summary has to reflect where it lands.
         const turnSubagentStats = [...tab.turnSubagentIds]
@@ -380,7 +461,10 @@ export class ChatService {
             || accounting?.deepSeekTurn
             || projection.turnDurationMs > 0
             || turnToolStats.length > 0
+            || turnCombinedToolStats.length > 0
             || turnSubagentStats.length > 0
+            || turnModelWaitMs > 0
+            || turnCompactionMs > 0
         )) {
             const meta = tab.messageMeta.get(key)
                 ?? { thinkingDurationSec: 0, messageEndTime: 0 };
@@ -391,6 +475,10 @@ export class ChatService {
                 meta.totalTurnDurationMs = tab.totalTurnDurationMs;
             }
             if (turnToolStats.length > 0) meta.toolStats = turnToolStats;
+            if (turnModelWaitMs > 0) meta.modelWaitMs = turnModelWaitMs;
+            if (turnCompactionMs > 0) meta.compactionMs = turnCompactionMs;
+            if (turnChildToolStats.length > 0) meta.childToolStats = turnChildToolStats;
+            if (turnCombinedToolStats.length > 0) meta.combinedToolStats = turnCombinedToolStats;
             if (turnSubagentStats.length > 0) meta.subagentStats = turnSubagentStats;
             tab.recordMessageMeta(key, meta);
         }
@@ -797,6 +885,18 @@ function annotateAssistantMeta(
         if (meta.deepSeekTurn) message._deepSeekTurnUsage = meta.deepSeekTurn;
         if (meta.toolStats && meta.toolStats.length > 0) {
             message._toolStats = meta.toolStats;
+        }
+        if (meta.modelWaitMs !== undefined && meta.modelWaitMs > 0) {
+            message._modelWaitMs = meta.modelWaitMs;
+        }
+        if (meta.compactionMs !== undefined && meta.compactionMs > 0) {
+            message._compactionMs = meta.compactionMs;
+        }
+        if (meta.childToolStats && meta.childToolStats.length > 0) {
+            message._childToolStats = meta.childToolStats;
+        }
+        if (meta.combinedToolStats && meta.combinedToolStats.length > 0) {
+            message._combinedToolStats = meta.combinedToolStats;
         }
         if (meta.subagentStats && meta.subagentStats.length > 0) {
             message._subagentStats = meta.subagentStats.map(
