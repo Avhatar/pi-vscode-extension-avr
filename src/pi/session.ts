@@ -8,6 +8,7 @@ import {
     type SessionLockHandle,
     type SessionRuntimePorts,
 } from '../core/ports/session-platform';
+import { acquireSessionLock } from '../core/session/session-lock-recovery';
 import type { SerializedAgentState, ModelInfo, SessionInfo, ContextUsageInfo, SkillInfo, ImageAttachment, FileAttachment, TranscriptPage } from '../shared/protocol';
 import { TypedEventEmitter } from '../shared/typed-event';
 import { safeSerialize } from '../shared/safe-serialize';
@@ -374,7 +375,7 @@ export class PiSessionManager {
                 }
                 sessionLock = await this._perf.time(
                     'session.createRuntime.sessionLock.acquire',
-                    () => this._ports.sessionLocks.acquire(createdSessionPath),
+                    () => this._acquireSessionLock(createdSessionPath),
                 );
                 concreteSessionPath = createdSessionPath;
             } else {
@@ -382,7 +383,7 @@ export class PiSessionManager {
                 // existing sessions must be locked before the SDK opens them.
                 sessionLock = await this._perf.time(
                     'session.createRuntime.sessionLock.acquire',
-                    () => this._ports.sessionLocks.acquire(sessionPath!),
+                    () => this._acquireSessionLock(sessionPath!),
                 );
                 sessionManager = this._perf.timeSync(
                     'session.createRuntime.sessionManager.open',
@@ -454,6 +455,19 @@ export class PiSessionManager {
             }
             throw error;
         }
+    }
+
+    /**
+     * A crash, a kill, or a power loss leaves the sidecar lock behind. Reclaim it
+     * when its owner is provably gone so history stays openable without manual
+     * cleanup; a live owner still blocks the session.
+     */
+    private _acquireSessionLock(sessionPath: string): Promise<SessionLockHandle> {
+        return acquireSessionLock(
+            this._ports.sessionLocks,
+            sessionPath,
+            (message) => this._outputChannel.appendLine(message),
+        );
     }
 
     private async _createRawRecorderFor(concreteSessionPath: string): Promise<RawRecorder | undefined> {

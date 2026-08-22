@@ -18,6 +18,7 @@ import type { AvailableModel, ResolvedAgentSpec } from './types';
 import type { WriteExecutionLease, WriteIsolationManager } from './write-isolation';
 import type { ChildToolFactoryRegistry } from './child-tools';
 import type { SessionLockHandle, SessionLockPort } from '../../core/ports/session-platform';
+import { acquireSessionLock } from '../../core/session/session-lock-recovery';
 
 export const CHILD_SAFE_TOOLS = ['read', 'grep', 'find', 'ls', 'edit', 'write'] as const;
 export const READ_ONLY_CHILD_TOOLS = CHILD_SAFE_TOOLS.slice(0, 4);
@@ -60,7 +61,7 @@ export class PiChildSessionFactory implements ChildSessionFactory {
                 if (!transcriptPath) {
                     throw new Error('Persistent child session did not provide a transcript path.');
                 }
-                sessionLock = await this.options.sessionLocks!.acquire(transcriptPath);
+                sessionLock = await this._acquireTranscriptLock(transcriptPath);
             } else {
                 sessionManager = SessionManager.inMemory(lease.cwd, { id: context.agentId });
             }
@@ -98,7 +99,7 @@ export class PiChildSessionFactory implements ChildSessionFactory {
             : { cwd: this.options.cwd, release: async () => {} };
         let sessionLock: SessionLockHandle | undefined;
         try {
-            sessionLock = await this.options.sessionLocks!.acquire(transcriptPath);
+            sessionLock = await this._acquireTranscriptLock(transcriptPath);
             const sessionManager = SessionManager.open(
                 transcriptPath,
                 this.options.transcriptDirectory,
@@ -118,6 +119,15 @@ export class PiChildSessionFactory implements ChildSessionFactory {
             await lease.release();
             throw error;
         }
+    }
+
+    /** Child transcripts survive their parent, so abandoned locks must be reclaimable too. */
+    private _acquireTranscriptLock(transcriptPath: string): Promise<SessionLockHandle> {
+        return acquireSessionLock(
+            this.options.sessionLocks!,
+            transcriptPath,
+            this.options.log,
+        );
     }
 
     private async createWithSessionManager(

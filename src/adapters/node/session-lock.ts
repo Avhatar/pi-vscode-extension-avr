@@ -11,11 +11,19 @@ import {
     type SessionLockPort,
 } from '../../core/ports/session-platform';
 
-const LOCK_SCHEMA_VERSION = 1;
+const LOCK_SCHEMA_VERSION = 2;
+const SUPPORTED_LOCK_VERSIONS = new Set([1, LOCK_SCHEMA_VERSION]);
 const DEFAULT_STALE_AFTER_MS = 5 * 60_000;
+/**
+ * Boot instants are derived from `Date.now() - os.uptime()`, so small clock
+ * adjustments must not read as a reboot. Real reboots move the instant by the
+ * previous uptime plus the downtime, which dwarfs this window.
+ */
+const BOOT_TIME_TOLERANCE_MS = 10_000;
+const UNIDENTIFIED_OWNER_CLAIM = 'unidentified-owner';
 
 interface PersistedSessionLock {
-    readonly version: typeof LOCK_SCHEMA_VERSION;
+    readonly version: number;
     readonly owner: SessionLockOwner;
 }
 
@@ -28,6 +36,7 @@ export interface NodeSessionLockOptions {
     readonly isProcessAlive?: (
         processId: number,
     ) => boolean | SessionLockOwnerLiveness;
+    readonly bootTimeMs?: () => number | undefined;
     readonly ownerIdFactory?: () => string;
 }
 
@@ -41,6 +50,7 @@ export class NodeSessionLock implements SessionLockPort {
     private readonly _isProcessAlive: (
         processId: number,
     ) => boolean | SessionLockOwnerLiveness;
+    private readonly _bootTimeMs: () => number | undefined;
     private readonly _ownerIdFactory: () => string;
 
     constructor(options: NodeSessionLockOptions) {
@@ -53,18 +63,21 @@ export class NodeSessionLock implements SessionLockPort {
         this._staleAfterMs = Math.max(0, options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS);
         this._now = options.now ?? Date.now;
         this._isProcessAlive = options.isProcessAlive ?? defaultProcessLiveness;
+        this._bootTimeMs = options.bootTimeMs ?? defaultBootTimeMs;
         this._ownerIdFactory = options.ownerIdFactory ?? randomUUID;
     }
 
     async acquire(sessionPath: string): Promise<SessionLockHandle> {
         const canonicalSessionPath = await canonicalizeSessionPath(sessionPath);
         const lockPath = getSessionLockPath(canonicalSessionPath);
+        const bootTimeMs = this._bootTimeMs();
         const owner: SessionLockOwner = {
             ownerId: this._ownerIdFactory(),
             applicationId: this._applicationId,
             processId: this._processId,
             hostname: this._hostname,
             acquiredAt: this._now(),
+            ...(bootTimeMs !== undefined ? { bootTimeMs } : {}),
         };
         let handle: fs.FileHandle | undefined;
         try {
@@ -110,7 +123,7 @@ export class NodeSessionLock implements SessionLockPort {
 
     async recoverStale(
         sessionPath: string,
-        expectedOwnerId: string,
+        expectedOwnerId: string | undefined,
     ): Promise<SessionLockHandle> {
         const canonicalSessionPath = await canonicalizeSessionPath(sessionPath);
         const lockPath = getSessionLockPath(canonicalSessionPath);
@@ -129,6 +142,8 @@ export class NodeSessionLock implements SessionLockPort {
 
         try {
             const current = await this._readConflict(canonicalSessionPath, lockPath);
+            // An unreadable lock has no owner id; recovery then requires that it is
+            // still unreadable, so a fresh owner cannot be evicted by a stale verdict.
             if (!current.staleRecoveryAllowed
                 || current.owner?.ownerId !== expectedOwnerId) {
                 throw new SessionLockConflictError(current);
@@ -151,30 +166,79 @@ export class NodeSessionLock implements SessionLockPort {
     ): Promise<SessionLockConflict> {
         const persisted = await readPersistedLock(lockPath);
         if (!persisted) {
+            // A torn write from a power loss, or a schema this build cannot read.
+            // The sidecar mtime is the only age signal left; without this fallback
+            // an unparseable lock would block its session permanently.
+            const sidecarAgeMs = await this._readSidecarAgeMs(lockPath);
             return {
                 sessionPath,
                 lockPath,
                 owner: undefined,
                 ownerLiveness: 'unknown',
-                ageMs: undefined,
-                staleRecoveryAllowed: false,
+                ageMs: sidecarAgeMs,
+                staleRecoveryAllowed: sidecarAgeMs === undefined
+                    || sidecarAgeMs >= this._staleAfterMs,
             };
         }
         const owner = persisted.owner;
         const ageMs = Math.max(0, this._now() - owner.acquiredAt);
-        const ownerLiveness = this._ownerLiveness(owner);
+        const sameHost = owner.hostname === this._hostname;
+        const ownerBootMismatch = sameHost && this._isBootMismatch(owner);
+        const ownerLiveness = this._ownerLiveness(owner, ownerBootMismatch);
         return {
             sessionPath,
             lockPath,
             owner,
             ownerLiveness,
             ageMs,
-            staleRecoveryAllowed: ownerLiveness === 'dead' && ageMs >= this._staleAfterMs,
+            ownerBootMismatch,
+            staleRecoveryAllowed: this._isStaleRecoveryAllowed(sameHost, ownerLiveness, ageMs),
         };
     }
 
-    private _ownerLiveness(owner: SessionLockOwner): SessionLockOwnerLiveness {
+    /**
+     * A lock is reclaimable only when its owner is provably gone. A dead process
+     * id on this host cannot come back — the same host restarting the session gets
+     * a new lock — so no waiting period applies. Ambiguous verdicts still wait out
+     * the stale threshold, and another host's liveness is never guessed.
+     */
+    private _isStaleRecoveryAllowed(
+        sameHost: boolean,
+        ownerLiveness: SessionLockOwnerLiveness,
+        ageMs: number,
+    ): boolean {
+        if (!sameHost) return false;
+        if (ownerLiveness === 'dead') return true;
+        if (ownerLiveness === 'alive') return false;
+        return ageMs >= this._staleAfterMs;
+    }
+
+    private async _readSidecarAgeMs(lockPath: string): Promise<number | undefined> {
+        try {
+            const stats = await fs.stat(lockPath);
+            return Math.max(0, this._now() - stats.mtimeMs);
+        } catch (error) {
+            // A vanished sidecar means nobody owns the session any more.
+            if (isMissingFileError(error)) return undefined;
+            throw error;
+        }
+    }
+
+    /** True when the lock was taken before the machine last booted. */
+    private _isBootMismatch(owner: SessionLockOwner): boolean {
+        const currentBootTimeMs = this._bootTimeMs();
+        if (currentBootTimeMs === undefined || owner.bootTimeMs === undefined) return false;
+        return Math.abs(currentBootTimeMs - owner.bootTimeMs) > BOOT_TIME_TOLERANCE_MS;
+    }
+
+    private _ownerLiveness(
+        owner: SessionLockOwner,
+        ownerBootMismatch: boolean,
+    ): SessionLockOwnerLiveness {
         if (owner.hostname !== this._hostname) return 'unknown';
+        // The recorded process id may have been recycled by an unrelated process
+        // after a reboot, so a pre-boot lock outranks any liveness probe.
+        if (ownerBootMismatch) return 'dead';
         try {
             const result = this._isProcessAlive(owner.processId);
             if (result === true) return 'alive';
@@ -190,8 +254,10 @@ export function getSessionLockPath(sessionPath: string): string {
     return `${sessionPath}.pi-code.lock`;
 }
 
-function getRecoveryClaimPath(lockPath: string, expectedOwnerId: string): string {
-    const ownerHash = createHash('sha256').update(expectedOwnerId).digest('hex');
+function getRecoveryClaimPath(lockPath: string, expectedOwnerId: string | undefined): string {
+    const ownerHash = createHash('sha256')
+        .update(expectedOwnerId ?? UNIDENTIFIED_OWNER_CLAIM)
+        .digest('hex');
     return `${lockPath}.recover-${ownerHash}`;
 }
 
@@ -221,7 +287,8 @@ async function readPersistedLock(lockPath: string): Promise<PersistedSessionLock
 function isPersistedSessionLock(value: unknown): value is PersistedSessionLock {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const candidate = value as Record<string, unknown>;
-    if (candidate.version !== LOCK_SCHEMA_VERSION
+    if (typeof candidate.version !== 'number'
+        || !SUPPORTED_LOCK_VERSIONS.has(candidate.version)
         || !candidate.owner
         || typeof candidate.owner !== 'object'
         || Array.isArray(candidate.owner)) return false;
@@ -235,7 +302,20 @@ function isPersistedSessionLock(value: unknown): value is PersistedSessionLock {
         && owner.processId > 0
         && typeof owner.hostname === 'string'
         && typeof owner.acquiredAt === 'number'
-        && Number.isFinite(owner.acquiredAt);
+        && Number.isFinite(owner.acquiredAt)
+        && (owner.bootTimeMs === undefined
+            || (typeof owner.bootTimeMs === 'number' && Number.isFinite(owner.bootTimeMs)));
+}
+
+/**
+ * Epoch instant the OS booted. `os.uptime()` counts suspended time on Windows,
+ * Linux, and macOS, so sleep/resume cycles keep this value stable while a reboot
+ * moves it far beyond {@link BOOT_TIME_TOLERANCE_MS}.
+ */
+function defaultBootTimeMs(): number | undefined {
+    const uptimeSeconds = os.uptime();
+    if (!Number.isFinite(uptimeSeconds) || uptimeSeconds < 0) return undefined;
+    return Math.round(Date.now() - uptimeSeconds * 1000);
 }
 
 function defaultProcessLiveness(processId: number): SessionLockOwnerLiveness {

@@ -169,10 +169,9 @@ async function acquireStateLock(
             return await lock.acquire(filePath);
         } catch (error) {
             if (!(error instanceof SessionLockConflictError)) throw error;
-            const owner = error.conflict.owner;
-            if (owner && error.conflict.staleRecoveryAllowed) {
+            if (error.conflict.staleRecoveryAllowed) {
                 try {
-                    return await lock.recoverStale(filePath, owner.ownerId);
+                    return await lock.recoverStale(filePath, error.conflict.owner?.ownerId);
                 } catch (recoveryError) {
                     if (!(recoveryError instanceof SessionLockConflictError)) throw recoveryError;
                 }

@@ -29,7 +29,7 @@ Six ports cover the whole surface.
 - `resources: SessionResourcePaths` — `bundledPiPackagePaths: string[]`.
 - `extensions?: SessionExtensionPort` — `createLspExtension(enabled)`, `syncClaudeCodeMcpImport?(enabled)`.
 - `codexUsage: SessionCodexUsagePort` — `updateFromHeaders(headers)`.
-- `sessionLocks: SessionLockPort` — `acquire(sessionPath)`, `recoverStale(sessionPath, expectedOwnerId)` returning `SessionLockHandle` (`{ sessionPath, owner, release() }`); errors surface as `SessionLockConflictError` with a `SessionLockConflict` payload.
+- `sessionLocks: SessionLockPort` — `acquire(sessionPath)`, `recoverStale(sessionPath, expectedOwnerId)` returning `SessionLockHandle` (`{ sessionPath, owner, release() }`); errors surface as `SessionLockConflictError` with a `SessionLockConflict` payload. `expectedOwnerId` may be `undefined`, which recovers an unreadable lock only while it stays unidentifiable. Session-opening code calls [`acquireSessionLock`](../../07-safety-and-reversibility/writable-session-lock/writable-session-lock.md) rather than the port directly, so the reclaim decision lives in one place.
 
 `DEFAULT_SESSION_RUNTIME_PORTS` supplies no-op stubs so tests can partially override.
 

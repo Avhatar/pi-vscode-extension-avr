@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSessionEvent, AgentSessionEventListener } from '@earendil-works/pi-coding-agent';
 import { PiSessionManager } from '../../../pi/session';
-import { DEFAULT_SESSION_RUNTIME_PORTS } from '../../../core/ports/session-platform';
+import {
+    DEFAULT_SESSION_RUNTIME_PORTS,
+    SessionLockConflictError,
+    type SessionLockConflict,
+} from '../../../core/ports/session-platform';
 import { resetTestWorkspace, setTestWorkspaceRoot } from '../../mocks/vscode';
 
 const sdkMocks = vi.hoisted(() => ({
@@ -95,6 +99,48 @@ describe('PiSessionManager session replacement', () => {
         expect(creationOptions.cwd).toBe(process.cwd());
         expect(creationOptions).not.toHaveProperty('tools');
         expectReplacementLifecycle(harness, false);
+    });
+
+    it('reclaims a lock abandoned by a crashed host when loading from history', async () => {
+        const harness = await createReplacementHarness();
+        const sessionPath = 'X:/sessions/existing.jsonl';
+        activeManager = harness.manager;
+        harness.acquireSessionLock.mockImplementationOnce(async () => {
+            harness.order.push('replacement:lock-conflict');
+            throw new SessionLockConflictError(createConflict(sessionPath, {
+                ownerLiveness: 'dead',
+                staleRecoveryAllowed: true,
+            }));
+        });
+
+        await harness.manager.loadSession(sessionPath);
+
+        expect(harness.recoverStaleLock).toHaveBeenCalledWith(sessionPath, 'crashed-owner');
+        expect(sdkMocks.openSessionManager).toHaveBeenCalledWith(sessionPath, undefined);
+        expect(harness.manager.isReady).toBe(true);
+        expectLifecycleOrder(harness.order, [
+            'replacement:lock-conflict',
+            'replacement:lock-recover',
+            'manager:open',
+            'replacement:create',
+        ]);
+    });
+
+    it('refuses to load a session another live window still owns', async () => {
+        const harness = await createReplacementHarness();
+        activeManager = harness.manager;
+        harness.acquireSessionLock.mockImplementationOnce(async () => {
+            throw new SessionLockConflictError(createConflict('X:/sessions/existing.jsonl', {
+                ownerLiveness: 'alive',
+                staleRecoveryAllowed: false,
+            }));
+        });
+
+        await expect(harness.manager.loadSession('X:/sessions/existing.jsonl'))
+            .rejects.toThrow('Close that chat tab or Pi Code instance');
+
+        expect(harness.recoverStaleLock).not.toHaveBeenCalled();
+        expect(sdkMocks.openSessionManager).not.toHaveBeenCalled();
     });
 
     it('releases a failed replacement candidate lock without restoring writable state', async () => {
@@ -231,7 +277,29 @@ interface ReplacementHarness {
     resetSubagentManager: ReturnType<typeof vi.fn>;
     applyDefaultSettings: ReturnType<typeof vi.fn>;
     acquireSessionLock: ReturnType<typeof vi.fn>;
+    recoverStaleLock: ReturnType<typeof vi.fn>;
     releaseReplacementLock: ReturnType<typeof vi.fn>;
+}
+
+function createConflict(
+    sessionPath: string,
+    overrides: Partial<SessionLockConflict>,
+): SessionLockConflict {
+    return {
+        sessionPath,
+        lockPath: `${sessionPath}.pi-code.lock`,
+        owner: {
+            ownerId: 'crashed-owner',
+            applicationId: 'pi-code-vscode',
+            processId: 32152,
+            hostname: 'test-host',
+            acquiredAt: 0,
+        },
+        ownerLiveness: 'dead',
+        ageMs: 0,
+        staleRecoveryAllowed: true,
+        ...overrides,
+    };
 }
 
 async function createReplacementHarness(): Promise<ReplacementHarness> {
@@ -242,19 +310,24 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
     const releaseReplacementLock = vi.fn(async () => {
         order.push('replacement:unlock');
     });
+    const createLockHandle = (sessionPath: string) => ({
+        sessionPath,
+        owner: {
+            ownerId: 'replacement-owner',
+            applicationId: 'test',
+            processId: 1,
+            hostname: 'test-host',
+            acquiredAt: 0,
+        },
+        release: releaseReplacementLock,
+    });
     const acquireSessionLock = vi.fn(async (sessionPath: string) => {
         order.push('replacement:lock');
-        return {
-            sessionPath,
-            owner: {
-                ownerId: 'replacement-owner',
-                applicationId: 'test',
-                processId: 1,
-                hostname: 'test-host',
-                acquiredAt: 0,
-            },
-            release: releaseReplacementLock,
-        };
+        return createLockHandle(sessionPath);
+    });
+    const recoverStaleLock = vi.fn(async (sessionPath: string) => {
+        order.push('replacement:lock-recover');
+        return createLockHandle(sessionPath);
     });
     const manager = new PiSessionManager(
         outputChannel as any,
@@ -271,7 +344,7 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
             },
             sessionLocks: {
                 acquire: acquireSessionLock,
-                recoverStale: vi.fn(),
+                recoverStale: recoverStaleLock,
             },
         },
     );
@@ -331,6 +404,7 @@ async function createReplacementHarness(): Promise<ReplacementHarness> {
         resetSubagentManager,
         applyDefaultSettings,
         acquireSessionLock,
+        recoverStaleLock,
         releaseReplacementLock,
     };
 }

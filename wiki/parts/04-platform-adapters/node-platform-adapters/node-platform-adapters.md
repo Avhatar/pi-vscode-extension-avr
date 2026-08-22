@@ -20,7 +20,7 @@ Nine classes / factories cover the surface.
 
 **[`createNodeSessionRuntimePorts`](../../../../src/adapters/node/session-platform.ts#L101)** — factory taking `NodeSessionRuntimePortOptions` (required: `workspace`; optional: `settings`, `dialogs`, `bundledPiPackagePaths`, `codexUsage`, `sessionLocks`). Assembles a `SessionRuntimePorts`; defaults `applicationId` in the session lock to `'pi-code-node'`.
 
-**[`NodeSessionLock`](../../../../src/adapters/node/session-lock.ts#L35)** — `SessionLockPort` shared between hosts. Lock file: `${sessionPath}.pi-code.lock`, written with mode `0o600`. `acquire(sessionPath)` uses O_EXCL semantics via `fs.openSync(path, 'wx')`; throws `SessionLockConflictError` with the current owner payload on EEXIST. `recoverStale(sessionPath, expectedOwnerId)` reads the current lock, checks liveness of `processId` on `hostname`, and, if the process is gone plus `staleAfterMs` has elapsed, replaces the file. Lock payload version 1: `{ version: 1, owner: SessionLockOwner }` where owner has `ownerId`, `applicationId`, `processId`, `hostname`, `acquiredAt`.
+**[`NodeSessionLock`](../../../../src/adapters/node/session-lock.ts#L44)** — `SessionLockPort` shared between hosts. Lock file: `${sessionPath}.pi-code.lock`, written with mode `0o600`. `acquire(sessionPath)` uses O_EXCL semantics via `fs.open(path, 'wx')`; throws `SessionLockConflictError` with the current owner payload on EEXIST. `recoverStale(sessionPath, expectedOwnerId)` re-reads the conflict and, when it is still recoverable and still names the same owner, replaces the file. Recoverable means the owner is provably gone: a `processId` that no longer exists on this `hostname`, or a `bootTimeMs` older than the current boot; `staleAfterMs` only gates the ambiguous cases (unverifiable liveness, unreadable payload aged by sidecar mtime). Lock payload version 2: `{ version: 2, owner: SessionLockOwner }` where owner has `ownerId`, `applicationId`, `processId`, `hostname`, `acquiredAt`, `bootTimeMs`; version 1 payloads without `bootTimeMs` are still read.
 
 **[`NodeFileMentions`](../../../../src/adapters/node/file-mentions.ts#L43)** — `FileMentionsPort` with a watched, debounced file index. `ensureIndexed()` walks once, records paths. `search(query, maxSuggestions?)` runs fuzzy match. `augmentPromptIfNeeded(text)` scans for `@mention` patterns and inlines file contents. Watcher rebuilds are debounced (250 ms default) so a `git checkout` doesn't produce a rebuild storm.
 
@@ -69,7 +69,7 @@ Nine classes / factories cover the surface.
 
 **Attributes / markers:**
 - Lock filename convention: `${sessionPath}.pi-code.lock`
-- Lock version constant: `1` — bump only when the payload shape changes incompatibly
+- Lock version constant: `2` — bump only when the payload shape changes incompatibly; `SUPPORTED_LOCK_VERSIONS` keeps reading `1`
 - State-store version constant: `1` — same rule
 - `JsonStateStore` streaming threshold: 50 MB
 - `applicationId` for Node-created locks: `'pi-code-node'`
@@ -94,7 +94,7 @@ Nine classes / factories cover the surface.
 - **Rule — session locks are cross-host.** Both VS Code and Node factories use `NodeSessionLock` against the same file naming rule. Do not add a "faster" host-local lock that skips the sidecar file; you will race the other host.
 - **Pattern — DI everywhere.** `NodeSessionWorkspace` takes an explicit root (canonicalized), `NodeLogger` takes a sink, `CallbackSessionDialogs` takes callbacks. Adapters do not read environment variables or globals.
 - **Pattern — stream large state files.** `JsonStateStore` switches to line-by-line reading above 50 MB. Do not `JSON.parse(fs.readFileSync(...))` unconditionally — you will OOM on large workspaces.
-- **Pitfall — `acquire` may throw `SessionLockConflictError`.** Callers must catch and offer recovery via `recoverStale(expectedOwnerId)` rather than retrying blindly.
+- **Pitfall — `acquire` may throw `SessionLockConflictError`.** Callers must not retry blindly: go through the shared [`acquireSessionLock`](../../07-safety-and-reversibility/writable-session-lock/writable-session-lock.md) helper, which reclaims exactly once when the conflict says the owner is provably gone. `JsonStateStore` is the one caller with its own loop, because it also waits out a live writer within a timeout.
 - **Pitfall — `NodeFileMentions` watches recursively.** On very large workspaces the watch can be expensive; the debounce buffers bursts, but there is no exclusion list beyond symlinks. If a workspace has directories that should never be indexed, exclude them at a higher level.
 - **Pattern — Windows case-insensitivity is explicit.** `NodeSessionWorkspace.findFiles` handles case-fold on Windows, case-sensitive on macOS/Linux. VS Code's own findFiles does the same; the Node adapter mirrors the behavior deliberately.
 - **Pattern — factory hardcodes `applicationId`.** `createNodeSessionRuntimePorts` uses `'pi-code-node'`. If a new host emerges, do not reuse this suffix; invent a new one so session-lock owner identity remains diagnostic.

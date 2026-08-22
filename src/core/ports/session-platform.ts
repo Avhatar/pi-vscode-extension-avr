@@ -71,6 +71,13 @@ export interface SessionLockOwner {
     readonly processId: number;
     readonly hostname: string;
     readonly acquiredAt: number;
+    /**
+     * OS boot instant observed by the owner, in epoch milliseconds. It proves a
+     * lock predates the current boot, which is the only reliable evidence that a
+     * crashed owner is gone after the recorded process id was recycled by an
+     * unrelated process. Absent in locks written by older releases.
+     */
+    readonly bootTimeMs?: number;
 }
 
 export type SessionLockOwnerLiveness = 'alive' | 'dead' | 'unknown';
@@ -82,16 +89,35 @@ export interface SessionLockConflict {
     readonly ownerLiveness: SessionLockOwnerLiveness;
     readonly ageMs: number | undefined;
     readonly staleRecoveryAllowed: boolean;
+    /** True when the lock was written before the current OS boot. */
+    readonly ownerBootMismatch?: boolean;
+}
+
+/** Actionable one-line diagnosis of why a writable session could not be opened. */
+export function describeSessionLockConflict(conflict: SessionLockConflict): string {
+    const owner = conflict.owner;
+    if (!owner) {
+        return `Session lock file ${conflict.lockPath} cannot be read, so its owner is unknown. `
+            + 'Close any other Pi Code instance using this chat, or delete that file and try again.';
+    }
+    const identity = `${owner.applicationId} (process ${owner.processId} on ${owner.hostname})`;
+    if (conflict.ownerLiveness === 'alive') {
+        return `Session is already open for writing by ${identity}. `
+            + 'Close that chat tab or Pi Code instance, then try again.';
+    }
+    if (conflict.ownerLiveness === 'dead') {
+        return `Session was left locked by ${identity}, which is no longer running. `
+            + `Try again to reclaim it, or delete ${conflict.lockPath}.`;
+    }
+    return `Session is locked by ${identity}, and this machine cannot check whether that `
+        + `process still runs. Close it there, or delete ${conflict.lockPath} if that host is offline.`;
 }
 
 export class SessionLockConflictError extends Error {
     readonly code = 'SESSION_LOCK_CONFLICT';
 
     constructor(readonly conflict: SessionLockConflict) {
-        super(conflict.owner
-            ? `Session is already open for writing by ${conflict.owner.applicationId} `
-                + `(process ${conflict.owner.processId} on ${conflict.owner.hostname}).`
-            : 'Session is already locked for writing.');
+        super(describeSessionLockConflict(conflict));
         this.name = 'SessionLockConflictError';
     }
 }
@@ -104,7 +130,15 @@ export interface SessionLockHandle {
 
 export interface SessionLockPort {
     acquire(sessionPath: string): Promise<SessionLockHandle>;
-    recoverStale(sessionPath: string, expectedOwnerId: string): Promise<SessionLockHandle>;
+    /**
+     * Reclaims a lock whose owner is provably gone. `expectedOwnerId` is the
+     * owner observed in the conflict, or `undefined` when the lock file could not
+     * be parsed; recovery is refused when the on-disk owner no longer matches it.
+     */
+    recoverStale(
+        sessionPath: string,
+        expectedOwnerId: string | undefined,
+    ): Promise<SessionLockHandle>;
 }
 
 export interface SessionRuntimePorts {

@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- A chat whose window crashed, was killed, or lost power can be opened again. Its session file kept an exclusive write lock that was never reclaimed, so the chat stayed permanently unopenable from history and had to be unblocked by deleting a `.pi-code.lock` file by hand. Pi Code now reclaims a lock whose owner is provably gone — a process that no longer exists, or a lock written before the machine last booted — and does so immediately instead of after a five-minute delay. A chat genuinely open elsewhere is still protected.
+- A session left locked by a power loss is no longer blocked forever when the operating system hands the crashed process's id to an unrelated program after the reboot. Locks now record the boot they were taken in, which settles that case without guessing.
+- A session lock file truncated mid-write — the usual result of pulling the plug — no longer blocks its chat permanently; it is reclaimed once it is old enough to be certain nobody is writing to it.
+- Session lock errors now identify the owner, say whether that process is still running, and name the lock file to remove when the owner is on a machine this one cannot check.
+- Delegated subagent transcripts are covered by the same recovery, so a resumable child run does not become unreachable after its parent crashes.
+
 ## [0.68.0] - 2026-08-21
 
 ### Added

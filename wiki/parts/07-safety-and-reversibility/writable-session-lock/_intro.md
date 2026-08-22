@@ -1,6 +1,8 @@
 # Chapter: writable-session-lock
 
-Two hosts — a VS Code window and the standalone desktop app — can both open the same repository. If they both try to write to the same Pi session file, message history corrupts and the underlying JSONL becomes inconsistent. The **writable-session lock** is the mechanism that prevents this: a sidecar `.pi-code.lock` file next to every session file, holding a JSON payload identifying the owner (`applicationId`, `processId`, `hostname`, `acquiredAt`). Acquisition is exclusive; a second host attempting to open the same session hits a `SessionLockConflictError` and either offers to recover (if the previous owner is dead) or refuses.
+Two hosts — a VS Code window and the standalone desktop app — can both open the same repository. If they both try to write to the same Pi session file, message history corrupts and the underlying JSONL becomes inconsistent. The **writable-session lock** is the mechanism that prevents this: a sidecar `.pi-code.lock` file next to every session file, holding a JSON payload identifying the owner (`applicationId`, `processId`, `hostname`, `acquiredAt`, `bootTimeMs`). Acquisition is exclusive; a second host attempting to open the same session hits a `SessionLockConflictError`, which is reclaimed automatically when the previous owner is provably gone and refused when it is not.
+
+The second half of that sentence carries as much weight as the first. Owners die without releasing anything — a crashed window, a killed process, a machine losing power — and a sidecar nobody can reclaim turns its chat into a permanently unopenable history entry. So the open path reclaims on evidence (a vanished process id on this host, or a lock older than the current boot) rather than deferring to a manual repair step, while a live owner or an unverifiable remote one still blocks.
 
 ## Article roster
 
@@ -12,6 +14,7 @@ The reader arrives here to answer one of:
 
 - "What happens when the user has the same repo open in both VS Code and the standalone desktop app?"
 - "How is a stale lock (from a crashed process) recovered?"
+- "Why does a pid check alone not prove the previous owner is gone?"
 - "Why is the lock file next to the session file, not in a shared table?"
 - "Does the lock survive across window reloads?"
 
