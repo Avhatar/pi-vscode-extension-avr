@@ -1289,9 +1289,48 @@ body[data-mode="panel"] .tab-strip,
 }
 
 .turn-tool-stats-name {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* Truncation lives on the label, not the flex row, so the status pill next to
+   a long agent name is never the part that gets clipped. */
+.turn-tool-stats-label {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Section label separating delegated runs from the agent's own tool calls. */
+.turn-tool-stats-heading {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 9px;
+    opacity: 0.75;
+}
+
+.turn-tool-stats-status {
+    font-size: 9px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: var(--badge-bg);
+    color: var(--badge-fg);
+}
+
+.turn-tool-stats-status.failed,
+.turn-tool-stats-status.cancelled {
+    background: rgba(244, 135, 113, 0.15);
+    color: var(--error-fg);
+}
+
+.turn-tool-stats-status.active {
+    background: rgba(204, 167, 0, 0.15);
+    color: var(--warning-fg);
 }
 
 .turn-tool-stats-time {

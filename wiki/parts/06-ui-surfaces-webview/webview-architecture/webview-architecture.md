@@ -21,7 +21,7 @@ Plus helper modules imported by the chat panel:
 - [src/webview/interrupted-turn-notice.ts](../../../../src/webview/interrupted-turn-notice.ts) — interrupted-turn state reconciliation
 - [src/webview/transcript-state.ts](../../../../src/webview/transcript-state.ts) — stable-id merge/prepend state for lazy full-history pages
 
-**The `el()` helper.** `el(tag, className?)` creates a typed DOM element with optional class. It's the only construction primitive; everything else appends children, sets `textContent`, listens for events with `.addEventListener`. Around 4900 lines of chat UI use this pattern.
+**The `el()` helper.** `el(tag, className?, text?)` creates a DOM element with optional class and text. It's the only construction primitive; everything else appends children, sets `textContent`, listens for events with `.addEventListener`. Around 4900 lines of chat UI use this pattern. Every bundle declares its own copy because the bundles share no runtime, and all four copies must keep the same arity — see the rule in See also.
 
 **Transport.** [`VsCodeAgentConnection`](../../../../src/webview/vscode-agent-connection.ts#L32) extends `AgentConnectionClient`; construction wraps `acquireVsCodeApi().postMessage` as `send` and `window.addEventListener('message', ...)` as `subscribe`. Requests are timed out per [Part II § protocol-runtime](../../02-shared-protocol-and-contracts/protocol-runtime/protocol-runtime.md); events flow via `connection.subscribe(listener)`.
 
@@ -49,7 +49,7 @@ Plus helper modules imported by the chat panel:
 - `ClientTranscriptState`, `createTranscriptState`, `mergeTranscriptTail`, `prependTranscriptPage` — lazy transcript accumulator [transcript-state.ts](../../../../src/webview/transcript-state.ts)
 
 **Methods — DOM:**
-- `el(tag, className?)` — the sole construction helper; declared inline in [main.ts:4892](../../../../src/webview/main.ts#L4892) and mirrored in launcher / settings
+- `el(tag, className?, text?)` — the sole construction helper; declared inline per bundle in [main.ts](../../../../src/webview/main.ts), [launcher.ts](../../../../src/webview/launcher.ts), [raw.ts](../../../../src/webview/raw.ts), [settings.ts](../../../../src/webview/settings.ts)
 - `vscode.setState({ tabId, sessionPath })` — panel-mode persistence [main.ts:399](../../../../src/webview/main.ts#L399)
 
 **Methods — transport:**
@@ -81,6 +81,8 @@ Plus helper modules imported by the chat panel:
 - [slash-commands-and-skills-menu](../slash-commands-and-skills-menu/slash-commands-and-skills-menu.md) — transport + DOM patterns.
 
 ## See also
+
+- **Rule — every `el()` copy keeps the same arity.** The four bundles share no runtime, so each declares its own helper. A copy that omits the `text?` parameter silently turns every `el(tag, class, text)` call in that bundle into an empty element: esbuild does not typecheck the webview and `tsconfig.json` excludes `src/webview/**`, so nothing fails at build time. This is how the Todo tool result card shipped with blank rows. `src/test/unit/webview/element-helper.test.ts` guards the arity; do not narrow a helper to satisfy a lint.
 
 - **Rule — no framework, no ambient DOM helpers.** Use `el()`. Do not introduce jQuery-style shortcuts; do not import React.
 - **Rule — always route through `AgentConnectionClient`.** A raw `vscode.postMessage(...)` bypasses timeouts, deduplication, and recovery. If a new webview needs a transport, wrap it in a `createXTransport(api, source)` factory that mirrors [`createVsCodeTransport`](../../../../src/webview/vscode-agent-connection.ts#L46).

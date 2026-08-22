@@ -44,7 +44,7 @@ describe('TabRuntime', () => {
         expect(first.pendingTools).toEqual(new Map());
 
         first.queuedMessages.push('first-only');
-        first.messageMeta.set(1, { thinkingDurationSec: 1, messageEndTime: 2 });
+        first.messageMeta.set('1', { thinkingDurationSec: 1, messageEndTime: 2 });
         first.pendingTools.set('call-1', { name: 'read', startTime: 3 });
 
         expect(second.queuedMessages).toEqual([]);
@@ -82,7 +82,7 @@ describe('TabRuntime', () => {
         runtime.streamingThinkingDuration = 11;
         runtime.agentStartTime = 12;
         runtime.totalTurnDurationMs = 13;
-        runtime.messageMeta.set(0, { thinkingDurationSec: 1, messageEndTime: 2 });
+        runtime.messageMeta.set('0', { thinkingDurationSec: 1, messageEndTime: 2 });
         runtime.queuedMessages.push('queued');
         runtime.isStreamingLocal = true;
         runtime.isCompacting = true;

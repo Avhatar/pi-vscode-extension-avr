@@ -12,6 +12,24 @@ Format for each entry:
 - **Escalations:** <open question reference or "none">
 ```
 
+## 2026-08-21 — Key turn metadata by message identity
+
+- **Code:** `TabRuntime.messageMeta` was keyed by an assistant message's position inside the compact model context, which compaction rewrites. A turn followed by auto-compaction therefore lost its footer duration, tok/s, and tool/subagent breakdown, and a surviving assistant could inherit an unrelated older turn's numbers. Introduced `assistantMetaKey(message)` (the SDK-required `timestamp`), re-keyed the map, replaced the ordinal lookup plus the "align newest assistants from the end" transcript pass in `buildState` with one identity-matched annotation over both projections, and added `recordMessageMeta` with a `MESSAGE_META_HISTORY_LIMIT` ceiling now that the map no longer shrinks with the context.
+- **Wiki:** `chat-host-and-service.md` documents identity-keyed projection, `assistantMetaKey`, and a rule against reintroducing ordinal keying or positional alignment; `tab-registry-and-runtime.md` updates the `messageMeta` shape, adds `recordMessageMeta`, and records the identity-key rule with its bound.
+- **Escalations:** none — a keying fix inside already-documented turn accounting.
+
+## 2026-08-21 — Restore text in the Todo tool result card
+
+- **Code:** `src/webview/main.ts` declared a two-parameter `el(tag, className?)` while `launcher.ts` and `raw.ts` declare `el(tag, className?, text?)`. `buildTodoToolResultElement` was written against the wider signature, so the task number, label, and blocked-by chips were created empty and the card rendered as bare bullets. Added the `text?` parameter to the `main.ts` and `settings.ts` helpers so all four bundles match, and added `src/test/unit/webview/element-helper.test.ts` as an arity guard — nothing else can catch this, since esbuild does not typecheck the webview and `tsconfig.json` excludes `src/webview/**`.
+- **Wiki:** `webview-architecture.md` updates the `el()` signature in Role and Keywords and gains a See-also rule that every per-bundle copy must keep the same arity, with the Todo card as the recorded failure.
+- **Escalations:** none — a signature drift fix inside an already-documented helper.
+
+## 2026-08-21 — Transfer delegated-run timing to the parent turn summary
+
+- **Code:** `ChatService` gained `recordSubagentToolEvent` and `syncSubagentRuns`, fed by the existing `onSubagentMutation` / `onSubagentStateChanged` channels in `ChatController`. `TabRuntime` tracks delegated runs in a bounded `subagentStats` map with mutable rows, charges each run to the turn that first observed it via `turnSubagentIds`, and holds in-flight child tool starts in `pendingSubagentTools`. `completeAgentEnd` attaches those rows to the closing assistant message by reference so a background child settling after its turn updates the closed summary; `buildState` copies them into `_subagentStats` for the webview, which renders a separate Subagents section — including failed, cancelled, and still-running delegations.
+- **Wiki:** `chat-host-and-service.md` documents the separate delegated-run accounting channel, the new methods and shared types, and the rule against publishing state per child tool event; `tab-registry-and-runtime.md` records the delegated-run fields, `subagentStat`, and the mutable-row and once-per-run charging rules; `subagent-manager-and-lifecycle.md` notes timing as a second consumer of the mutation channel and why delegated time is reported separately from the parent's own `subagent` tool row.
+- **Escalations:** none — this extends the existing tool-timing accounting and reuses the established subagent event channels.
+
 ## 2026-08-21 — Record completed tool timing
 
 - **Code:** `ChatService` now measures each completed tool call by stable call id, retains a bounded per-tab duration history, snapshots grouped per-tool totals onto the closing assistant message, and projects both per-call and per-turn timing into chat and transcript state for the webview.

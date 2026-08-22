@@ -6,8 +6,12 @@ import { formatUsdAmount } from '../shared/deepseek-usage';
 import { shouldDisplayChatMessage } from '../shared/message-visibility';
 import {
     formatToolDurationSeconds,
+    parseSubagentStatEntries,
     parseToolStatEntries,
+    sortSubagentStats,
+    totalSubagentStats,
     totalToolStats,
+    type SubagentStatEntry,
 } from '../shared/tool-timing';
 import {
     VsCodeAgentConnection,
@@ -5195,9 +5199,10 @@ function isSlashMenuVisible(): boolean {
 
 // ── Helpers ──
 
-function el(tag: string, className?: string): HTMLElement {
+function el(tag: string, className?: string, text?: string): HTMLElement {
     const e = document.createElement(tag);
     if (className) e.className = className;
+    if (text !== undefined) e.textContent = text;
     return e;
 }
 
@@ -5308,38 +5313,86 @@ function buildMessageFooter(msg: any, index: number): HTMLElement | null {
 }
 
 /**
- * Per-tool wall-clock breakdown for the turn that ends at this message.
- * Collapsed by default: it is a diagnostic, not part of the reading flow.
+ * Wall-clock breakdown for the turn that ends at this message: the agent's own
+ * tool calls, then delegated runs accounted separately because the parent books
+ * its `subagent` call while the child does the actual work. Collapsed by
+ * default — it is a diagnostic, not part of the reading flow.
  */
 function buildTurnToolStats(msg: any, index: number): HTMLElement | null {
     if ((msg?.role ?? '') !== 'assistant') return null;
-    const entries = parseToolStatEntries(msg._toolStats);
-    if (entries.length === 0) return null;
+    const toolEntries = parseToolStatEntries(msg._toolStats);
+    const subagentEntries = sortSubagentStats(parseSubagentStatEntries(msg._subagentStats));
+    if (toolEntries.length === 0 && subagentEntries.length === 0) return null;
 
-    const total = totalToolStats(entries);
+    const toolTotal = totalToolStats(toolEntries);
+    const subagentTotal = totalSubagentStats(subagentEntries);
+    const summaryParts: string[] = [];
+    if (toolEntries.length > 0) {
+        summaryParts.push(`Tools ${formatToolDurationSeconds(toolTotal.durationMs)}`);
+        summaryParts.push(`${toolTotal.calls} call${toolTotal.calls === 1 ? '' : 's'}`);
+    }
+    if (subagentEntries.length > 0) {
+        summaryParts.push(`Subagents ${formatToolDurationSeconds(subagentTotal.durationMs)}`);
+        summaryParts.push(`${subagentTotal.runs} run${subagentTotal.runs === 1 ? '' : 's'}`);
+        if (subagentTotal.failed > 0) summaryParts.push(`${subagentTotal.failed} failed`);
+        if (subagentTotal.cancelled > 0) summaryParts.push(`${subagentTotal.cancelled} cancelled`);
+        if (subagentTotal.active > 0) summaryParts.push(`${subagentTotal.active} running`);
+    }
+
     const details = document.createElement('details');
     details.className = 'turn-tool-stats';
     details.dataset.foldoutKey = `${state.activeTabId}:message:${index}:tool-stats`;
 
     const summary = document.createElement('summary');
     summary.className = 'turn-tool-stats-summary';
-    summary.title = 'Wall-clock time spent in tools during this turn';
-    summary.textContent = `Tool time ${formatToolDurationSeconds(total.durationMs)}`
-        + ` · ${total.calls} call${total.calls === 1 ? '' : 's'}`;
+    summary.title = 'Wall-clock time spent in tools and delegated runs during this turn';
+    summary.textContent = summaryParts.join(' · ');
     details.appendChild(summary);
 
     const list = el('div', 'turn-tool-stats-list');
-    for (const entry of entries) {
+    for (const entry of toolEntries) {
         const name = el('span', 'turn-tool-stats-name');
-        name.textContent = entry.calls > 1 ? `${entry.name} ×${entry.calls}` : entry.name;
         name.title = entry.name;
+        const label = el('span', 'turn-tool-stats-label');
+        label.textContent = entry.calls > 1 ? `${entry.name} ×${entry.calls}` : entry.name;
+        name.appendChild(label);
+        list.appendChild(name);
         const time = el('span', 'turn-tool-stats-time');
         time.textContent = formatToolDurationSeconds(entry.durationMs);
-        list.appendChild(name);
         list.appendChild(time);
+    }
+    if (subagentEntries.length > 0) {
+        const heading = el('span', 'turn-tool-stats-heading');
+        heading.textContent = 'Subagents';
+        list.appendChild(heading);
+        for (const entry of subagentEntries) {
+            list.appendChild(buildSubagentStatName(entry));
+            const time = el('span', 'turn-tool-stats-time');
+            time.textContent = formatToolDurationSeconds(entry.durationMs);
+            list.appendChild(time);
+        }
     }
     details.appendChild(list);
     return details;
+}
+
+function buildSubagentStatName(entry: SubagentStatEntry): HTMLElement {
+    const statusLabel = entry.status === 'active' ? 'running' : entry.status;
+    const name = el('span', 'turn-tool-stats-name');
+    const label = el('span', 'turn-tool-stats-label');
+    label.textContent = entry.name;
+    name.appendChild(label);
+    if (entry.status !== 'completed') {
+        const status = el('span', `turn-tool-stats-status ${entry.status}`);
+        status.textContent = statusLabel;
+        name.appendChild(status);
+    }
+    const toolSummary = entry.toolCalls > 0
+        ? `tools ${formatToolDurationSeconds(entry.toolDurationMs)}`
+            + ` across ${entry.toolCalls} call${entry.toolCalls === 1 ? '' : 's'}`
+        : 'no tool calls recorded';
+    name.title = `${entry.name} — ${statusLabel}, ${toolSummary}`;
+    return name;
 }
 
 function formatFullUsageParts(usage: any): string[] {

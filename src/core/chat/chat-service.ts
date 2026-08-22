@@ -16,12 +16,15 @@ import type { TurnCompletionInfo, TurnCompletionOutcome } from '../../shared/tur
 import { safeSerialize } from '../../shared/safe-serialize';
 import {
     accumulateToolStat,
+    subagentStatStatus,
     toolStatDisplayName,
     toolStatEntries,
+    type SubagentStatEntry,
 } from '../../shared/tool-timing';
 import {
     TabRuntime,
     type TabDisposableResource,
+    type TabMessageMeta,
     type TabSessionResource,
 } from './tab-runtime';
 
@@ -78,6 +81,28 @@ export interface AgentEndAccounting {
 export interface TabNameUpdate {
     readonly changed: boolean;
     readonly name: string;
+}
+
+/**
+ * Structural view of one child tool event forwarded by the subagent manager.
+ * Child sessions never reach `reduceEvent`, so their timing arrives here.
+ */
+export interface SubagentToolEvent {
+    readonly type: 'tool_execution_start' | 'tool_execution_end';
+    readonly agentId: string;
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly args?: unknown;
+}
+
+/** Structural view of the delegated-run lifecycle fields turn accounting reads. */
+export interface SubagentRunTiming {
+    readonly agentId: string;
+    readonly name: string;
+    readonly status: string;
+    readonly queuedAt?: number;
+    readonly startedAt?: number;
+    readonly finishedAt?: number;
 }
 
 const FILE_BLOCK_TITLE_RE = /\[File:\s*(.+?)\]\s*(?:\(binary file\))?[\s\S]*?\[\/File\]\s*\n?/g;
@@ -199,6 +224,7 @@ export class ChatService {
             tab.errorReportedThisRun = false;
             tab.pendingTools.clear();
             tab.turnToolStats.clear();
+            tab.turnSubagentIds.clear();
         }
 
         if (event.type === 'tool_execution_start' && event.toolCallId) {
@@ -229,13 +255,16 @@ export class ChatService {
         if (event.type === 'compaction_end') tab.isCompacting = false;
 
         if (event.type === 'message_end' && event.message?.role === 'assistant') {
-            const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
-            if (lastOrdinal >= 0) {
-                const meta = tab.messageMeta.get(lastOrdinal)
+            // The event carries the finalized message, so its identity is exact
+            // and does not depend on the compact context's current shape.
+            const key = assistantMetaKey(event.message)
+                ?? assistantMetaKey(lastAssistantMessage(tab.session.getMessages()));
+            if (key !== undefined) {
+                const meta = tab.messageMeta.get(key)
                     ?? { thinkingDurationSec: 0, messageEndTime: 0 };
                 meta.thinkingDurationSec = tab.streamingThinkingDuration;
                 meta.messageEndTime = this._now();
-                tab.messageMeta.set(lastOrdinal, meta);
+                tab.recordMessageMeta(key, meta);
             }
             // A turn may contain more than one assistant message. The next
             // streaming draft must not inherit finalized text or thinking.
@@ -272,6 +301,50 @@ export class ChatService {
         }
     }
 
+    /**
+     * Fold one child tool call into the delegating run's accounting. The parent
+     * also books its own `subagent` tool call, so this time is reported as a
+     * separate section rather than merged into the parent tool breakdown.
+     */
+    recordSubagentToolEvent(tab: ChatServiceTab, event: SubagentToolEvent): void {
+        const agentId = String(event.agentId ?? '');
+        const toolCallId = String(event.toolCallId ?? '');
+        if (!agentId || !toolCallId) return;
+
+        if (event.type === 'tool_execution_start') {
+            tab.subagentStat(agentId);
+            tab.pendingSubagentTools.set(toolCallId, this._now());
+            return;
+        }
+
+        const startTime = tab.pendingSubagentTools.get(toolCallId);
+        tab.pendingSubagentTools.delete(toolCallId);
+        if (startTime === undefined) return;
+        const entry = tab.subagentStat(agentId);
+        entry.toolDurationMs += Math.max(0, this._now() - startTime);
+        entry.toolCalls += 1;
+    }
+
+    /**
+     * Reconcile the manager's run list into per-turn accounting. Runs that
+     * disappear from the snapshot (terminal retention expiry) keep the numbers
+     * they last reported.
+     */
+    syncSubagentRuns(tab: ChatServiceTab, runs: readonly SubagentRunTiming[]): void {
+        const now = this._now();
+        for (const run of runs) {
+            const agentId = String(run.agentId ?? '');
+            if (!agentId) continue;
+            const entry = tab.subagentStat(agentId, run.name);
+            if (run.name) entry.name = run.name;
+            entry.status = subagentStatStatus(run.status);
+            const start = run.startedAt ?? run.queuedAt;
+            entry.durationMs = start === undefined
+                ? 0
+                : Math.max(0, (run.finishedAt ?? now) - start);
+        }
+    }
+
     beginAgentEnd(
         tab: ChatServiceTab,
         outcome: TurnCompletionOutcome,
@@ -294,16 +367,22 @@ export class ChatService {
         projection: AgentEndProjection,
         accounting?: AgentEndAccounting,
     ): void {
-        const lastOrdinal = lastAssistantOrdinal(tab.session.getMessages());
+        const key = assistantMetaKey(lastAssistantMessage(tab.session.getMessages()));
         const turnToolStats = toolStatEntries(tab.turnToolStats);
         tab.turnToolStats.clear();
-        if (lastOrdinal >= 0 && (
+        // Live rows on purpose: a background child keeps running past this
+        // point and the turn summary has to reflect where it lands.
+        const turnSubagentStats = [...tab.turnSubagentIds]
+            .map((agentId) => tab.subagentStats.get(agentId))
+            .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+        if (key !== undefined && (
             accounting?.codexTurn
             || accounting?.deepSeekTurn
             || projection.turnDurationMs > 0
             || turnToolStats.length > 0
+            || turnSubagentStats.length > 0
         )) {
-            const meta = tab.messageMeta.get(lastOrdinal)
+            const meta = tab.messageMeta.get(key)
                 ?? { thinkingDurationSec: 0, messageEndTime: 0 };
             if (accounting?.codexTurn) meta.codexTurn = accounting.codexTurn;
             if (accounting?.deepSeekTurn) meta.deepSeekTurn = accounting.deepSeekTurn;
@@ -312,7 +391,8 @@ export class ChatService {
                 meta.totalTurnDurationMs = tab.totalTurnDurationMs;
             }
             if (turnToolStats.length > 0) meta.toolStats = turnToolStats;
-            tab.messageMeta.set(lastOrdinal, meta);
+            if (turnSubagentStats.length > 0) meta.subagentStats = turnSubagentStats;
+            tab.recordMessageMeta(key, meta);
         }
 
         tab.streamingText = '';
@@ -679,60 +759,50 @@ export class ChatService {
             ...(tool.args === undefined ? {} : { args: safeSerialize(tool.args) }),
         }));
 
-        let assistantOrdinal = 0;
-        for (const message of state.messages) {
-            if (message.role !== 'assistant') continue;
-            const meta = tab.messageMeta.get(assistantOrdinal);
-            if (meta) {
-                message._thinkingDurationSec = meta.thinkingDurationSec;
-                message._messageEndTime = meta.messageEndTime;
-                if (meta.turnDurationMs !== undefined) {
-                    message._turnDurationMs = meta.turnDurationMs;
-                }
-                if (meta.totalTurnDurationMs !== undefined) {
-                    message._totalTurnDurationMs = meta.totalTurnDurationMs;
-                }
-                if (meta.codexTurn) message._codexTurnUsage = meta.codexTurn;
-                if (meta.deepSeekTurn) message._deepSeekTurnUsage = meta.deepSeekTurn;
-                if (meta.toolStats && meta.toolStats.length > 0) {
-                    message._toolStats = meta.toolStats;
-                }
-            }
-            assistantOrdinal++;
-        }
-
-        // The webview renders the transcript page, while runtime timing/cost
-        // metadata is tracked against compact context assistants. Align the
-        // newest assistants from the end so recent cards keep that metadata.
-        const transcriptAssistants = state.transcript?.items
-            .map((item) => item.message)
-            .filter((message) => message?.role === 'assistant') ?? [];
-        let transcriptAssistantIndex = transcriptAssistants.length - 1;
-        for (let index = state.messages.length - 1; index >= 0 && transcriptAssistantIndex >= 0; index--) {
-            const contextMessage = state.messages[index];
-            if (contextMessage?.role !== 'assistant') continue;
-            const transcriptMessage = transcriptAssistants[transcriptAssistantIndex--];
-            for (const key of [
-                '_thinkingDurationSec',
-                '_messageEndTime',
-                '_turnDurationMs',
-                '_totalTurnDurationMs',
-                '_codexTurnUsage',
-                '_deepSeekTurnUsage',
-                '_toolStats',
-            ]) {
-                if (contextMessage[key] !== undefined) transcriptMessage[key] = contextMessage[key];
-            }
-        }
+        // Both projections of a message share its identity, so the compact
+        // context and the rendered transcript are annotated the same way. There
+        // is deliberately no positional alignment step: compaction rewrites the
+        // compact context, and matching by position there mismatched turns.
+        const transcriptMessages = state.transcript?.items.map((item) => item.message) ?? [];
+        annotateAssistantMeta(state.messages, tab.messageMeta);
+        annotateAssistantMeta(transcriptMessages, tab.messageMeta);
 
         // Tool results carry a stable call id, so per-action durations can be
         // matched exactly instead of being aligned positionally.
         annotateToolDurations(state.messages, tab.toolDurations);
-        annotateToolDurations(
-            state.transcript?.items.map((item) => item.message) ?? [],
-            tab.toolDurations,
-        );
+        annotateToolDurations(transcriptMessages, tab.toolDurations);
         return state;
+    }
+}
+
+function annotateAssistantMeta(
+    messages: readonly any[],
+    metaByMessage: ReadonlyMap<string, TabMessageMeta>,
+): void {
+    if (metaByMessage.size === 0) return;
+    for (const message of messages) {
+        const key = assistantMetaKey(message);
+        if (key === undefined) continue;
+        const meta = metaByMessage.get(key);
+        if (!meta) continue;
+        message._thinkingDurationSec = meta.thinkingDurationSec;
+        message._messageEndTime = meta.messageEndTime;
+        if (meta.turnDurationMs !== undefined) {
+            message._turnDurationMs = meta.turnDurationMs;
+        }
+        if (meta.totalTurnDurationMs !== undefined) {
+            message._totalTurnDurationMs = meta.totalTurnDurationMs;
+        }
+        if (meta.codexTurn) message._codexTurnUsage = meta.codexTurn;
+        if (meta.deepSeekTurn) message._deepSeekTurnUsage = meta.deepSeekTurn;
+        if (meta.toolStats && meta.toolStats.length > 0) {
+            message._toolStats = meta.toolStats;
+        }
+        if (meta.subagentStats && meta.subagentStats.length > 0) {
+            message._subagentStats = meta.subagentStats.map(
+                (entry: SubagentStatEntry) => ({ ...entry }),
+            );
+        }
     }
 }
 
@@ -797,14 +867,26 @@ function findMessageCutoff(messages: readonly any[], rollbackPoint: number): num
     return -1;
 }
 
-function lastAssistantOrdinal(messages: any[]): number {
-    let ordinal = -1;
-    let counter = 0;
-    for (const message of messages) {
-        if (message?.role === 'assistant') {
-            ordinal = counter;
-            counter++;
-        }
+/**
+ * Stable identity for one assistant message's turn metadata.
+ *
+ * Position is unusable as a key: compaction rewrites the compact context, so an
+ * ordinal recorded at turn end either stops existing or comes to name a
+ * different message — losing the turn footer, or worse, showing an unrelated
+ * older turn's numbers. The SDK requires `timestamp` on every message and both
+ * the compact-context and full-transcript projections of a message carry the
+ * same value, so it survives compaction, reload, and branch changes.
+ */
+export function assistantMetaKey(message: any): string | undefined {
+    if (!message || message.role !== 'assistant') return undefined;
+    const timestamp = message.timestamp;
+    if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return undefined;
+    return String(timestamp);
+}
+
+function lastAssistantMessage(messages: readonly any[]): any | undefined {
+    for (let index = messages.length - 1; index >= 0; index--) {
+        if (messages[index]?.role === 'assistant') return messages[index];
     }
-    return ordinal;
+    return undefined;
 }

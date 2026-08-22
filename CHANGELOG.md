@@ -7,10 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-08-21
+
 ### Added
 - Completed tool calls now show their wall-clock duration, and each finished assistant turn includes a collapsed per-tool breakdown with call counts and total time.
+- The turn breakdown also reports delegated subagent runs separately, with each run's wall-clock time, its outcome, and how much of it the child spent inside its own tools. Failed, cancelled, and still-running delegations are all included, and a background run that finishes after its turn updates that turn's breakdown in place.
 
 ### Fixed
+- A turn's footer details — duration, tokens-per-second, and the tool/subagent breakdown — no longer disappear when the context is compacted right after that turn, and a compacted chat can no longer show one turn the timings of an unrelated earlier one.
+- Todo tool result cards no longer render as empty rows — the task number, subject, and blocked-by chips are visible again.
 - The maximum-turns setting for subagents is now used exactly as you set it, instead of being capped at 100 behind the scenes. An agent definition that declares its own `maxTurns` still takes precedence over the setting, as before.
 
 ### Changed

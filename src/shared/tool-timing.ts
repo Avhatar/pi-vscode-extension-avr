@@ -20,7 +20,31 @@ export interface ToolStatEntry {
     readonly durationMs: number;
 }
 
+export type SubagentStatStatus = 'active' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * One delegated run, accounted against the turn that spawned it.
+ *
+ * A background child outlives its spawning turn, so entries stay mutable on the
+ * host: the turn keeps a reference and the numbers settle in place once the run
+ * finishes. Failed and cancelled runs are reported like any other — the time
+ * was spent regardless of the outcome.
+ */
+export interface SubagentStatEntry {
+    readonly agentId: string;
+    name: string;
+    status: SubagentStatStatus;
+    /** Wall clock from run start to settle, or to the last observation. */
+    durationMs: number;
+    /** Share of `durationMs` the child spent inside its own tool calls. */
+    toolDurationMs: number;
+    toolCalls: number;
+}
+
 const UNKNOWN_TOOL_NAME = 'Unknown tool';
+const SUBAGENT_TERMINAL_STATUSES = new Set<SubagentStatStatus>([
+    'completed', 'failed', 'cancelled',
+]);
 
 /**
  * Human-readable name used to group durations.
@@ -88,6 +112,86 @@ export function formatToolDurationSeconds(ms: number): string {
     if (ms < 100) return '<0.1s';
     if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
     return `${Math.round(ms / 1000)}s`;
+}
+
+/**
+ * Collapse the manager's run lifecycle onto the three outcomes worth reporting
+ * plus `active`. Queued, starting, retrying, and permission waits are all still
+ * in flight as far as turn accounting is concerned.
+ */
+export function subagentStatStatus(status: unknown): SubagentStatStatus {
+    const raw = typeof status === 'string' ? status : '';
+    return SUBAGENT_TERMINAL_STATUSES.has(raw as SubagentStatStatus)
+        ? raw as SubagentStatStatus
+        : 'active';
+}
+
+/** Longest run first; ties broken by name so the order survives re-renders. */
+export function sortSubagentStats(entries: readonly SubagentStatEntry[]): SubagentStatEntry[] {
+    return [...entries].sort(
+        (a, b) => b.durationMs - a.durationMs
+            || a.name.localeCompare(b.name)
+            || a.agentId.localeCompare(b.agentId),
+    );
+}
+
+export function totalSubagentStats(entries: readonly SubagentStatEntry[]): {
+    runs: number;
+    durationMs: number;
+    toolDurationMs: number;
+    toolCalls: number;
+    active: number;
+    failed: number;
+    cancelled: number;
+} {
+    let durationMs = 0;
+    let toolDurationMs = 0;
+    let toolCalls = 0;
+    let active = 0;
+    let failed = 0;
+    let cancelled = 0;
+    for (const entry of entries) {
+        durationMs += entry.durationMs;
+        toolDurationMs += entry.toolDurationMs;
+        toolCalls += entry.toolCalls;
+        if (entry.status === 'active') active++;
+        if (entry.status === 'failed') failed++;
+        if (entry.status === 'cancelled') cancelled++;
+    }
+    return {
+        runs: entries.length,
+        durationMs,
+        toolDurationMs,
+        toolCalls,
+        active,
+        failed,
+        cancelled,
+    };
+}
+
+/** Narrow an untrusted `_subagentStats` payload coming from serialized state. */
+export function parseSubagentStatEntries(value: unknown): SubagentStatEntry[] {
+    if (!Array.isArray(value)) return [];
+    const entries: SubagentStatEntry[] = [];
+    for (const item of value) {
+        if (!item || typeof item !== 'object') continue;
+        const record = item as Record<string, unknown>;
+        const agentId = typeof record.agentId === 'string' ? record.agentId : '';
+        if (!agentId) continue;
+        entries.push({
+            agentId,
+            name: typeof record.name === 'string' && record.name ? record.name : agentId,
+            status: subagentStatStatus(record.status),
+            durationMs: nonNegative(record.durationMs),
+            toolDurationMs: nonNegative(record.toolDurationMs),
+            toolCalls: Math.trunc(nonNegative(record.toolCalls)),
+        });
+    }
+    return entries;
+}
+
+function nonNegative(value: unknown): number {
+    return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 /** Narrow an untrusted `_toolStats` payload coming from serialized state. */

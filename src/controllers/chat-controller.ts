@@ -972,13 +972,19 @@ export class ChatController implements vscode.Disposable {
             }),
         );
 
-        const subagentStateSubscription = tab.session.onSubagentStateChanged(() => {
+        // Delegated-run timing is folded into the parent turn summary here, not
+        // pushed as its own state sync: child tool churn would otherwise force a
+        // full transcript projection per event. The rows are read live on the
+        // next natural sync (turn end, or the background settle notification).
+        const subagentStateSubscription = tab.session.onSubagentStateChanged((snapshot) => {
+            this._chatService.syncSubagentRuns(tab, snapshot.runs);
             if (tab.id === this._activeTabId && !this._subagentSmokeSnapshot) {
                 this._onLauncherStateChanged.fire();
             }
         });
         unsubs.push(() => subagentStateSubscription.dispose());
         const subagentMutationSubscription = tab.session.onSubagentMutation((event) => {
+            this._chatService.recordSubagentToolEvent(tab, event);
             routeSubagentMutation(event, tab.diffManager);
         });
         unsubs.push(() => subagentMutationSubscription.dispose());

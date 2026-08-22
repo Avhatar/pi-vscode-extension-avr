@@ -988,9 +988,10 @@ function showToast(message: string, type: 'error' | 'info' = 'info'): void {
     toastTimeout = setTimeout(() => toast!.classList.remove('visible'), 3000);
 }
 
-function el(tag: string, className?: string): HTMLElement {
+function el(tag: string, className?: string, text?: string): HTMLElement {
     const e = document.createElement(tag);
     if (className) e.className = className;
+    if (text !== undefined) e.textContent = text;
     return e;
 }
 

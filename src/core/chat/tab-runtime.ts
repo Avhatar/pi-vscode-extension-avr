@@ -6,7 +6,7 @@ import type {
     DeepSeekTurnUsage,
 } from '../../shared/agent-protocol';
 import type { ProjectToolSelectionDefault } from '../../shared/project-tool-default';
-import type { ToolStatEntry } from '../../shared/tool-timing';
+import type { SubagentStatEntry, ToolStatEntry } from '../../shared/tool-timing';
 
 export interface TabSessionResource {
     dispose(): void | Promise<void>;
@@ -24,6 +24,12 @@ export interface TabMessageMeta {
     turnDurationMs?: number;
     totalTurnDurationMs?: number;
     toolStats?: ToolStatEntry[];
+    /**
+     * Live entries owned by `TabRuntime.subagentStats`. Held by reference on
+     * purpose: a background child settles after its turn closed, and the turn
+     * summary has to pick that up without rewriting history.
+     */
+    subagentStats?: SubagentStatEntry[];
 }
 
 /**
@@ -32,6 +38,16 @@ export interface TabMessageMeta {
  * long-lived tab from growing without limit.
  */
 export const TOOL_DURATION_HISTORY_LIMIT = 5000;
+
+/** Upper bound on delegated runs tracked for turn summaries in one tab. */
+export const SUBAGENT_STAT_HISTORY_LIMIT = 500;
+
+/**
+ * Upper bound on assistant messages retaining turn metadata. Keys are message
+ * identities rather than compact-context positions, so the map no longer shrinks
+ * when the context is compacted and needs its own ceiling.
+ */
+export const MESSAGE_META_HISTORY_LIMIT = 2000;
 
 export interface TabRuntimeOptions<
     TSession extends TabSessionResource,
@@ -69,7 +85,8 @@ export class TabRuntime<
     streamingThinkingDuration: number;
     agentStartTime: number;
     totalTurnDurationMs: number;
-    readonly messageMeta: Map<number, TabMessageMeta>;
+    /** Keyed by `assistantMetaKey`, not by position — compaction rewrites order. */
+    readonly messageMeta: Map<string, TabMessageMeta>;
     readonly turnNotificationGate: TurnNotificationGate;
     hasNotification: boolean;
     queuedMessages: string[];
@@ -90,6 +107,12 @@ export class TabRuntime<
     readonly toolDurations: Map<string, number>;
     /** Per-tool totals for the turn currently running, keyed by display name. */
     readonly turnToolStats: Map<string, ToolStatEntry>;
+    /** Delegated runs observed in this tab, keyed by agent id. Mutated in place. */
+    readonly subagentStats: Map<string, SubagentStatEntry>;
+    /** Agent ids first observed during the turn currently running. */
+    readonly turnSubagentIds: Set<string>;
+    /** Start time of in-flight child tool calls, keyed by namespaced call id. */
+    readonly pendingSubagentTools: Map<string, number>;
     projectToolDefault?: ProjectToolSelectionDefault;
 
     private _subscriptions: Array<() => void> = [];
@@ -124,7 +147,62 @@ export class TabRuntime<
         this.pendingTools = new Map();
         this.toolDurations = new Map();
         this.turnToolStats = new Map();
+        this.subagentStats = new Map();
+        this.turnSubagentIds = new Set();
+        this.pendingSubagentTools = new Map();
         this.projectToolDefault = options.projectToolDefault;
+    }
+
+    /**
+     * Fetch the accounting row for one delegated run, creating it on first
+     * sight. Rows are mutated in place so a turn summary that already holds one
+     * keeps seeing current numbers after a background child settles.
+     *
+     * A run first seen while the agent is streaming is charged to that turn;
+     * restored history and late arrivals are tracked without being charged to
+     * whatever turn happens to be open.
+     */
+    subagentStat(agentId: string, name?: string): SubagentStatEntry {
+        const existing = this.subagentStats.get(agentId);
+        if (existing) {
+            // The tool-event channel carries no run name, so a row created from
+            // a child tool call adopts the real name on the next run sync.
+            if (name && existing.name === agentId) existing.name = name;
+            return existing;
+        }
+
+        const created: SubagentStatEntry = {
+            agentId,
+            name: name || agentId,
+            status: 'active',
+            durationMs: 0,
+            toolDurationMs: 0,
+            toolCalls: 0,
+        };
+        this.subagentStats.set(agentId, created);
+        if (this.isStreamingLocal) this.turnSubagentIds.add(agentId);
+        // Evicted rows stop receiving updates but stay rendered in the turn
+        // summaries that already reference them.
+        while (this.subagentStats.size > SUBAGENT_STAT_HISTORY_LIMIT) {
+            const oldest = this.subagentStats.keys().next();
+            if (oldest.done) break;
+            this.subagentStats.delete(oldest.value);
+        }
+        return created;
+    }
+
+    /**
+     * Store one assistant message's turn metadata, evicting the oldest entries
+     * once the history cap is reached. An evicted card simply loses its footer
+     * detail; nothing else depends on the map.
+     */
+    recordMessageMeta(key: string, meta: TabMessageMeta): void {
+        this.messageMeta.set(key, meta);
+        while (this.messageMeta.size > MESSAGE_META_HISTORY_LIMIT) {
+            const oldest = this.messageMeta.keys().next();
+            if (oldest.done) break;
+            this.messageMeta.delete(oldest.value);
+        }
     }
 
     /**
@@ -186,6 +264,9 @@ export class TabRuntime<
         this.messageMeta.clear();
         this.toolDurations.clear();
         this.turnToolStats.clear();
+        this.subagentStats.clear();
+        this.turnSubagentIds.clear();
+        this.pendingSubagentTools.clear();
         this.turnNotificationGate.reset();
         this.queuedMessages = [];
         this.queuedRetryHead = undefined;

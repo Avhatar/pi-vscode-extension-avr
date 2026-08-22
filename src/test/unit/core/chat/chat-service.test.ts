@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ChatService } from '../../../../core/chat/chat-service';
+import { assistantMetaKey, ChatService } from '../../../../core/chat/chat-service';
 import { PLAN_MODE_INSTRUCTIONS } from '../../../../core/chat/chat-preferences';
 import { TabRuntime } from '../../../../core/chat/tab-runtime';
 import type { CodexTurnUsage, SerializedAgentState, TabInfo } from '../../../../shared/agent-protocol';
@@ -69,12 +69,12 @@ describe('portable ChatService event and state projection', () => {
         const tab = createTab();
         tab.session.messages = [
             { role: 'user', content: 'task' },
-            { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+            { role: 'assistant', timestamp: 2001, content: [{ type: 'text', text: 'answer' }] },
         ];
         tab.isStreamingLocal = false;
         tab.isCompacting = true;
         tab.suspendedMessages = [
-            { role: 'assistant', content: [{ type: 'text', text: 'suspended' }] },
+            { role: 'assistant', timestamp: 2002, content: [{ type: 'text', text: 'suspended' }] },
         ];
         tab.streamingText = 'draft';
         tab.streamingThinking = 'reasoning';
@@ -87,13 +87,13 @@ describe('portable ChatService event and state projection', () => {
             startTime: 321,
             args: { command: 'sleep 80' },
         });
-        tab.messageMeta.set(0, {
+        tab.messageMeta.set('2001', {
             thinkingDurationSec: 4,
             messageEndTime: 456,
             turnDurationMs: 700,
             totalTurnDurationMs: 900,
         });
-        tab.messageMeta.set(1, {
+        tab.messageMeta.set('2002', {
             thinkingDurationSec: 2,
             messageEndTime: 789,
             codexTurn: {
@@ -186,7 +186,11 @@ describe('portable ChatService event and state projection', () => {
             toolName: 'grep',
             content: [{ type: 'text', text: 'hit' }],
         };
-        const assistant = { role: 'assistant', content: [{ type: 'text', text: 'done' }] };
+        const assistant = {
+            role: 'assistant',
+            timestamp: 3003,
+            content: [{ type: 'text', text: 'done' }],
+        };
         tab.session.messages = [{ role: 'user', content: 'task' }, toolResult, assistant];
         vi.spyOn(tab.session, 'serializeState').mockImplementation(() => ({
             messages: tab.session.messages.map((message) => ({ ...message })),
@@ -204,7 +208,7 @@ describe('portable ChatService event and state projection', () => {
             },
         }));
         tab.recordToolDuration('call-7', 452_000);
-        tab.messageMeta.set(0, {
+        tab.messageMeta.set(assistantMetaKey(assistant)!, {
             thinkingDurationSec: 0,
             messageEndTime: 900,
             toolStats: [{ name: 'Grep', calls: 2, durationMs: 452_000 }],
@@ -229,11 +233,115 @@ describe('portable ChatService event and state projection', () => {
         expect(isServerMessage({ type: 'stateSync', state })).toBe(true);
     });
 
+    it('keeps turn metadata on the closing assistant after compaction drops it from context', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        // The turn closes with this assistant still in the compact context.
+        const closingAssistant = {
+            role: 'assistant',
+            timestamp: 1_700_000_111,
+            content: [{ type: 'text', text: 'done' }],
+        };
+        const transcriptMessages = [
+            { role: 'user', timestamp: 1_700_000_100, content: 'task' },
+            closingAssistant,
+        ];
+        tab.session.messages = [...transcriptMessages];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.reduceEvent(tab, {
+            type: 'tool_execution_start', toolCallId: 'c1', toolName: 'grep',
+        });
+        clock = 453_000;
+        service.reduceEvent(tab, {
+            type: 'tool_execution_end', toolCallId: 'c1', toolName: 'grep',
+        });
+        service.reduceEvent(tab, { type: 'message_end', message: closingAssistant });
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        // Auto-compaction rewrites the compact context: the assistant that
+        // closed the turn is gone from it, while the transcript keeps the
+        // full branch.
+        tab.session.messages = [
+            { role: 'compactionSummary', timestamp: 1_700_000_200, summary: 'earlier work' },
+        ];
+        vi.spyOn(tab.session, 'serializeState').mockImplementation(() => ({
+            messages: tab.session.messages.map((message) => ({ ...message })),
+            isStreaming: false,
+            tools: [],
+            transcript: {
+                sessionId: 'session-1',
+                items: transcriptMessages.map((message, index) => ({
+                    id: `item-${index}`,
+                    entryId: `entry-${index}`,
+                    message: { ...message },
+                })),
+                hasMoreBefore: false,
+                totalUserMessages: 1,
+            },
+        }));
+
+        const state = service.buildState(tab, {
+            activeTabId: 'tab-1',
+            getTabs: () => [] as TabInfo[],
+            cacheMode: 'auto',
+            getCacheEffective: () => 'short',
+            getFileUndoViewEnabled: () => false,
+        });
+
+        expect(state.transcript?.items[1].message).toMatchObject({
+            _turnDurationMs: 452_000,
+            _messageEndTime: 453_000,
+            _toolStats: [{ name: 'Grep', calls: 1, durationMs: 452_000 }],
+        });
+    });
+
+    it('does not hand one assistant the metadata of an unrelated older turn', () => {
+        const service = new ChatService({ now: () => 1000 });
+        const tab = createTab();
+        const firstTurnAssistant = {
+            role: 'assistant',
+            timestamp: 1_700_000_111,
+            content: [{ type: 'text', text: 'first' }],
+        };
+        const survivingAssistant = {
+            role: 'assistant',
+            timestamp: 1_700_000_999,
+            content: [{ type: 'text', text: 'second' }],
+        };
+        // Only the first turn ever recorded metadata.
+        tab.messageMeta.set(assistantMetaKey(firstTurnAssistant)!, {
+            thinkingDurationSec: 0,
+            messageEndTime: 900,
+            turnDurationMs: 700,
+            toolStats: [{ name: 'Grep', calls: 2, durationMs: 452_000 }],
+        });
+        // Compaction left a different, later assistant at ordinal 0.
+        tab.session.messages = [survivingAssistant];
+        vi.spyOn(tab.session, 'serializeState').mockImplementation(() => ({
+            messages: tab.session.messages.map((message) => ({ ...message })),
+            isStreaming: false,
+            tools: [],
+        }));
+
+        const state = service.buildState(tab, {
+            activeTabId: 'tab-1',
+            getTabs: () => [] as TabInfo[],
+            cacheMode: 'auto',
+            getCacheEffective: () => 'short',
+            getFileUndoViewEnabled: () => false,
+        });
+
+        expect(state.messages[0]).not.toHaveProperty('_toolStats');
+        expect(state.messages[0]).not.toHaveProperty('_turnDurationMs');
+    });
+
     it('snapshots per-tool turn totals onto the closing assistant message', () => {
         let clock = 0;
         const service = new ChatService({ now: () => clock });
         const tab = createTab();
-        tab.session.messages = [{ role: 'assistant', content: [{ type: 'text', text: 'done' }] }];
+        tab.session.messages = [{ role: 'assistant', timestamp: 4001, content: [{ type: 'text', text: 'done' }] }];
 
         clock = 1000;
         service.reduceEvent(tab, { type: 'agent_start' });
@@ -270,12 +378,121 @@ describe('portable ChatService event and state projection', () => {
         const projection = service.beginAgentEnd(tab, 'completed');
         service.completeAgentEnd(tab, projection);
 
-        expect(tab.messageMeta.get(0)?.toolStats).toEqual([
+        expect(tab.messageMeta.get('4001')?.toolStats).toEqual([
             { name: 'Grep', calls: 2, durationMs: 452_000 },
             { name: 'MCP unity.read_log', calls: 1, durationMs: 30_000 },
         ]);
         expect(tab.turnToolStats.size).toBe(0);
         expect(tab.toolDurations.get('c')).toBe(30_000);
+    });
+
+    it('accounts delegated runs against the spawning turn, failures included', () => {
+        let clock = 0;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{ role: 'assistant', timestamp: 4002, content: [{ type: 'text', text: 'done' }] }];
+
+        clock = 1000;
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.syncSubagentRuns(tab, [
+            { agentId: 'a1', name: 'Explorer', status: 'running', queuedAt: 900, startedAt: 1000 },
+            { agentId: 'a2', name: 'Implementer', status: 'queued', queuedAt: 950 },
+        ]);
+
+        service.recordSubagentToolEvent(tab, {
+            type: 'tool_execution_start', agentId: 'a1', toolCallId: 'a1:c1', toolName: 'grep',
+        });
+        clock = 6000;
+        service.recordSubagentToolEvent(tab, {
+            type: 'tool_execution_end', agentId: 'a1', toolCallId: 'a1:c1', toolName: 'grep',
+        });
+
+        clock = 30_000;
+        service.syncSubagentRuns(tab, [
+            { agentId: 'a1', name: 'Explorer', status: 'completed', startedAt: 1000, finishedAt: 21_000 },
+            { agentId: 'a2', name: 'Implementer', status: 'failed', startedAt: 1200, finishedAt: 4200 },
+        ]);
+
+        const projection = service.beginAgentEnd(tab, 'completed');
+        service.completeAgentEnd(tab, projection);
+
+        expect(tab.messageMeta.get('4002')?.subagentStats).toEqual([
+            {
+                agentId: 'a1',
+                name: 'Explorer',
+                status: 'completed',
+                durationMs: 20_000,
+                toolDurationMs: 5000,
+                toolCalls: 1,
+            },
+            {
+                agentId: 'a2',
+                name: 'Implementer',
+                status: 'failed',
+                durationMs: 3000,
+                toolDurationMs: 0,
+                toolCalls: 0,
+            },
+        ]);
+    });
+
+    it('keeps a background run charged to its spawning turn and settles it in place', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{ role: 'assistant', timestamp: 4003, content: [{ type: 'text', text: 'spawned' }] }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.syncSubagentRuns(tab, [
+            { agentId: 'bg', name: 'Explorer', status: 'running', startedAt: 1000 },
+        ]);
+        // An unfinished run reports elapsed time as of the last manager update.
+        clock = 5000;
+        service.syncSubagentRuns(tab, [
+            { agentId: 'bg', name: 'Explorer', status: 'running', startedAt: 1000 },
+        ]);
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        const firstTurn = tab.messageMeta.get('4003')?.subagentStats;
+        expect(firstTurn).toMatchObject([{ status: 'active', durationMs: 4000 }]);
+
+        // A later turn must not re-charge the same run...
+        clock = 9000;
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.syncSubagentRuns(tab, [
+            { agentId: 'bg', name: 'Explorer', status: 'running', startedAt: 1000 },
+        ]);
+        expect(tab.turnSubagentIds.size).toBe(0);
+
+        // ...and the settled numbers reach the turn that spawned it.
+        clock = 20_000;
+        service.syncSubagentRuns(tab, [
+            { agentId: 'bg', name: 'Explorer', status: 'completed', startedAt: 1000, finishedAt: 15_000 },
+        ]);
+        expect(firstTurn).toMatchObject([{ status: 'completed', durationMs: 14_000 }]);
+    });
+
+    it('does not charge restored delegated runs to an idle tab', () => {
+        const service = new ChatService({ now: () => 5000 });
+        const tab = createTab();
+
+        service.syncSubagentRuns(tab, [
+            { agentId: 'restored', name: 'Explorer', status: 'completed', startedAt: 0, finishedAt: 1000 },
+        ]);
+
+        expect(tab.subagentStats.get('restored')).toMatchObject({ durationMs: 1000 });
+        expect(tab.turnSubagentIds.size).toBe(0);
+    });
+
+    it('ignores a child tool end without a recorded start', () => {
+        const service = new ChatService({ now: () => 5000 });
+        const tab = createTab();
+
+        service.recordSubagentToolEvent(tab, {
+            type: 'tool_execution_end', agentId: 'a1', toolCallId: 'a1:c1', toolName: 'grep',
+        });
+
+        expect(tab.subagentStats.size).toBe(0);
     });
 
     it('ignores a tool end without a recorded start', () => {
@@ -370,9 +587,12 @@ describe('portable ChatService event and state projection', () => {
         expect(tab.streamingText).toBe('answer');
         expect(tab.streamingThinkingDuration).toBe(4);
 
-        tab.session.messages = [{ role: 'assistant', content: [] }];
-        service.reduceEvent(tab, { type: 'message_end', message: { role: 'assistant' } });
-        expect(tab.messageMeta.get(0)).toMatchObject({
+        tab.session.messages = [{ role: 'assistant', timestamp: 4004, content: [] }];
+        service.reduceEvent(tab, {
+            type: 'message_end',
+            message: { role: 'assistant', timestamp: 4004 },
+        });
+        expect(tab.messageMeta.get('4004')).toMatchObject({
             thinkingDurationSec: 4,
             messageEndTime: 7000,
         });
@@ -385,7 +605,7 @@ describe('portable ChatService event and state projection', () => {
         const service = new ChatService({ now: () => 7000 });
         const tab = createTab();
         tab.name = 'Portable chat';
-        tab.session.messages = [{ role: 'assistant', content: [{ type: 'text', text: 'done' }] }];
+        tab.session.messages = [{ role: 'assistant', timestamp: 4005, content: [{ type: 'text', text: 'done' }] }];
         tab.turnNotificationGate.arm();
         service.reduceEvent(tab, { type: 'agent_start' });
         tab.agentStartTime = 1000;
@@ -402,7 +622,7 @@ describe('portable ChatService event and state projection', () => {
         service.completeAgentEnd(tab, end, { codexTurn });
 
         expect(end).toEqual({ turnEndAt: 7000, turnDurationMs: 6000 });
-        expect(tab.messageMeta.get(0)).toMatchObject({
+        expect(tab.messageMeta.get('4005')).toMatchObject({
             codexTurn,
             turnDurationMs: 6000,
             totalTurnDurationMs: 6000,
