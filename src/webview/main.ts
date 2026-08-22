@@ -4,6 +4,7 @@ import { getCacheCapability } from '../shared/cache-info';
 import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage';
 import { formatUsdAmount } from '../shared/deepseek-usage';
 import { shouldDisplayChatMessage } from '../shared/message-visibility';
+import { orderDisplayMessages, type DisplayMessageItem } from './display-order';
 import {
     formatToolDurationSeconds,
     parseSubagentStatEntries,
@@ -1015,43 +1016,8 @@ function markRetriedValidationErrorsForAllChanges(): void {
     }
 }
 
-function getDisplayMessageItems(): Array<{ msg: any; sourceIndex: number }> {
-    const compactions: Array<{ msg: any; sourceIndex: number; timestamp: number }> = [];
-    const items: Array<{ msg: any; sourceIndex: number }> = [];
-
-    for (let i = 0; i < state.messages.length; i++) {
-        const msg = state.messages[i];
-        if (!shouldDisplayChatMessage(msg)) continue;
-        if ((msg.role ?? 'unknown') === 'compactionSummary') {
-            const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : Number.MAX_SAFE_INTEGER;
-            compactions.push({ msg, sourceIndex: i, timestamp });
-        } else {
-            items.push({ msg, sourceIndex: i });
-        }
-    }
-
-    const latestCompactionTimestamp = compactions.reduce(
-        (latest, item) => Math.max(latest, item.timestamp),
-        -Infinity,
-    );
-
-    for (const compaction of compactions.sort((a, b) => a.timestamp - b.timestamp)) {
-        const msg = {
-            ...compaction.msg,
-            _latestCompaction: compaction.timestamp === latestCompactionTimestamp,
-        };
-        let insertAt = items.length;
-        for (let i = 0; i < items.length; i++) {
-            const ts = items[i].msg?.timestamp;
-            if (typeof ts === 'number' && ts > compaction.timestamp) {
-                insertAt = i;
-                break;
-            }
-        }
-        items.splice(insertAt, 0, { msg, sourceIndex: compaction.sourceIndex });
-    }
-
-    return items;
+function getDisplayMessageItems(): DisplayMessageItem[] {
+    return orderDisplayMessages(state.messages, shouldDisplayChatMessage);
 }
 
 function updateTabs(): void {
@@ -3527,6 +3493,14 @@ function buildSubagentNotificationCard(msg: any): HTMLElement {
     `;
     const wrapper = el('div', 'tool-card-wrapper');
     wrapper.appendChild(buildToolIoCard(headerHtml, task, result));
+    // The card is positioned by `finishedAt` rather than by where the buffered
+    // notification landed in the transcript, so name the time it stands for.
+    if (typeof details.finishedAt === 'number') {
+        const footer = el('div', 'tool-footer');
+        footer.textContent = formatTimestamp(details.finishedAt);
+        footer.title = 'When the child agent finished';
+        wrapper.appendChild(footer);
+    }
     return wrapper;
 }
 

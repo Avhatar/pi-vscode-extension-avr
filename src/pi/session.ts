@@ -1394,6 +1394,11 @@ export class PiSessionManager {
             status: outcome,
             model: run.model,
             turnCount: run.turnCount,
+            // When the child actually settled. The notification itself is
+            // buffered until the parent turn ends, so without this the chat can
+            // only show the flush time and a child that finished mid-turn looks
+            // like it outlived the parent's final report.
+            ...(run.finishedAt !== undefined ? { finishedAt: run.finishedAt } : {}),
         };
         if (this._session?.isStreaming) {
             this._pendingBackgroundNotifications.push({ content, details });

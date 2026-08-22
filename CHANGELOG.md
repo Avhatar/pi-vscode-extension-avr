@@ -24,6 +24,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A child that is about to run out of turns is now asked to wrap up and return what it has, one turn before the budget is spent, instead of being cut off mid-tool-call.
 - When a child is stopped anyway — turn budget or timeout — its last message now comes back with the failure, so the parent can finish from where the child stopped instead of re-running the whole task from scratch.
 - A child that delivered its result at the very end of its budget is no longer reported as failed when the stop lands in the same moment as the result.
+- Background subagent completion cards now sit where the child actually finished instead of all landing below the turn's final report. A child that finished mid-turn appears among that turn's tool calls, one that genuinely outlived the turn still appears after it, and each card names the completion time.
 
 ## [0.68.0] - 2026-08-21
 
