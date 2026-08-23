@@ -1,10 +1,10 @@
 # Chapter: packaging-and-release
 
-Packaging a VS Code extension is more ceremony than compilation: the VSIX must contain the right files, exclude the wrong ones, ship an accurate `CHANGELOG.md` for the marketplace listing, use a bespoke `MARKETPLACE.md` instead of the developer-facing README, and pass a boundary verifier that catches accidental inclusion of the standalone desktop project. This chapter documents the pipeline: manifest, ignore rules, deploy scripts, boundary verifier.
+Packaging a VS Code extension is more ceremony than compilation: the VSIX must contain the right files, exclude the wrong ones, swap in both a bespoke `MARKETPLACE.md` and a user-facing `RELEASES.md` in place of the developer-facing `README.md` and per-build `CHANGELOG.md`, and pass a boundary verifier that catches accidental inclusion of the standalone desktop project. This chapter documents the pipeline: manifest, ignore rules, deploy scripts, boundary verifier.
 
 ## Article roster
 
-- [packaging-and-release](packaging-and-release.md) — `package.json` scripts, `.vscodeignore` invariants, `scripts/bump-version.js`, `scripts/verify-vsix-boundary.js`, `CHANGELOG.md` stamping, `MARKETPLACE.md` swap.
+- [packaging-and-release](packaging-and-release.md) — `package.json` scripts, `.vscodeignore` invariants, `scripts/bump-version.js`, `scripts/verify-vsix-boundary.js`, `CHANGELOG.md` stamping, the `MARKETPLACE.md` / `RELEASES.md` swap.
 
 ## Reader task
 
@@ -14,6 +14,7 @@ The reader arrives here to answer one of:
 - "What does `npm run deploy:patch` actually do?"
 - "Why does the VSIX have a different README than the repo?"
 - "How is the CHANGELOG stamped — manual or automated?"
+- "Which changelog do users see, and why isn't it the one the bump script writes?"
 
 ## Neighborhood
 

@@ -11,6 +11,10 @@ esbuild.js
 AGENTS.md
 CLAUDE.md
 README.md
+# The per-build history is for contributors. Users get RELEASES.md, which
+# `vsce package --changelog-path` installs as the VSIX's changelog.md and the
+# Marketplace renders on its Changelog tab.
+CHANGELOG.md
 .dev-notes/**
 docs/**
 standalone/**

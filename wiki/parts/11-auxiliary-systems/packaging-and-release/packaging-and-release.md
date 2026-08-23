@@ -11,7 +11,7 @@ Manifest scripts [package.json](../../../../package.json):
 - `compile` → `node esbuild.js`
 - `postinstall` / `repair:runtime-dependencies` → remove the Pi SDK's shrinkwrapped vulnerable `brace-expansion` copy so its `minimatch` resolves root 5.0.9
 - `verify:runtime-dependencies` → fail unless Pi physically resolves patched `brace-expansion`
-- `package` → post-prune runtime repair + runtime-dependency verification + VSIX boundary verification + `vsce package --readme-path MARKETPLACE.md`
+- `package` → post-prune runtime repair + runtime-dependency verification + VSIX boundary verification + `vsce package --readme-path MARKETPLACE.md --changelog-path RELEASES.md`
 - `test`, `test:unit`, `test:integration`
 - `version:patch/minor/major` → `node scripts/bump-version.js <bump> --sync-lock`
 - `deploy` → compile + prune devDeps + package + reinstall devDeps + `code --install-extension`
@@ -22,7 +22,7 @@ Manifest scripts [package.json](../../../../package.json):
 - `.vscode/**`, `.github/**`, `docs/**`, `standalone/**`, `.dev-notes/**`, `scripts/**`, `.pi/**`, `.claude/**` — excluded
 - `src/**` excluded **except** `!src/webview/styles/**` — CSS must ship for runtime loading
 - `vitest.config.ts`, `tsconfig*.json`, `esbuild.js` — excluded
-- `AGENTS.md`, `CLAUDE.md`, `README.md` — excluded (README replaced at package time)
+- `AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md` — excluded; both the README and the changelog are replaced at package time from `MARKETPLACE.md` and `RELEASES.md`
 - `**/*.map`, `*.vsix` — excluded; source maps require the recursive glob because a bare `*.map` matches only the package root
 - **Never filter `node_modules/**`** — hoisted transitive deps must remain intact (see [Part I § bundle-targets-and-esbuild](../../01-extension-host-substrate/bundle-targets-and-esbuild/bundle-targets-and-esbuild.md))
 
@@ -47,6 +47,13 @@ Boundary verification [scripts/verify-vsix-boundary.js:1](../../../../scripts/ve
 - Sections `### Added`, `### Changed`, `### Removed`, `### Fixed` under each version.
 - Dates in ISO 8601 (`YYYY-MM-DD`).
 - Newest at top; the bump script stamps and prepends `[Unreleased]`.
+- Per **build**, not per release. Most stamped versions are only installed locally, so this file is a contributor artefact and is excluded from the VSIX.
+
+`RELEASES.md` [RELEASES.md:1](../../../../RELEASES.md#L1):
+
+- Per **published** version, newest first; each entry consolidates everything since the previous published version so a user reads exactly one entry.
+- Replaces `CHANGELOG.md` inside the VSIX via `--changelog-path RELEASES.md`; `vsce` installs it as `extension/changelog.md`, which is what the Marketplace Changelog tab renders and what the in-chat `/changelog` command opens [chat-controller.ts:1559](../../../../src/controllers/chat-controller.ts#L1559).
+- Curated by hand. `bump-version.js` never touches it — the bump stamps `CHANGELOG.md` only, because the bump happens per build while an entry here is owed only when a build is actually handed to users.
 
 `MARKETPLACE.md` [MARKETPLACE.md:1](../../../../MARKETPLACE.md#L1):
 
@@ -77,7 +84,8 @@ After publishing, verify the intended version on the Marketplace page or Gallery
 **Types / files:**
 - [package.json](../../../../package.json) — script pipeline
 - [.vscodeignore](../../../../.vscodeignore) — inclusion rules
-- [CHANGELOG.md](../../../../CHANGELOG.md) — release history
+- [CHANGELOG.md](../../../../CHANGELOG.md) — per-build history, contributors only
+- [RELEASES.md](../../../../RELEASES.md) — per-published-version notes, ships as the VSIX changelog
 - [MARKETPLACE.md](../../../../MARKETPLACE.md) — VSIX README
 - [scripts/bump-version.js](../../../../scripts/bump-version.js) — version bump
 - [scripts/verify-vsix-boundary.js](../../../../scripts/verify-vsix-boundary.js) — boundary verifier
@@ -93,12 +101,14 @@ After publishing, verify the intended version on the Marketplace page or Gallery
 - Date format: `YYYY-MM-DD` (ISO 8601)
 - Bump-abort condition: empty `[Unreleased]`
 - Boundary abort condition: any `standalone/` prefix in packaged files
-- vsce flags: `--allow-missing-repository`, `--no-rewrite-relative-links`, `--readme-path MARKETPLACE.md`
+- vsce flags: `--allow-missing-repository`, `--no-rewrite-relative-links`, `--readme-path MARKETPLACE.md`, `--changelog-path RELEASES.md`
+- Packaged names: `vsce` lowercases the sourced files into `extension/readme.md` and `extension/changelog.md`
 
 **Namespaces:**
 - [scripts/](../../../../scripts/) — release automation
 - [.vscodeignore](../../../../.vscodeignore) — inclusion policy
-- [MARKETPLACE.md](../../../../MARKETPLACE.md), [CHANGELOG.md](../../../../CHANGELOG.md) — release artefacts
+- [MARKETPLACE.md](../../../../MARKETPLACE.md), [RELEASES.md](../../../../RELEASES.md) — packaged release artefacts
+- [CHANGELOG.md](../../../../CHANGELOG.md) — contributor-only build history
 
 ## Lifecycle edges
 
@@ -112,6 +122,9 @@ After publishing, verify the intended version on the Marketplace page or Gallery
 - **Rule — always `npm prune --omit=dev` before `vsce package`.** Otherwise every dev dep (vitest, esbuild, TypeScript) lands in the VSIX. Restore afterward with `npm install`.
 - **Rule — `standalone/` must never appear in `vsce ls` output.** The boundary verifier is the gate; do not `--skip` it.
 - **Pattern — `MARKETPLACE.md` for users, `README.md` for contributors.** The two READMEs serve different audiences; `README.md` documents the repo (build steps, contribution guide), `MARKETPLACE.md` is the product page.
+- **Pattern — `RELEASES.md` for users, `CHANGELOG.md` for contributors.** The same split applied to history: `CHANGELOG.md` stamps every build, `RELEASES.md` carries one consolidated entry per version actually published. Users receive roughly one build in ten, so the per-build history reads as noise to them and cannot answer "what did this upgrade give me".
+- **Rule — a `RELEASES.md` entry is owed at publication, not at bump.** The bump script deliberately does not touch it; adding an entry for a version that was never handed out makes the file lie about what users have.
+- **Pitfall — `/changelog` resolves by probing.** `chat-controller.ts` tries `RELEASES.md`, then `changelog.md`, then `CHANGELOG.md`, because a source checkout and an installed VSIX have different layouts and only Windows would forgive the case difference. Do not collapse it back to one hardcoded name.
 - **Pattern — sync-lock is optional but recommended.** `--sync-lock` runs `npm install --package-lock-only`; guarantees `package-lock.json` reflects the new version. Skip only if you know the lock is already correct.
 - **Pitfall — `code --install-extension --force` overwrites the existing install.** Fine for developer machines; do not run inside CI without a clean profile.
 - **Pitfall — the boundary verifier hardcodes `['standalone/']`.** If a new subtree needs to be excluded from the VSIX, add it to the list; do not rely on `.vscodeignore` alone.

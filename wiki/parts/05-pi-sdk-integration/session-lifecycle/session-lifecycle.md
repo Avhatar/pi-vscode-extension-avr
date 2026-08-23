@@ -34,9 +34,11 @@ During initialization, the manager obtains the process-wide runtime from [`getMo
 
 - `additionalExtensionPaths` — bundled Pi packages resolved via [`getBundledPiPackagePaths`](../../../../src/pi/bundled-packages.ts) (see [bundled-pi-packages](../bundled-pi-packages/bundled-pi-packages.md)).
 - `additionalSkillPaths` — Agent Skills paths from [`getStandardSkillPaths()`](../../../../src/pi/standard-resources.ts#L6).
-- Extension factories — todo, LSP (opt-in), codex-monitor, raw-recorder, tool-selection-guard, subagent, claude-compat. Factories are functions the SDK invokes at extension activation; each factory has access to session state.
+- Extension factories — todo, LSP (opt-in), codex-monitor, raw-recorder, image-compat-guard, tool-selection-guard, subagent, claude-compat. Factories are functions the SDK invokes at extension activation; each factory has access to session state.
 
 The tool-selection-guard [`createToolSelectionGuard`](../../../../src/pi/tool-selection-guard.ts#L27) closes a subtle hole: even when a tool is on the denylist, the Pi `mcp` gateway would still be able to reach it via proxy. The guard intercepts `mcp` gateway calls and blocks disabled targets.
+
+The image-compat guard [`createImageCompatGuard`](../../../../src/pi/image-compat-guard.ts) keeps an image-bearing chat usable after the model changes. It reads the active model lazily through `() => this._session?.model` and, on the SDK `context` event, replaces image blocks with `OMITTED_IMAGE_PLACEHOLDER` text whenever the model's `input` lacks `image`. Only that one request is rewritten — the stored history keeps its images, so switching back to an image-capable model restores them. Without the guard, a provider with a mixed line-up (DeepSeek ships vision as a separate model) rejects every later request in the chat: the chat panel blocks only *new* attachments, and the SDK request builder emits image blocks from user messages without consulting `model.input`. A model with no `input` metadata is treated as image-capable, matching the chat input's optimistic `supportsImages !== false` rule.
 
 [`PiSessionRuntime`](../../../../src/pi/session-runtime.ts#L15) is the state-machine wrapper around a single `AgentSession`. It exposes `start<State>()`, `replace<State>()`, `clear()`, `dispose()`. `_install()` binds the listener and returns state; `_invalidateCurrent()` unbinds, disposes, and releases the session lock.
 
@@ -67,6 +69,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 
 **Methods — guards:**
 - `createToolSelectionGuard()` — [tool-selection-guard.ts:27](../../../../src/pi/tool-selection-guard.ts#L27)
+- `createImageCompatGuard()` — [image-compat-guard.ts](../../../../src/pi/image-compat-guard.ts)
 
 **Methods — resources:**
 - `getStandardSkillPaths()` — [standard-resources.ts:6](../../../../src/pi/standard-resources.ts#L6)
@@ -82,6 +85,7 @@ Process CWD is changed to the workspace root before resource discovery [session.
 - [src/pi/session-runtime.ts](../../../../src/pi/session-runtime.ts) — `PiSessionRuntime`
 - [src/pi/standard-resources.ts](../../../../src/pi/standard-resources.ts) — Agent Skills paths
 - [src/pi/tool-selection-guard.ts](../../../../src/pi/tool-selection-guard.ts) — MCP-proxy denylist guard
+- [src/pi/image-compat-guard.ts](../../../../src/pi/image-compat-guard.ts) — per-request image stripping for text-only models
 
 ## Lifecycle edges
 

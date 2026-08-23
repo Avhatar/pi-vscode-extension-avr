@@ -84,3 +84,33 @@ export class SubagentRunError extends Error {
         this.name = 'SubagentRunError';
     }
 }
+
+/** Upper bound for the salvaged tail appended to a failure message. Large
+ *  enough to carry a real partial answer, small enough that a stranded child
+ *  cannot flood the parent context with a failed run's transcript. */
+export const PARTIAL_RESULT_LIMIT = 8_000;
+
+/**
+ * Keeps a stranded child's work reachable by the parent.
+ *
+ * A run that hits its turn budget or timeout is a real failure, so the status
+ * stays `failed` — but the child's last message is often most of the delegated
+ * answer. Reporting the bare reason forces the parent to re-spawn the whole
+ * task from scratch, which is the expensive part of a failure. Appending the
+ * salvage lets the parent finish the work, or at least resume from where the
+ * child stopped, without paying for the run twice.
+ *
+ * Returns the failure message unchanged when there is nothing to salvage, so
+ * callers can tell the two cases apart by identity.
+ */
+export function describeSubagentFailure(error: SubagentRunError): string {
+    const partial = error.partialResult?.trim();
+    if (!partial) return error.message;
+    const bounded = partial.length > PARTIAL_RESULT_LIMIT
+        ? `${partial.slice(0, PARTIAL_RESULT_LIMIT)}\n… salvaged output truncated …`
+        : partial;
+    return `${error.message}\n\n`
+        + 'The child produced this before it stopped. It is unverified and may be incomplete, '
+        + 'but it is real work — use it instead of re-running the same task from scratch:\n'
+        + bounded;
+}

@@ -101,6 +101,21 @@ Plain `npm run deploy` will:
 - If `[Unreleased]` is empty, the bump script will refuse to run — you must
   document your changes first
 
+### RELEASES.md — the user-facing notes
+
+`CHANGELOG.md` is the per-build history for contributors and is excluded from
+the VSIX. `RELEASES.md` holds one entry per version actually published to
+users, each consolidating everything since the previous published version;
+`npm run package` ships it as the VSIX's `changelog.md` via
+`vsce --changelog-path`, which is what the Marketplace Changelog tab and the
+in-chat `/changelog` command show.
+
+- Version bumps stamp `CHANGELOG.md` only — `RELEASES.md` is written by hand.
+- Add a `RELEASES.md` entry when a build is actually handed to users, not on
+  every bump. Most bumps never reach anyone.
+- Consolidate intermediate builds into themed bullets and drop anything a user
+  cannot observe (refactors, internal diagnostics, packaging plumbing).
+
 ### Version-only bump (no deploy)
 
 ```bash

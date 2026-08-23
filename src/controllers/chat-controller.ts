@@ -1556,12 +1556,31 @@ export class ChatController implements vscode.Disposable {
                         '@ext:Avhatar.pi-code',
                     );
                     break;
-                case 'openChangelog':
-                    await vscode.commands.executeCommand(
-                        'markdown.showPreview',
-                        vscode.Uri.joinPath(this._context.extensionUri, 'CHANGELOG.md'),
-                    );
+                case 'openChangelog': {
+                    // `/changelog` is for users, so it must land on the release
+                    // notes, never on the per-build history kept for
+                    // contributors. A source checkout has both files side by
+                    // side; the packaged VSIX carries only the release notes,
+                    // which `vsce --changelog-path` renames to `changelog.md`.
+                    const candidates = ['RELEASES.md', 'changelog.md', 'CHANGELOG.md'];
+                    let notes: vscode.Uri | undefined;
+                    for (const name of candidates) {
+                        const candidate = vscode.Uri.joinPath(this._context.extensionUri, name);
+                        try {
+                            await vscode.workspace.fs.stat(candidate);
+                            notes = candidate;
+                            break;
+                        } catch {
+                            // Absent in this layout — try the next candidate.
+                        }
+                    }
+                    if (notes) {
+                        await vscode.commands.executeCommand('markdown.showPreview', notes);
+                    } else {
+                        vscode.window.showWarningMessage('Pi Code: release notes are not available in this build.');
+                    }
                     break;
+                }
                 case 'openRawView': {
                     // Target the tab whose panel sent the message so a click on
                     // the button always opens Raw for that specific chat, even

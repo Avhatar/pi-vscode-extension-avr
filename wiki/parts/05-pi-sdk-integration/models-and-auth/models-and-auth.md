@@ -19,8 +19,9 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 
 [src/pi/models.ts](../../../../src/pi/models.ts) projects model state:
 
-- `prepareModelRuntime(runtime, log?)` synchronizes custom providers and applies metadata.
+- `prepareModelRuntime(runtime, log?)` synchronizes custom providers, applies the DeepSeek vision catalog shim, and applies metadata.
 - `syncCustomProviders(runtime)` conditionally registers or unregisters `qwen` and `qwen-cn` according to Pi Code's applied SecretStorage override map (`hasRuntimeSecretOverride()`). Registration state is tracked per runtime with a `WeakMap`, so disposal/recreation is safe.
+- `syncDeepSeekVisionModel(runtime, log?)` applies the temporary DeepSeek vision entry and swallows failures after logging them, so a catalog shape it does not recognize cannot cost the user the whole model list.
 - `refreshModelRuntime(log?)` refreshes the SDK snapshot without catalog networking, then re-runs custom-provider and metadata preparation.
 - `getAvailableModels(runtime)` converts `getAvailableSnapshot()` entries into shared `ModelInfo` values.
 - `findModel(runtime, provider, modelId)` delegates to `runtime.getModel()`.
@@ -30,6 +31,8 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 [src/pi/deepseek-usage-store.ts](../../../../src/pi/deepseek-usage-store.ts) uses the same runtime credential to refresh DeepSeek's authoritative account balance after turns and when a chat opens. It keeps key-fingerprinted, local-calendar-day ledgers of Pi Code-attributable turn cost in global state; API-key changes invalidate in-flight balance requests and clear the old account projection without discarding that day's other-account totals.
 
 [src/pi/providers/qwen.ts](../../../../src/pi/providers/qwen.ts) registers DashScope's international and China endpoints directly on the runtime. Their models use Qwen-specific flags such as `supportsDeveloperRole: false`, `supportsStore: false`, `supportsLongCacheRetention: false`, and `thinkingFormat: 'qwen'`.
+
+[src/pi/providers/deepseek.ts](../../../../src/pi/providers/deepseek.ts) adds `deepseek-v4-flash-vision-exp` to the built-in `deepseek` provider until the SDK catalog carries it. `registerDeepSeekVisionModel(runtime)` clones the provider's existing models verbatim and appends one entry derived from `deepseek-v4-flash` with `input: ['text', 'image']`; the SDK stays the source of truth for cost, context window, `compat`, and thinking levels. Unlike the Qwen registrations this composes over a provider the SDK already ships, so API-key resolution and streaming stay with the built-in provider and no placeholder key is needed. The shim skips itself when `runtime.getModel()` already resolves the vision id — which makes repeated preparation idempotent and retires the shim automatically once an SDK release ships the model — and when the `deepseek-v4-flash` template is absent.
 
 [src/providers/settings-panel.ts](../../../../src/providers/settings-panel.ts) projects OAuth-capable providers from `runtime.getProviders()`, checks sign-in state with `runtime.checkAuth()`, and invokes `runtime.login(providerId, 'oauth', interaction)` or `runtime.logout(providerId)`. [`OAuthLoginFlow`](../../../../src/pi/oauth-login-flow.ts) implements the SDK `AuthInteraction` contract with prompt, selection, browser, device-code, notification, and cancellation UI states.
 
@@ -57,10 +60,14 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 **Methods — Qwen:**
 - `registerQwenProvider(runtime, baseUrl?)`, `registerQwenCnProvider(runtime, baseUrl?)`
 
+**Methods — DeepSeek catalog shim:**
+- `registerDeepSeekVisionModel(runtime)`
+
 **Markers:**
 - SecretStorage prefix: `pi-code.apiKey.`
 - Codex catalog freshness: 24 hours per account, with stale-while-revalidate behavior
 - `DOCUMENTED_API_OVERRIDES`
+- `DEEPSEEK_VISION_MODEL_ID`, `DEEPSEEK_VISION_MODEL_NAME`
 
 ## Lifecycle edges
 
@@ -81,3 +88,6 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 - **Pattern — consumers receive the runtime.** Do not create private `ModelRuntime` instances in tabs or subagents; otherwise credential changes and provider projection diverge.
 - **Pitfall — `getModelRuntime()` is asynchronous.** The SDK remains dynamically imported because it is externalized from the extension-host bundle.
 - **Pattern — `onAuthChanged` is the public event.** Downstream consumers re-query the runtime instead of subscribing directly to VS Code SecretStorage.
+- **Pattern — catalog shims clone, never re-declare.** An extension layer replaces a provider's model list wholesale and does not merge `compat`, so a shim that hand-copies existing entries silently drops provider quirks and drifts from the SDK. Clone the runtime's own models and add only the new entry.
+- **Rule — a catalog shim must retire itself.** Gate it on `runtime.getModel()` so an SDK release that ships the model wins automatically; otherwise the temporary entry outlives its reason and freezes stale metadata.
+- **Pitfall — `input` is the only image-capability signal.** `getAvailableModels()` derives `ModelInfo.supportsImages` from `model.input`, and the chat input refuses attachments on that basis, so a vision model missing from the catalog is unusable for images no matter what the provider API accepts. Mixed line-ups also need the [session-lifecycle](../session-lifecycle/session-lifecycle.md) image-compat guard.

@@ -2,12 +2,7 @@ import type { AgentToolUpdateCallback } from '@earendil-works/pi-agent-core';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import type { AgentDefinition, ModelRef, SubagentInvocation, SubagentRunStatus } from './types';
-import { SubagentRunError, type SubagentExecutionResult } from './runtime';
-
-/** Upper bound for the salvaged tail appended to a failure message. Large
- *  enough to carry a real partial answer, small enough that a stranded child
- *  cannot flood the parent context with a failed run's transcript. */
-const PARTIAL_RESULT_LIMIT = 8_000;
+import { describeSubagentFailure, SubagentRunError, type SubagentExecutionResult } from './runtime';
 
 export const SUBAGENT_TOOL_NAME = 'subagent';
 
@@ -201,31 +196,18 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
 }
 
 /**
- * Keeps a stranded child's work reachable by the parent.
- *
- * A run that hits its turn budget or timeout is a real failure, so the status
- * stays `failed` — but the child's last message is often most of the delegated
- * answer. Throwing the bare reason forces the parent to re-spawn the whole task
- * from scratch, which is the expensive part of a failure. Appending the salvage
- * lets the parent finish the work, or at least resume from where the child
- * stopped, without paying for the run twice.
+ * Surfaces a stranded child's salvaged output on the failure the parent sees.
+ * See {@link describeSubagentFailure}; the bare failure is rethrown untouched
+ * when the child left nothing behind.
  */
 async function withSalvagedPartial<Result>(operation: () => Promise<Result>): Promise<Result> {
     try {
         return await operation();
     } catch (error) {
         if (!(error instanceof SubagentRunError)) throw error;
-        const partial = error.partialResult?.trim();
-        if (!partial) throw error;
-        const bounded = partial.length > PARTIAL_RESULT_LIMIT
-            ? `${partial.slice(0, PARTIAL_RESULT_LIMIT)}\n… salvaged output truncated …`
-            : partial;
-        throw new Error(
-            `${error.message}\n\n`
-            + 'The child produced this before it stopped. It is unverified and may be incomplete, '
-            + 'but it is real work — use it instead of re-running the same task from scratch:\n'
-            + bounded,
-        );
+        const described = describeSubagentFailure(error);
+        if (described === error.message) throw error;
+        throw new Error(described);
     }
 }
 

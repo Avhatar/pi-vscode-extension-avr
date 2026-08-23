@@ -2,6 +2,7 @@ import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ModelInfo } from '../shared/protocol';
 import { getInitializedModelRuntime, hasRuntimeSecretOverride } from './auth';
 import { registerQwenCnProvider, registerQwenProvider } from './providers/qwen';
+import { DEEPSEEK_VISION_MODEL_ID, registerDeepSeekVisionModel } from './providers/deepseek';
 import { refreshModelMetadata, type ModelMetadataLog } from './model-metadata';
 
 let registeredProviders = new WeakMap<ModelRuntime, Set<string>>();
@@ -11,8 +12,23 @@ export async function prepareModelRuntime(
     log?: ModelMetadataLog,
 ): Promise<ModelRuntime> {
     await syncCustomProviders(runtime);
+    syncDeepSeekVisionModel(runtime, log);
     await refreshModelMetadata(runtime, log);
     return runtime;
+}
+
+/**
+ * Temporary catalog shim; see `registerDeepSeekVisionModel`. A failure here must
+ * not cost the user their whole model list, so it is reported and swallowed.
+ */
+function syncDeepSeekVisionModel(runtime: ModelRuntime, log?: ModelMetadataLog): void {
+    try {
+        if (registerDeepSeekVisionModel(runtime)) {
+            log?.(`DeepSeek vision model added until the Pi SDK catalog ships it: ${DEEPSEEK_VISION_MODEL_ID}`);
+        }
+    } catch (err) {
+        console.error('[pi-code] Failed to register the DeepSeek vision model:', err);
+    }
 }
 
 // Pi Code keeps its DashScope providers conditional because their model list

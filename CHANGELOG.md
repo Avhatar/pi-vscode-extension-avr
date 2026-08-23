@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-08-23
+
+### Added
+- DeepSeek's vision model is now offered in the model picker, so screenshots and images can be sent to DeepSeek at last. It costs and holds exactly what DeepSeek V4 Flash does and can still use tools, so it works as a normal agent model. The entry is a stopgap that Pi Code adds itself: it disappears silently once a Pi SDK release ships the model in its own catalog.
+
+### Changed
+- The Changelog tab on the extension's listing, and the `/changelog` command, now show release notes written for you: one entry per version that was actually published, each covering everything that changed since the previous published version. It used to show every internal build — 173 of them, against 11 versions ever handed out — so answering "what did this upgrade give me" meant reading and merging up to two dozen sections. The full per-build history stays in the repository for contributors.
+
+### Fixed
+- A chat that already contains images no longer breaks when you switch to a model without image support. Images in the history are replaced with a short placeholder for those requests and come back as soon as an image-capable model is selected again. Providers that keep vision in a separate model — DeepSeek does — used to turn that switch into a dead end, with every following request rejected outright.
+
+## [0.69.0] - 2026-08-23
+
 ### Added
 - The turn breakdown now separates delegated work into four named sections: `ONLY ORCHESTRATOR TOOLS TIME` (what your agent called itself), `ONLY SUBAGENTS TOOLS TIME` (what its children called, summed per tool rather than per child), `TOTAL WITH SUBAGENTS TOOLS TIME`, and `SUBAGENTS TOTAL TIME AND STATUS` (per run, with the outcome). Child tool time used to be hidden inside one opaque "Subagent" total. The delegation row is excluded from the total so the same seconds are not counted twice, and derived rows account for the time that is not tool execution at all: `Model await` in the orchestrator list, and `Model await & startup` under the delegated runs. The orchestrator figure is measured as turn time with no tool running, so it stays correct when a message runs its tool calls in parallel and their durations overlap.
 - Context compaction is now timed and reported on its own `Context compaction` row. It is a provider request over the whole context and routinely the largest single cost in a turn, and it used to be invisible — either buried in the model-wait figure or, when it ran as the overflow check before your prompt was sent, not counted anywhere at all.
@@ -14,7 +27,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Child agents can now use the read-only Language Server tools — find references, go to definition, hover, document and workspace symbols, implementations, type definitions, and call hierarchy — whenever `Language Server tools` is enabled. A child can answer "where is this used" in one call instead of a long grep-and-read sequence, which is also the single biggest saving on its turn budget.
 - New `Allow shell access for children` setting (off by default) grants child agents the `bash` tool. Worktree isolation bounds a child's file edits, not what a shell can reach, so this hands children the same machine access the parent has without the parent's review step — but it lets read-only children answer with one `git diff` or `rg` instead of many turns.
 
+### Changed
+- The Marketplace and repository guides now describe the per-turn tool breakdown, how a child agent's turn budget is counted and what happens when it runs out, the Language Server and shell access children can be given, Plan Mode's approval step, and session-lock recovery — and the settings tables list the new `Allow shell access for children` option.
+
 ### Fixed
+- When a background subagent fails, its report now includes the work it had already produced instead of only the reason it stopped. Foreground children already handed their last message back on a timeout or an exhausted turn budget; a background child settles through a different path and that partial answer was being dropped, so the orchestrator was told "exceeded its maximum turn count" and re-ran a task that was largely done.
 - A chat whose window crashed, was killed, or lost power can be opened again. Its session file kept an exclusive write lock that was never reclaimed, so the chat stayed permanently unopenable from history and had to be unblocked by deleting a `.pi-code.lock` file by hand. Pi Code now reclaims a lock whose owner is provably gone — a process that no longer exists, or a lock written before the machine last booted — and does so immediately instead of after a five-minute delay. A chat genuinely open elsewhere is still protected.
 - A session left locked by a power loss is no longer blocked forever when the operating system hands the crashed process's id to an unrelated program after the reboot. Locks now record the boot they were taken in, which settles that case without guessing.
 - A session lock file truncated mid-write — the usual result of pulling the plug — no longer blocks its chat permanently; it is reclaimed once it is old enough to be certain nobody is writing to it.

@@ -11,6 +11,17 @@ Under the hood Pi Code embeds [Mario Zechner's Pi coding agent](https://github.c
 
 > This is a downstream fork of the upstream `pi-vscode-extension`. The fork takes the UX in a Claude Code direction — chats live as editor tabs rather than inside the sidebar — and bundles selected Pi ecosystem packages directly inside the VSIX. See **[Why this fork](#why-this-fork)** below for the full diff.
 
+## Release notes
+
+[RELEASES.md](RELEASES.md) is the user-facing history: one entry per version
+actually published, each covering everything that changed since the previous
+published version. It ships inside the VSIX as the Marketplace Changelog tab
+and is what the in-chat `/changelog` command opens.
+
+[CHANGELOG.md](CHANGELOG.md) is the per-build history for contributors. Most
+of the versions it stamps are only ever installed locally, so it is excluded
+from the VSIX.
+
 ## Why this fork
 
 Two motivations drove the split from upstream:
@@ -36,17 +47,6 @@ In addition to those two structural changes, the fork has accumulated a number o
 - The launcher persists a session history on disk and lets you delete entries individually; opening an old entry reopens it as a fresh editor panel.
 
 The fork tracks the upstream `@earendil-works/pi-coding-agent` SDK as a regular npm dependency and stays in sync with its API.
-
-## What's new since Marketplace 0.57.1
-
-- **Chat renaming** — use the pencil button in a chat panel or type `/name` to rename a chat locally without contacting the model. Renamed chats keep their full history, diffs, and checkpoints.
-- **Raw Mode** — opt-in developer diagnostics that record complete unredacted provider payloads and agent events to local VS Code global storage. The recording stays local, is disabled by default, and opens with **Pi Code: Open Raw View for Active Chat**.
-- **Faster startup and restoration** — Pi SDK warm-up removes the first dynamic-import delay, an optional full prewarm (`pi-code.prewarm.full`) completes session bring-up at startup, and the Codex model catalog is cached across reloads. Chat panels show a loading overlay and VS Code status progress while new or restored sessions prepare.
-- **Claude compatibility controls** — a master switch (`pi-code.claudeCompat.enabled`) and per-workspace mode (`auto` / `on` / `off`) control when the Claude bridge activates. Restored chat and Raw View tabs reconnect after `Reload Window` without waiting for the sidebar.
-- **Usage and activity clarity** — DeepSeek chats show remaining balance and turn/session spend, MCP actions identify the server and tool being called, and timeline activity stays aligned and visibly active throughout long turns.
-- **Reliability fixes** — streaming preserves your reading position, prompts appear immediately after sending, compacted chats retain names and full current-branch history, queued messages wait for full agent settlement, and internal attachment/file-mention scaffolding stays out of visible prompts.
-- **Smaller installed package** — source maps and unused bundled-package assets, tests, and the unrequested `librarian` skill no longer ship in the VSIX; bundled web search and content-fetch tools are unchanged.
-- **Pi SDK 0.82.1** — updated model runtime, provider authentication, retry behaviour, and model catalog support.
 
 ## Features
 
@@ -75,7 +75,7 @@ Each user message creates a checkpoint. Restore your workspace to any previous c
 Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle through `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. `max` is natively supported by GPT-5.6 and adaptive Claude models; other models fall back to their closest supported level.
 
 ### Model Selection
-Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching.
+Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching. Pi Code adds DeepSeek's vision model to that list itself, because the bundled Pi SDK catalog predates its announcement; the added entry disappears silently once an SDK release ships the model.
 
 ### Settings Page with OAuth Login
 A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API keys, default model and thinking level, ToDo behaviour, subagents, Claude compatibility controls, Raw Mode recording, performance diagnostics and prewarm, Claude Code MCP import, file-mention indexing, and chat appearance. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
@@ -93,6 +93,8 @@ Root, ancestor, local, explicitly imported, and directory-scoped instructions ar
 
 ### Image Attachments
 Paste images directly into the chat input, drop them onto the chat panel, or pick a file via the paperclip button next to the model picker. Attached images appear as previews before sending and remain in the chat history. Large images are resized automatically; image-capable models receive them inline with the prompt.
+
+Switching an image-bearing chat to a model without image support is safe: those images are replaced with a short placeholder for the requests that model sends, and the originals stay in the history and are sent again once an image-capable model is selected. This matters for providers with a mixed line-up — DeepSeek ships vision as a separate model — where attaching a screenshot and then switching back to the stronger text-only model used to leave the chat unusable.
 
 ### Codex Subscription Usage Indicator
 When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer shows percent used in the 5-hour and weekly windows with colour cues at 50% and 90%. A tooltip details the plan, exact reset times, and remaining credit balance. Each assistant message footer also shows the per-turn delta (`5h +1.2% · week +0.3%`) so you can see how much each turn cost. Hidden for non-Codex models and for token-billed API key accounts.
@@ -115,7 +117,7 @@ Nine semantic-navigation tools backed by the active VS Code language extension i
 Each tool accepts either positional addressing (`file`, `line`, `column`) or by-name lookup, returns context snippets around each location, and annotates results from external dependency sources (NuGet, cargo registry, `node_modules`) as `[external]`. Enable when semantic accuracy is worth the extra system-prompt footprint — large Unity / Rust / TS codebases with name collisions, partial classes, or heavy overloading benefit most. Changes apply on new sessions or window reload.
 
 ### Per-Turn and Cumulative Timing
-Each assistant message footer shows the elapsed wall-clock time for that turn plus the cumulative active time across the chat (idle gaps excluded), alongside token usage.
+Each assistant message footer shows the elapsed wall-clock time for that turn plus the cumulative active time across the chat (idle gaps excluded), alongside token usage. Completed tool calls carry their own duration, and each finished turn expands into a per-tool breakdown with call counts and totals. When a turn delegated work, the breakdown is split into four sections — orchestrator tools only, subagent tools only, the combined total, and per-run subagent time with its outcome — plus derived rows for model wait, child startup, context compaction, and time children spent queued for a concurrency slot.
 
 ### Windows Turn-Completion Notifications
 The launcher provides **Show Popup** and **Play Sound** toggles, both off by default. On Windows, they can show a native toast outside VS Code and play the standard notification sound when an agent turn finishes. On unsupported platforms no popup or sound is produced, and an explanatory notice is logged.
@@ -130,6 +132,8 @@ Type `/` in the input to trigger a slash-command menu. Cross-client Agent Skills
 Enable the per-chat **Subagents** toggle to let the parent agent delegate bounded work through a single `subagent` tool. Reusable agents are discovered from user and trusted-project `.agents/agents/*.md` files, compatible Claude agent resources, and bundled packages; the parent can also create temporary ad-hoc roles. Children use fresh context, policy-approved tools, and exact configured `provider/id` models, and can run in the foreground or background under global and per-chat concurrency limits.
 
 The launcher's **Subagents** section shows live model, status, activity, turns, elapsed time, and expandable task/result details. Background writers require extension-owned Git worktrees; the parent orchestrator reviews the patch, applies accepted changes, verifies them, and cleans up without transferring lifecycle decisions to the user. Delegation is off by default and configurable through `pi-code.subagents.*` settings.
+
+A child's turn budget is one model response including every tool call it makes, and the configured limit is used verbatim — an agent definition's own `maxTurns` acts as a floor a per-call value cannot lower. A child approaching its budget is asked to wrap up one turn early, and a child stopped by its budget or timeout still returns the work it had produced so the parent can finish from there. When `pi-code.lsp.enabled` is on, children also get the read-only Language Server tools; `pi-code.subagents.allowChildBash` additionally grants them `bash` and is off by default.
 
 ### Prompt Cache Retention
 A `cache: …` chip in the chat footer controls prompt cache retention for future requests. Choose `short`, `long`, or `auto`; in `auto`, Pi Code uses provider-aware heuristics. OpenAI-style providers and other free-write cache backends prefer `long`, while Anthropic-style providers switch to `long` only after a meaningful idle gap or a large cached prefix. Providers that do not expose cache controls show the chip faded as informational.
@@ -292,7 +296,8 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.subagents.defaultModel` | `string` | `""` | Default child model in canonical `provider/id` format; empty uses the agent definition and then the parent model |
 | `pi-code.subagents.allowedModels` | `string[]` | `[]` | Exact `provider/id` allowlist for child agents; empty permits every configured model |
 | `pi-code.subagents.allowInvocationModelOverride` | `boolean` | `true` | Allow the parent orchestrator to select an exact child provider/model per delegation |
-| `pi-code.subagents.defaultMaxTurns` | `number` | `60` | Default maximum child turns; no upper cap |
+| `pi-code.subagents.allowChildBash` | `boolean` | `false` | Grant child agents the `bash` tool. Off by default — worktree isolation bounds a child's file edits, not what a shell can reach, so this gives children the same machine access the parent has without the parent's review step |
+| `pi-code.subagents.defaultMaxTurns` | `number` | `60` | Default maximum child turns; no upper cap. One turn is one model response including every tool call it makes |
 | `pi-code.subagents.defaultTimeoutMinutes` | `number` | `30` | Default child timeout in minutes (1–120) |
 | `pi-code.subagents.maxConcurrentGlobal` | `number` | `4` | Maximum children running across all Pi Code chats (1–16) |
 | `pi-code.subagents.maxConcurrentPerChat` | `number` | `2` | Maximum children from one parent chat occupying execution slots (1–8) |

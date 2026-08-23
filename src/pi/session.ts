@@ -20,6 +20,7 @@ import {
 } from '../shared/interrupted-turn';
 import { EventRouter } from './events';
 import { createRawRecorderExtension } from './raw-recorder-extension';
+import { createImageCompatGuard } from './image-compat-guard';
 import { RawRecorder, RawRecorderRegistry } from '../core/raw/raw-recorder';
 import type { RawStoragePort } from '../core/ports/raw-storage';
 import { RAW_SESSION_ONLY_EVENT_KINDS } from '../shared/raw-protocol';
@@ -52,6 +53,7 @@ import { AgentRegistry } from './subagents/registry';
 import { resolveAgentSpec } from './subagents/resolver';
 import { createSubagentExtension } from './subagents/extension';
 import type { SubagentInvocation, SubagentRun } from './subagents/types';
+import { describeSubagentFailure, SubagentRunError } from './subagents/runtime';
 import type {
     SubagentExecutionResult, SubagentForegroundResult, SubagentManagerSnapshot,
 } from './subagents/runtime';
@@ -641,6 +643,7 @@ export class PiSessionManager {
             ...(rawRecorder ? [createRawRecorderExtension(rawRecorder, () => this._isRawModeEnabled())] : []),
             createTodoExtension(this.todoStore, todoGuidelines),
             ...(lspExtension ? [lspExtension] : []),
+            createImageCompatGuard(() => this._session?.model),
             createToolSelectionGuard((gateway, target) => {
                 this._outputChannel.appendLine(
                     `[tool selection] blocked gateway=${gateway} target=${target} reason=disabled`,
@@ -1377,7 +1380,12 @@ export class PiSessionManager {
         error: Error | undefined,
     ): void {
         const outcome = result ? 'completed' : run.status;
-        const body = result?.result ?? error?.message ?? run.error ?? 'No result was returned.';
+        // A background child never passes through the tool-call salvage path —
+        // its spawn call returned the moment the run was queued. Without the
+        // same treatment here, the parent would be told only why the child
+        // stopped and would re-spawn work the child had already done.
+        const failureBody = error instanceof SubagentRunError ? describeSubagentFailure(error) : error?.message;
+        const body = result?.result ?? failureBody ?? run.error ?? 'No result was returned.';
         const content = [
             '<subagent-notification>',
             `Background subagent ${run.name} (${run.agentId}) ${outcome}.`,

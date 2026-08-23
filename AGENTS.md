@@ -340,6 +340,33 @@ Rules:
 - Group by type (Added, Changed, Fixed, etc.).
 - Never leave `[Unreleased]` empty before a deploy — the bump script will refuse to run.
 
+### Two changelogs: per-build and per-release
+
+`CHANGELOG.md` records **every build**, including the many versions that are
+only ever installed locally. It is a contributor artefact and is excluded from
+the VSIX by `.vscodeignore`.
+
+`RELEASES.md` records **only the versions actually handed to users**, newest
+first, and each entry consolidates everything that changed since the *previous
+published version* — so a user reads exactly one entry, the one for the version
+they are upgrading to. `npm run package` passes it through
+`vsce --changelog-path RELEASES.md`, which installs it into the VSIX as
+`changelog.md`; that file is what the Marketplace renders on its Changelog tab
+and what the in-chat `/changelog` command opens.
+
+Keeping them separate is deliberate: the per-build history is noise to a user
+who receives one version in ten, and consolidating it at publish time is the
+only point where the difference between two published versions is known.
+
+Rules:
+- The version bump only stamps `CHANGELOG.md`. `RELEASES.md` is curated by hand.
+- Add a `RELEASES.md` entry **when a version is actually published to users**,
+  not on every bump. Ask the user which build is being handed out if it is not
+  obvious.
+- Consolidate: merge the intermediate builds into themed bullets, drop pure
+  refactors, internal diagnostics, and anything a user cannot observe.
+- Never let `RELEASES.md` claim a version that was not published.
+
 When deploying, use one of:
 ```bash
 npm run deploy:patch   # bug fixes, small tweaks
