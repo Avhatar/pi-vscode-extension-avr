@@ -154,11 +154,11 @@ export class ChatCommandService {
                 return {};
             case 'getTranscriptPage':
                 return {
-                    result: tab.session.getTranscriptPage(
+                    result: this.chat.annotateTranscriptPage(tab, tab.session.getTranscriptPage(
                         message.sessionId,
                         message.beforeEntryId,
                         message.limit,
-                    ),
+                    )),
                 };
             case 'renameTab':
                 callbacks.handleName(`/name ${message.name}`, false);

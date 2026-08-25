@@ -162,6 +162,8 @@ export class TabRuntime<
     readonly subagentStats: Map<string, SubagentStatEntry>;
     /** Agent ids first observed during the turn currently running. */
     readonly turnSubagentIds: Set<string>;
+    /** Turn metadata key each delegated run was charged to, for late restatement. */
+    readonly subagentTurnKey: Map<string, string>;
     /** In-flight child tool calls, keyed by namespaced call id. */
     readonly pendingSubagentTools: Map<string, { startTime: number; name: string }>;
     projectToolDefault?: ProjectToolSelectionDefault;
@@ -208,6 +210,7 @@ export class TabRuntime<
         this.pendingCompactionMs = 0;
         this.subagentStats = new Map();
         this.turnSubagentIds = new Set();
+        this.subagentTurnKey = new Map();
         this.pendingSubagentTools = new Map();
         this.projectToolDefault = options.projectToolDefault;
     }
@@ -217,9 +220,9 @@ export class TabRuntime<
      * sight. Rows are mutated in place so a turn summary that already holds one
      * keeps seeing current numbers after a background child settles.
      *
-     * A run first seen while the agent is streaming is charged to that turn;
-     * restored history and late arrivals are tracked without being charged to
-     * whatever turn happens to be open.
+     * Creating a row does not attribute the run to a turn. First sight only
+     * proves this extension host had not seen the id yet, which is equally true
+     * of every run restored from disk; `chargeSubagentToTurn` is the decision.
      */
     subagentStat(agentId: string, name?: string): SubagentStatEntry {
         const existing = this.subagentStats.get(agentId);
@@ -239,8 +242,17 @@ export class TabRuntime<
             toolDurationMs: 0,
             toolCalls: 0,
         };
-        this.subagentStats.set(agentId, created);
-        if (this.isStreamingLocal) this.turnSubagentIds.add(agentId);
+        this.adoptSubagentStat(created);
+        return created;
+    }
+
+    /**
+     * Take ownership of an accounting row without charging it to a turn. Rows
+     * rebuilt from persisted metrics come in this way, keeping their stored
+     * identity so a late settle still updates the summary that renders them.
+     */
+    adoptSubagentStat(entry: SubagentStatEntry): void {
+        this.subagentStats.set(entry.agentId, entry);
         // Evicted rows stop receiving updates but stay rendered in the turn
         // summaries that already reference them.
         while (this.subagentStats.size > SUBAGENT_STAT_HISTORY_LIMIT) {
@@ -248,7 +260,16 @@ export class TabRuntime<
             if (oldest.done) break;
             this.subagentStats.delete(oldest.value);
         }
-        return created;
+    }
+
+    /**
+     * Attribute one delegated run to the turn that is streaming right now. The
+     * caller decides membership from the run's own spawn time, because the
+     * manager re-announces its whole retained history on any change — a
+     * retention sweep alone is enough to surface runs from hours ago.
+     */
+    chargeSubagentToTurn(agentId: string): void {
+        if (this.isStreamingLocal) this.turnSubagentIds.add(agentId);
     }
 
     /**
@@ -328,6 +349,7 @@ export class TabRuntime<
         this.turnChildToolStats.clear();
         this.subagentStats.clear();
         this.turnSubagentIds.clear();
+        this.subagentTurnKey.clear();
         this.pendingSubagentTools.clear();
         this.turnNotificationGate.reset();
         this.queuedMessages = [];

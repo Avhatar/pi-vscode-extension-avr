@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Inspect all uncommitted changes (modified + untracked), decide on commit grouping, verify CHANGELOG and version, draft a concise commit message in the project's existing style, iterate with the user until approved, then commit. Use when the user asks to commit, write a commit message, finalize changes, create a commit, or wrap up work.
+description: Inspect all uncommitted changes (modified + untracked), decide on commit grouping, verify CHANGELOG, RELEASES, and version, draft a concise commit message in the project's existing style, iterate with the user until approved, then commit. Use when the user asks to commit, write a commit message, finalize changes, create a commit, or wrap up work.
 ---
 
 # Commit — Pi Code VS Code Extension
@@ -69,6 +69,13 @@ If the change is user-visible (new feature, fixed bug, changed behavior):
   them before committing.
 - If `package.json` version was bumped in the diff, confirm the matching
   `[x.y.z] - YYYY-MM-DD` section exists in CHANGELOG.md.
+- If the user has said this version goes to users, confirm `RELEASES.md` has an
+  entry for it. If the entry is missing, say so and offer to write it before
+  committing — the notes ship inside the VSIX as its Changelog tab, so a package
+  built without them needs repackaging. See `build-deploy` for how to
+  consolidate one. Do not raise this for an ordinary bump: most versions are
+  local-only, and whether a build goes to users is the user's call, never an
+  inference from the diff.
 - If the user says they're about to deploy, remind them that
   `npm run deploy:patch|minor|major` will refuse to run with an empty
   `[Unreleased]`.

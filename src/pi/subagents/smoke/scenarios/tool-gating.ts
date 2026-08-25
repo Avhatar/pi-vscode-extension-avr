@@ -95,7 +95,8 @@ export const toolGatingScenario: SmokeScenario = {
             model: `${result.details.model.provider}/${result.details.model.id}`,
             updates: updates.length,
         });
-        logger.assert('parent-tool-returns-child-result', result.content[0]?.type === 'text' && result.content[0].text === 'Bounded child result.', 'Bounded child result.', result.content[0]);
+        logger.assert('parent-tool-returns-child-result', result.content[0]?.type === 'text' && result.content[0].text.startsWith('Bounded child result.'), 'Bounded child result.', result.content[0]);
+        logger.assert('parent-tool-names-agent-id-in-result-text', result.content[0]?.type === 'text' && result.content[0].text.includes(`agentId=${result.details.agentId}`), `agentId=${result.details.agentId}`, result.content[0]);
         logger.assert('parent-tool-streams-status', progress.some((details) => details.status === 'queued') && progress.some((details) => details.status === 'running'), true, progress.map((details) => details.status));
         logger.assert('parent-tool-reports-actual-model', result.details.model.provider === 'deepseek' && result.details.model.id === 'deepseek-reasoner', 'deepseek/deepseek-reasoner', `${result.details.model.provider}/${result.details.model.id}`);
 

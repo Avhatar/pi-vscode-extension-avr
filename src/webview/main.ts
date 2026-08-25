@@ -5377,6 +5377,20 @@ function buildTurnToolStats(msg: any, index: number): HTMLElement | null {
         childEntries,
         'Tools called inside delegated runs, summed per tool across every child',
     );
+    // Repeated from the runs section on purpose: a reader looking at 83s of
+    // child tool time next to 2545s of child runs needs the difference here,
+    // not two sections further down.
+    const subagentNonToolMs = subagentNonToolTime(subagentEntries);
+    if (childEntries.length > 0 && subagentNonToolMs > 0) {
+        appendDerivedStatRow(
+            list,
+            'Model await & startup',
+            subagentNonToolMs,
+            'The rest of the delegated wall clock: provider round-trips and child'
+                + ' session startup. Child tool time plus this equals the run totals'
+                + ' listed below.',
+        );
+    }
     appendToolStatSection(
         list,
         'Total with subagents tools time',
@@ -5397,15 +5411,13 @@ function buildTurnToolStats(msg: any, index: number): HTMLElement | null {
             time.textContent = formatToolDurationSeconds(entry.durationMs);
             list.appendChild(time);
         }
-        // Reconcile the two subagent figures: run time minus tool time is
-        // provider round-trips and child session startup, so the reader is not
-        // left wondering which actions went unrecorded.
-        const nonToolMs = subagentNonToolTime(subagentEntries);
-        if (nonToolMs > 0) {
+        // Reconcile the run totals just listed: their sum minus child tool time
+        // is provider round-trips and child session startup.
+        if (subagentNonToolMs > 0) {
             appendDerivedStatRow(
                 list,
                 'Model await & startup',
-                nonToolMs,
+                subagentNonToolMs,
                 'Delegated wall clock that is not tool execution: provider'
                     + ' round-trips and child session startup. Subagent tool time'
                     + ' plus this equals the run totals above.',

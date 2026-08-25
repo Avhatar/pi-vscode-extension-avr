@@ -76,7 +76,7 @@ export const persistenceControlScenario: SmokeScenario = {
             let staleError = '';
             try { await restoredManager.resumeForeground('stale-agent-id', 'Should fail.'); }
             catch (error) { staleError = error instanceof Error ? error.message : String(error); }
-            logger.assert('stale-agent-id-fails-explicitly', staleError.includes('Unknown or stale'), true, staleError);
+            logger.assert('stale-agent-id-fails-explicitly', staleError.includes('Unknown subagent id'), true, staleError);
 
             const dismissed = await restoredManager.dismiss(first.agentId);
             logger.assert('terminal-run-dismissed-from-launcher-state', dismissed && !restoredManager.getSnapshot().runs.some((run) => run.agentId === first.agentId), true, dismissed);

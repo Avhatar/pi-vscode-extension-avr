@@ -7,6 +7,30 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Release notes are now written as the builds happen rather than reconstructed at publish time. The version bump rolls the top `RELEASES.md` entry forward — retitling it to the version just built, or opening a fresh one once the previous top entry has been handed out — and `npm run package` refuses to build when that file disagrees with `package.json` or with the new `release-state.json`, which is the only record of the version users actually received. `npm run mark-released -- <version>` writes that record. No user-visible behaviour changes.
+
+## [0.72.0] - 2026-08-24
+
+### Changed
+- Your agent can now go back to a subagent it already used and ask it to carry on, even when that subagent was working in its own isolated worktree — which used to be refused outright. The child picks up its own conversation, so it still knows the code it just read and the decisions it just made, resumes in the same worktree with its unfinished edits intact, and gets a full turn budget again. Previously the only option for isolated workers was a brand-new child starting from nothing, paying to rediscover everything each round. The agent is now told to prefer continuing a child over spawning a fresh one for follow-up work.
+
+### Fixed
+- A subagent id now stays usable for as long as the chat keeps its record, instead of expiring ten minutes after that child finished. Because a child is allowed to run for half an hour, any sequence like "implementer, then a thorough reviewer, then hand the review back to the same implementer" outlived its own handle and failed — so the work was redone from scratch by a fresh child that knew nothing. The handle was never actually lost; it was being looked for only in memory while the full record sat on disk. Review, apply, and cleanup of a child's isolated worktree recover the same way, so a worktree can no longer be stranded on disk with no way to apply or delete it. Your agent no longer has to hurry, reorder, or shorten review steps to keep a subagent reachable.
+- A turn that delegated nothing no longer shows other turns' subagents in its statistics. After a window reload the whole retained run history could be dumped onto whichever turn happened to be running when the extension next refreshed its subagent list — typically ten minutes in, as finished runs aged out — so a turn of seven minutes claimed hours of delegated work. Runs are now attributed by when they were actually spawned. A background child left over from an earlier turn likewise no longer adds its tool time to the current turn's breakdown, which used to disagree with the run list right beside it.
+- A finished subagent now reports its own id in the result your agent actually reads. The id was previously shown only on the tool card in the chat, so an agent that wanted to inspect, resume, or review the child it had just delegated to had no way to name it — and could only guess or give up.
+- A subagent that worked in its own isolated worktree now says so, and says where. Its edits sit outside your workspace until they are applied, and nothing in the result used to mention that: the child reported success, the files looked untouched, and the review-then-apply step it was supposed to go through was unreachable. The result now names the worktree and the exact actions that read, accept, and discard it, and warns against reaching into it any other way. Background children, which are always isolated, report the same in their completion notice.
+- Setting up an isolated worktree no longer fails when a previous one was removed from disk without Git being told, which left Git refusing the location as already taken.
+
+## [0.71.0] - 2026-08-23
+
+### Added
+- Turn timing now survives an extension host restart. Durations, the tool and subagent breakdowns, and per-call timings are stored alongside the conversation itself, so scrolling back into earlier turns still shows them after a reload — and they are deleted together with that chat's history, never separately.
+
+### Fixed
+- The subagent tool breakdown now shows the `Model await & startup` figure inline instead of only under the per-run list. Reading 83 seconds of child tool time next to 2545 seconds of child runs left the difference unexplained until you scrolled two sections down.
+- Scrolling back to an earlier turn no longer strips its footer: duration, tokens-per-second, and the tool breakdown used to vanish because history pages loaded on scroll arrived without their timing.
+
 ## [0.70.0] - 2026-08-23
 
 ### Added

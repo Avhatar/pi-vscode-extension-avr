@@ -94,18 +94,21 @@ export class PiChildSessionFactory implements ChildSessionFactory {
     async resume(
         spec: ResolvedAgentSpec,
         transcriptPath: string,
-        context: { agentId: string; signal: AbortSignal },
+        context: { agentId: string; signal: AbortSignal; isolationPath?: string },
     ): Promise<ChildSessionHandle> {
         if (!this.options.transcriptDirectory || !isWithin(this.options.transcriptDirectory, transcriptPath)) {
             throw new Error('Subagent transcript is outside the configured child-session storage boundary.');
         }
         const { SessionManager } = await import('@earendil-works/pi-coding-agent');
         await fs.access(transcriptPath);
-        if (this.options.writeIsolation?.hasWrites(spec) && spec.isolation === 'worktree') {
-            throw new Error('Resume for a write-capable worktree subagent requires its preserved worktree control path.');
-        }
+        // A recorded worktree is reattached, never recreated: `prepare` opens its
+        // create path with `fs.rm`. Without a recorded path the child either was
+        // never isolated or had its worktree cleaned up, so a fresh one is right —
+        // the conversation is what resume reuses, the checkout is only where it works.
         const lease = this.options.writeIsolation
-            ? await this.options.writeIsolation.prepare(this.options.cwd, context.agentId, spec)
+            ? await this.options.writeIsolation.prepare(this.options.cwd, context.agentId, spec, {
+                ...(context.isolationPath ? { reattachWorktreePath: context.isolationPath } : {}),
+            })
             : { cwd: this.options.cwd, release: async () => {} };
         let sessionLock: SessionLockHandle | undefined;
         try {

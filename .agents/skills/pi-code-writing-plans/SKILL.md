@@ -43,7 +43,8 @@ Include only relevant items:
 - subagent registry, runtime, persistence, isolation, review/apply, and launcher state;
 - runtime dependencies, bundled Pi packages, `.vscodeignore`, and VSIX contents;
 - unit, integration, manual F5, and installed-VSIX evidence;
-- `CHANGELOG.md` entry for code/product behavior changes.
+- `CHANGELOG.md` entry for code/product behavior changes, plus a `RELEASES.md`
+  entry when the plan ends in a build handed to users.
 
 ## Recommended Format
 

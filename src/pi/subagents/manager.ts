@@ -44,6 +44,13 @@ export interface SubagentManagerOptions {
     restoredRecords?: readonly PersistedSubagentRecord[];
     persistRun?: (run: SubagentRun, spec: ResolvedAgentSpec) => Promise<void>;
     dismissRun?: (agentId: string) => Promise<void>;
+    /**
+     * Read one run back from durable storage. Terminal rows are evicted from
+     * memory long before the stored record expires, so without this the
+     * retention window would silently become the deadline for resuming,
+     * reviewing, or cleaning up a finished child.
+     */
+    loadRun?: (agentId: string) => Promise<PersistedSubagentRecord | undefined>;
     maxConcurrentRuns?: number;
     onMutationEvent?: (event: {
         type: 'tool_execution_start' | 'tool_execution_end';
@@ -202,6 +209,57 @@ export class SubagentManager {
         return { agentId, model: { ...spec.model }, background: true };
     }
 
+    /**
+     * Resolve one run, pulling it back from durable storage when memory has
+     * already dropped it.
+     *
+     * Terminal rows live `terminalRetentionMs` in memory while the stored
+     * record lives for weeks. Every lifecycle action goes through here so the
+     * in-memory retention window stays what it is meant to be — a memory-
+     * pressure policy — instead of a deadline the parent has to plan around.
+     */
+    async resolveRun(agentId: string): Promise<SubagentRun | undefined> {
+        const known = this.runs.get(agentId);
+        if (known && this.runSpecs.has(agentId)) return cloneRun(known);
+        if (!this.options.loadRun) return known ? cloneRun(known) : undefined;
+
+        let record: PersistedSubagentRecord | undefined;
+        try {
+            record = await this.options.loadRun(agentId);
+        } catch (error) {
+            this.log(`[subagent persistence error] load agentId=${agentId} error=${String(error)}`);
+            return known ? cloneRun(known) : undefined;
+        }
+        // A dismissed record was explicitly discarded; rehydrating it would
+        // resurrect a row the user removed from the launcher.
+        if (!record || record.dismissed || record.agentId !== agentId) {
+            return known ? cloneRun(known) : undefined;
+        }
+        if (this.disposed) return known ? cloneRun(known) : undefined;
+        // Racing callers: whoever got here first already adopted the record.
+        const current = this.runs.get(agentId);
+        if (current && this.runSpecs.has(agentId)) return cloneRun(current);
+
+        const run = cloneRun(record.run);
+        run.parentTabId = this.parentTabId;
+        // An active status in a stored record cannot be true — a live run is
+        // never absent from memory — so the host that owned it is gone.
+        if (isActiveStatus(run.status)) {
+            run.status = 'failed';
+            run.currentTool = undefined;
+            run.activity = 'Interrupted by extension restart';
+            run.error = run.error ?? 'Subagent execution was interrupted by an extension restart.';
+            run.finishedAt = run.finishedAt ?? this.now();
+        }
+        this.runs.set(agentId, run);
+        this.runSpecs.set(agentId, cloneSpec(record.definitionSnapshot));
+        // Re-arm eviction: the row is a cache entry again, not a permanent one.
+        this.retainTerminalRun(run, false);
+        this.log(`[subagent rehydrated] agentId=${agentId} status=${run.status}`);
+        this.emitSnapshot();
+        return cloneRun(run);
+    }
+
     async resumeForeground(
         agentId: string,
         task: string,
@@ -209,9 +267,10 @@ export class SubagentManager {
         onRunChange?: (run: SubagentRun) => void,
     ): Promise<SubagentForegroundResult> {
         if (this.disposed) throw new Error('Subagent manager is disposed.');
+        if (!this.runs.has(agentId) || !this.runSpecs.has(agentId)) await this.resolveRun(agentId);
         const run = this.runs.get(agentId);
         const previousSpec = this.runSpecs.get(agentId);
-        if (!run || !previousSpec) throw new Error(`Unknown or stale subagent id: ${agentId}.`);
+        if (!run || !previousSpec) throw new Error(`Unknown subagent id: ${agentId}.`);
         if (this.activeRuns.has(agentId)) throw new Error(`Subagent ${agentId} is already running.`);
         if (!run.transcriptPath) throw new Error(`Subagent ${agentId} has no persistent transcript to resume.`);
         if (!this.factory.resume) throw new Error('The configured child runtime does not support resume.');
@@ -353,7 +412,14 @@ export class SubagentManager {
                 let timeout: ReturnType<typeof setTimeout> | undefined;
                 try {
                     child = resume
-                        ? await this.factory.resume!(spec, run.transcriptPath!, { agentId: run.agentId, signal })
+                        ? await this.factory.resume!(spec, run.transcriptPath!, {
+                            agentId: run.agentId,
+                            signal,
+                            // Carries the worktree the child last worked in, so the
+                            // runtime reattaches to it instead of recreating it over
+                            // the top of everything the child had written.
+                            ...(run.isolationPath ? { isolationPath: run.isolationPath } : {}),
+                        })
                         : await this.factory.create(spec, { agentId: run.agentId, signal });
                     active.child = child;
                     this.updateRun(run, {
@@ -506,6 +572,10 @@ export class SubagentManager {
                         model: { ...child.model },
                         turnCount: run.turnCount,
                         truncated: bounded.truncated,
+                        // Carried out to the caller so the parent learns the
+                        // worktree exists; without it the preserved checkout is
+                        // invisible to everything except the launcher.
+                        ...(run.isolationPath ? { isolationPath: run.isolationPath } : {}),
                     };
                     this.updateRun(run, {
                         status: 'completed',
@@ -602,7 +672,12 @@ export class SubagentManager {
         this.emitSnapshot();
     }
 
-    private retainTerminalRun(run: SubagentRun): void {
+    /**
+     * @param enforceCap Skipped for a row pulled back from storage: the sweep
+     * orders by `finishedAt`, so an older run would sort past the cap and be
+     * evicted again by the very call that fetched it.
+     */
+    private retainTerminalRun(run: SubagentRun, enforceCap = true): void {
         const previous = this.terminalTimers.get(run.agentId);
         if (previous) clearTimeout(previous);
         const timer = setTimeout(() => {
@@ -614,6 +689,7 @@ export class SubagentManager {
         }, this.terminalRetentionMs);
         timer.unref?.();
         this.terminalTimers.set(run.agentId, timer);
+        if (!enforceCap) return;
 
         const terminal = [...this.runs.values()]
             .filter((candidate) => !isActiveStatus(candidate.status))

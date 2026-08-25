@@ -13,7 +13,8 @@ Three concurrency gates protect the system. **Per-parent maxConcurrentRuns** (de
 - `runForeground(invocation)` [manager.ts:134](../../../../src/pi/subagents/manager.ts#L134) — creates `agentId` via `createAgentId()`, records status `queued`, calls `launchRun()` when scheduling permits.
 - `runBackground(invocation)` [manager.ts:161](../../../../src/pi/subagents/manager.ts#L161) — returns the persistent agentId immediately, spawns async with `onBackgroundSettled` callback so the parent can flush a notification.
 - `scheduleParent()` + `pumpParentQueue()` [manager.ts:517](../../../../src/pi/subagents/manager.ts#L517) — parent-level rate limiting; abort-signal aware.
-- `retainTerminalRun(agentId)` [manager.ts:575](../../../../src/pi/subagents/manager.ts#L575) — setTimeout for `terminalRetentionMs` (default 10 min); LRU eviction at `maxRetainedTerminalRuns` (default 20).
+- `retainTerminalRun(agentId, enforceCap?)` [manager.ts:680](../../../../src/pi/subagents/manager.ts#L680) — setTimeout for `terminalRetentionMs` (default 10 min); LRU eviction at `maxRetainedTerminalRuns` (default 20). `enforceCap: false` arms only the timer, for a row rehydrated from storage.
+- `resolveRun(agentId)` [manager.ts:221](../../../../src/pi/subagents/manager.ts#L221) — returns a run from memory, or pulls its record back through the `loadRun` option and re-adopts it. Every lifecycle action resolves through here.
 
 [`SubagentCoordinator`](../../../../src/pi/subagents/coordinator.ts#L8) — global gate:
 
@@ -30,7 +31,7 @@ Three concurrency gates protect the system. **Per-parent maxConcurrentRuns** (de
 Executing a run [manager.ts:323](../../../../src/pi/subagents/manager.ts#L323):
 
 1. Prepare write lease via [`WriteIsolationManager`](../../../../src/pi/subagents/write-isolation.ts).
-2. `factory.create(spec)` (or `factory.resume(runId)` for transcript replay) → `ChildSessionHandle`.
+2. `factory.create(spec)` (or `factory.resume(spec, transcriptPath, context)` to continue an existing child) → `ChildSessionHandle`.
 3. Subscribe to child events; on `tool-started` / `tool-ended`, emit `onMutationEvent` with namespaced tool-call ids so parent-level file tracking sees them. The same channel carries the child's tool wall-clock time to the parent's turn accounting.
 4. Enforce timeout via `AbortController`.
 5. On completion, populate `SubagentRun.result`, retain terminally, persist.
@@ -40,7 +41,17 @@ Turn-budget handling [manager.ts:364](../../../../src/pi/subagents/manager.ts#L3
 - **One turn left** — when `spec.maxTurns - turnCount === 1` and the child is still calling tools, the manager steers it once with `windDownMessage(...)` [manager.ts:26](../../../../src/pi/subagents/manager.ts#L26): stop investigating, call `complete_subagent` now with whatever you have. `ActiveRun.windDownSent` keeps it to a single nudge. The child cannot see its own turn accounting, so without this it has no way to know it is about to be cut off.
 - **Budget spent** — the run is aborted with reason `max-turns`. The resulting `SubagentRunError` carries `partialResult` (the child's last assistant text), and [`describeSubagentFailure`](../../../../src/pi/subagents/runtime.ts#L106) appends it to the parent-facing failure so a stranded child's work is recoverable instead of being re-run from scratch. Every termination reason — `timeout`, `cancelled`, `runtime-error`, `incomplete` — carries the same salvage, not only `max-turns`.
 
-`describeSubagentFailure` is the single formatter for both delivery paths: `withSalvagedPartial` [tool.ts:203](../../../../src/pi/subagents/tool.ts#L203) rethrows the described failure for foreground `spawn` / `resume` / lifecycle calls, and `_deliverBackgroundSubagentNotification` uses it for the notification body when a background child settles as failed. The salvaged tail is bounded by `PARTIAL_RESULT_LIMIT` (8000 chars) so a stranded child cannot flood the parent context with its transcript. When there is nothing to salvage the function returns `error.message` unchanged, which is how `withSalvagedPartial` knows to rethrow the original error object rather than wrap it.
+`describeSubagentFailure` is the single formatter for both delivery paths: `withSalvagedPartial` [tool.ts:205](../../../../src/pi/subagents/tool.ts#L205) rethrows the described failure for foreground `spawn` / `resume` / lifecycle calls, and `_deliverBackgroundSubagentNotification` uses it for the notification body when a background child settles as failed. The salvaged tail is bounded by `PARTIAL_RESULT_LIMIT` (8000 chars) so a stranded child cannot flood the parent context with its transcript. When there is nothing to salvage the function returns `error.message` unchanged, which is how `withSalvagedPartial` knows to rethrow the original error object rather than wrap it.
+
+[`describeSubagentResult`](../../../../src/pi/subagents/runtime.ts#L134) is its success-path counterpart, and it exists because `SubagentToolDetails` is invisible to the model. A finished child's `agentId` and preserved worktree used to live only in the tool call's `details`, which the chat UI renders but the model never reads — so the parent was told to call `review` before `apply` while having no sanctioned way to learn either the id to pass or that an isolated checkout existed at all. The observed failure mode was a parent that located worktrees by hand and dispatched shared-workspace writers into a sibling's checkout. The formatter appends a short `Subagent handle:` trailer naming `agentId`, model, and turn count, and for an isolated child additionally names the worktree, states that its edits are not in the workspace yet, and points at `review` → `apply` → `cleanup`. It is applied on foreground `spawn` [tool.ts:197](../../../../src/pi/subagents/tool.ts#L197) and on `resume` [session.ts:1330](../../../../src/pi/session.ts#L1330); the background notification carries the same worktree lines inline, which matters most there because write-capable background children are *required* to run isolated. The trailer is deliberately two to four lines: it is paid for on every delegation.
+
+`SubagentForegroundResult.isolationPath` [runtime.ts:53](../../../../src/pi/subagents/runtime.ts#L53) is what carries the worktree out of the manager to make that possible — the manager copies it from `SubagentRun.isolationPath` when building the result [manager.ts:512](../../../../src/pi/subagents/manager.ts#L512).
+
+`resumeForeground` [manager.ts:263](../../../../src/pi/subagents/manager.ts#L263) is how a parent continues an existing child instead of paying a fresh one to rediscover everything, and it reuses the child's *own session* rather than replaying a transcript into a new one: `PiChildSessionFactory.resume` calls `SessionManager.open(transcriptPath)`, so the child keeps its accumulated conversation and the follow-up task arrives as the next user message. The spec is reused verbatim [manager.ts:277](../../../../src/pi/subagents/manager.ts#L277) — same model, instructions, tools, and `maxTurns`; only `task` changes, and a `maxTurns` passed on the resume call itself is ignored. **The turn budget starts over** (`turnCount: 0` [manager.ts:291](../../../../src/pi/subagents/manager.ts#L291)), which makes resume the sanctioned answer to a child that hit `max-turns`: it gets a full budget back with everything it had worked out intact. The terminal retention timer is cleared [manager.ts:293](../../../../src/pi/subagents/manager.ts#L293), so each resume also renews the row's retention window.
+
+Resume does not depend on that window. `resumeForeground` and `_executeSubagentControl` both resolve the id through `resolveRun`, which falls back to the `loadRun` option — `SubagentRunStore.get` — when the row has already been evicted from memory. This matters because the two lifetimes were never reconciled: a child may run for 30 minutes by default while a *finished* sibling's row is dropped after 10, so any `implementer → long reviewer → resume implementer` chain outlived its own handle and failed with `Unknown or stale subagent id`. Since the record carries the run and its `definitionSnapshot`, nothing was actually lost — it was being looked for in the wrong place. Rehydration normalises a stored status that still claims to be active (only a dead host can leave one), refuses a `dismissed` record, and re-arms the retention timer with `enforceCap: false` so the LRU sweep, which orders by `finishedAt`, cannot evict the older row the caller just asked for.
+
+For a write-capable worktree child the recorded `SubagentRun.isolationPath` is passed through the resume context so the runtime *reattaches* that worktree instead of rebuilding it. Preconditions, each failing explicitly: the run and its spec must be resolvable from memory or durable storage, `run.transcriptPath` must be set, the run must not already be active, the factory must implement `resume`, and any recorded worktree must pass the strict reattachment checks. Resume is foreground-only — there is no background resume — and restored records repopulate `runs` and `runSpecs` in the constructor [manager.ts:114](../../../../src/pi/subagents/manager.ts#L114), while `resolveRun` rehydrates a row after its in-memory retention window, so resumability is bounded by the stored record rather than the cache.
 
 The completion is read *before* the abort is honoured [manager.ts:466](../../../../src/pi/subagents/manager.ts#L466). A child that called `complete_subagent` on its final turn has already delivered, and the budget abort or a user stop can land in the same tick; checking the abort first would fail a finished run.
 
@@ -71,15 +82,18 @@ Mutation routing [mutations.ts:1](../../../../src/pi/subagents/mutations.ts#L1) 
 **Types — runtime:**
 - `ChildSessionEvent` — union [runtime.ts:14](../../../../src/pi/subagents/runtime.ts#L14)
 - `ChildSessionHandle` — [runtime.ts:22](../../../../src/pi/subagents/runtime.ts#L22)
-- `ChildSessionFactory` — [runtime.ts:36](../../../../src/pi/subagents/runtime.ts#L36); `.create()` + optional `.resume()`
-- `SubagentRunError` — [runtime.ts:76](../../../../src/pi/subagents/runtime.ts#L76); carries `reason`, `agentId`, `partialResult`
-- `describeSubagentFailure(error)` — [runtime.ts:106](../../../../src/pi/subagents/runtime.ts#L106); shared salvage formatter
-- `PARTIAL_RESULT_LIMIT` — [runtime.ts:91](../../../../src/pi/subagents/runtime.ts#L91)
+- `ChildSessionFactory` — [runtime.ts:36](../../../../src/pi/subagents/runtime.ts#L36); `.create()` + optional `.resume()`, whose context carries `isolationPath?` for worktree reattachment
+- `SubagentForegroundResult` — [runtime.ts:47](../../../../src/pi/subagents/runtime.ts#L47); carries `agentId`, `model`, `turnCount`, `truncated`, `isolationPath?`
+- `SubagentRunError` — [runtime.ts:78](../../../../src/pi/subagents/runtime.ts#L78); carries `reason`, `agentId`, `partialResult`
+- `describeSubagentFailure(error)` — [runtime.ts:108](../../../../src/pi/subagents/runtime.ts#L108); shared salvage formatter
+- `describeSubagentResult(result)` — [runtime.ts:134](../../../../src/pi/subagents/runtime.ts#L134); success-path handle formatter (`agentId` + worktree into model-visible text)
+- `PARTIAL_RESULT_LIMIT` — [runtime.ts:93](../../../../src/pi/subagents/runtime.ts#L93)
 
 **Methods — manager:**
 - `runForeground(invocation)` — [manager.ts:134](../../../../src/pi/subagents/manager.ts#L134)
 - `runBackground(invocation)` — [manager.ts:161](../../../../src/pi/subagents/manager.ts#L161)
-- `retainTerminalRun(agentId)` — [manager.ts:575](../../../../src/pi/subagents/manager.ts#L575)
+- `retainTerminalRun(agentId, enforceCap?)` — [manager.ts:680](../../../../src/pi/subagents/manager.ts#L680)
+- `resolveRun(agentId)` — [manager.ts:221](../../../../src/pi/subagents/manager.ts#L221)
 - `namespaceChildToolCallId(agentId, toolCallId)` — [manager.ts:623](../../../../src/pi/subagents/manager.ts#L623)
 
 **Methods — coordinator:**
@@ -95,7 +109,7 @@ Mutation routing [mutations.ts:1](../../../../src/pi/subagents/mutations.ts#L1) 
 **Attributes / markers:**
 - Default global concurrency: `4` (`pi-code.subagents.maxConcurrentGlobal`)
 - Default per-parent concurrency: `2` (`pi-code.subagents.maxConcurrentPerChat`)
-- Default terminal retention: 10 minutes, 20-slot LRU
+- Default terminal retention: 10 minutes, 20-slot LRU — an in-memory cache policy only; a handle stays usable for the stored record's 30 days
 - Default maxTurns: `60` (no host ceiling), default timeoutMinutes: `30` (host ceiling `120`)
 - One turn is one child assistant step, counted per `turn-ended` — a tool call costs a turn
 - Wind-down steer fires once, one turn before the budget is spent; every failure reason carries `partialResult`

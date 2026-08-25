@@ -946,6 +946,9 @@ export class ChatController implements vscode.Disposable {
 
     private _subscribeTab(tab: TabState): void {
         tab.session.setSubagentParentTabId(tab.id);
+        // Turn timing lives in the session branch, so a tab restored on window
+        // reload gets its history's footers and breakdowns back.
+        this._chatService.restoreTurnMetrics(tab);
         const unsubs: (() => void)[] = [];
 
         unsubs.push(

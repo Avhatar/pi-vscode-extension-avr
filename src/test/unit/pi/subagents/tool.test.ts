@@ -165,9 +165,64 @@ describe('parent subagent tool', () => {
             maxTurns: 5,
             timeoutMinutes: 2,
         }), undefined, expect.any(Function));
-        expect(result.content).toEqual([{ type: 'text', text: 'Review complete.' }]);
+        expect(result.content[0].text).toContain('Review complete.');
         expect(result.details).toMatchObject({ status: 'completed', model: { provider: 'deepseek', id: 'reasoner' } });
         expect(updates.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('names the agentId in the foreground result the model actually reads', async () => {
+        let tool: any;
+        registerSubagentTool({ registerTool(value: any) { tool = value; } } as any, {
+            definitions: [],
+            execute: vi.fn(async () => ({
+                agentId: 'foreground-1',
+                result: 'Review complete.',
+                model: { provider: 'deepseek', id: 'reasoner' },
+                turnCount: 3,
+                truncated: false,
+            })),
+        });
+
+        const result = await tool.execute('call-1', { task: 'Review auth.' }, undefined, undefined, {});
+
+        expect(result.content[0].text).toContain('agentId=foreground-1');
+        expect(result.content[0].text).toContain('turns=3');
+        expect(result.details).toMatchObject({ agentId: 'foreground-1' });
+    });
+
+    it('names the preserved worktree so the parent never has to locate one by hand', async () => {
+        let tool: any;
+        registerSubagentTool({ registerTool(value: any) { tool = value; } } as any, {
+            definitions: [],
+            execute: vi.fn(async () => ({
+                agentId: 'isolated-1',
+                result: 'Implemented the slice.',
+                model: { provider: 'deepseek', id: 'reasoner' },
+                turnCount: 9,
+                truncated: false,
+                isolationPath: '/storage/subagents/worktrees/isolated-1',
+            })),
+        });
+
+        const result = await tool.execute('call-1', {
+            task: 'Implement the slice.', isolation: 'worktree',
+        }, undefined, undefined, {});
+
+        expect(result.content[0].text).toContain('/storage/subagents/worktrees/isolated-1');
+        expect(result.content[0].text).toContain('action="review"');
+        expect(result.details).toMatchObject({
+            agentId: 'isolated-1',
+            isolationPath: '/storage/subagents/worktrees/isolated-1',
+        });
+    });
+
+    it('tells the caller that a worktree is reachable only through the lifecycle actions', () => {
+        const registerTool = vi.fn();
+        registerSubagentTool({ registerTool } as any, { definitions: [], execute: vi.fn() });
+
+        const guidelines = registerTool.mock.calls[0][0].promptGuidelines.join('\n');
+        expect(guidelines).toContain('`Subagent handle:` line naming its agentId');
+        expect(guidelines).toContain('never locate one by hand');
     });
 
     it('documents what a turn costs so the caller does not under-budget the child', () => {

@@ -24,6 +24,10 @@ import {
     type SubagentStatEntry,
 } from '../../shared/tool-timing';
 import {
+    TURN_METRICS_TOOL_DURATION_LIMIT,
+    type PersistedTurnMetrics,
+} from '../../shared/turn-metrics';
+import {
     TabRuntime,
     type TabDisposableResource,
     type TabMessageMeta,
@@ -37,6 +41,10 @@ export interface ChatServiceSession extends TabSessionResource {
     getMessages(): any[];
     getFirstTranscriptUserMessage(): any | undefined;
     setSessionName(name: string): void;
+    /** Persist one turn's metrics into the session branch. */
+    recordTurnMetrics?(metrics: PersistedTurnMetrics): void;
+    /** Replay metrics persisted by an earlier extension host for this session. */
+    getPersistedTurnMetrics?(): PersistedTurnMetrics[];
 }
 
 export interface ChatServiceDiff extends TabDisposableResource {
@@ -351,7 +359,14 @@ export class ChatService {
         if (!agentId || !toolCallId) return;
 
         if (event.type === 'tool_execution_start') {
+            // An id never seen before that is already executing tools can only
+            // belong to the open turn — a restored run comes back terminal and
+            // never reaches this channel. This covers a child whose manager
+            // snapshot has not been folded in yet; anything older keeps the
+            // attribution the snapshot gave it.
+            const known = tab.subagentStats.has(agentId);
             tab.subagentStat(agentId);
+            if (!known) tab.chargeSubagentToTurn(agentId);
             // The name is resolved at start, where the arguments that qualify an
             // MCP call are guaranteed to be present.
             tab.pendingSubagentTools.set(toolCallId, {
@@ -368,10 +383,15 @@ export class ChatService {
         const entry = tab.subagentStat(agentId);
         entry.toolDurationMs += durationMs;
         entry.toolCalls += 1;
-        accumulateToolStat(tab.turnChildToolStats, {
-            name: pending.name || toolStatDisplayName(event.toolName, event.args),
-            durationMs,
-        });
+        // Only children this turn spawned. A background run started earlier is
+        // still executing tools now, but its row belongs to the turn that
+        // delegated it, and the two sections have to describe the same runs.
+        if (tab.turnSubagentIds.has(agentId)) {
+            accumulateToolStat(tab.turnChildToolStats, {
+                name: pending.name || toolStatDisplayName(event.toolName, event.args),
+                durationMs,
+            });
+        }
     }
 
     /**
@@ -381,12 +401,31 @@ export class ChatService {
      */
     syncSubagentRuns(tab: ChatServiceTab, runs: readonly SubagentRunTiming[]): void {
         const now = this._now();
+        // A background child settles after its turn closed, so the turn already
+        // written to the session file has to be re-written with the final numbers.
+        const restatedTurnKeys = new Set<string>();
         for (const run of runs) {
             const agentId = String(run.agentId ?? '');
             if (!agentId) continue;
             const entry = tab.subagentStat(agentId, run.name);
             if (run.name) entry.name = run.name;
+            // Attribution is the spawn time, not first sight: the manager
+            // re-announces every retained run whenever anything changes, so a
+            // restored history would otherwise land on the open turn wholesale.
+            // `queuedAt` and not `startedAt`, because a run that waited for a
+            // concurrency slot still belongs to the turn that delegated it.
+            const spawnedAt = run.queuedAt ?? run.startedAt;
+            if (spawnedAt !== undefined
+                && tab.agentStartTime > 0
+                && spawnedAt >= tab.agentStartTime) {
+                tab.chargeSubagentToTurn(agentId);
+            }
+            const previousStatus = entry.status;
             entry.status = subagentStatStatus(run.status);
+            if (entry.status !== previousStatus) {
+                const turnKey = tab.subagentTurnKey.get(agentId);
+                if (turnKey !== undefined) restatedTurnKeys.add(turnKey);
+            }
             const start = run.startedAt ?? run.queuedAt;
             entry.durationMs = start === undefined
                 ? 0
@@ -398,6 +437,105 @@ export class ChatService {
                 : run.startedAt !== undefined && run.queuedAt !== undefined
                     ? Math.max(0, run.startedAt - run.queuedAt)
                     : 0;
+        }
+        for (const key of restatedTurnKeys) this._persistTurnMetrics(tab, key);
+    }
+
+    /**
+     * Write one turn's metrics into the session branch so they outlive the
+     * extension host. Called again for a turn whose background child settled
+     * later; the replay takes the newest write per key.
+     */
+    private _persistTurnMetrics(tab: ChatServiceTab, key: string): void {
+        const record = tab.session.recordTurnMetrics;
+        if (!record) return;
+        const meta = tab.messageMeta.get(key);
+        if (!meta) return;
+
+        const metrics: PersistedTurnMetrics = { key };
+        if (meta.thinkingDurationSec > 0) metrics.thinkingDurationSec = meta.thinkingDurationSec;
+        if (meta.messageEndTime > 0) metrics.messageEndTime = meta.messageEndTime;
+        if (meta.turnDurationMs !== undefined) metrics.turnDurationMs = meta.turnDurationMs;
+        if (meta.totalTurnDurationMs !== undefined) {
+            metrics.totalTurnDurationMs = meta.totalTurnDurationMs;
+        }
+        if (meta.modelWaitMs !== undefined) metrics.modelWaitMs = meta.modelWaitMs;
+        if (meta.compactionMs !== undefined) metrics.compactionMs = meta.compactionMs;
+        if (meta.toolStats?.length) metrics.toolStats = meta.toolStats;
+        if (meta.childToolStats?.length) metrics.childToolStats = meta.childToolStats;
+        if (meta.combinedToolStats?.length) metrics.combinedToolStats = meta.combinedToolStats;
+        // Snapshot the live rows: the stored copy must not keep mutating.
+        if (meta.subagentStats?.length) {
+            metrics.subagentStats = meta.subagentStats.map((entry) => ({ ...entry }));
+        }
+
+        // Only the calls this turn can still show, newest first, under the cap.
+        const toolDurations: Record<string, number> = {};
+        let stored = 0;
+        const entries = [...tab.toolDurations.entries()];
+        for (let index = entries.length - 1; index >= 0; index--) {
+            if (stored >= TURN_METRICS_TOOL_DURATION_LIMIT) break;
+            const [toolCallId, durationMs] = entries[index];
+            toolDurations[toolCallId] = durationMs;
+            stored++;
+        }
+        if (stored > 0) metrics.toolDurations = toolDurations;
+
+        record.call(tab.session, metrics);
+    }
+
+    /**
+     * Rebuild turn metadata persisted by an earlier extension host.
+     *
+     * Must run **after** `resetSessionProjection`, which clears the very maps
+     * this fills. Keys are assistant message identities, and the session file
+     * preserves those timestamps, so a reloaded transcript matches its metrics.
+     */
+    restoreTurnMetrics(tab: ChatServiceTab): void {
+        const persisted = tab.session.getPersistedTurnMetrics?.() ?? [];
+        let latestTotalTurnDurationMs = 0;
+        for (const metrics of persisted) {
+            const meta: TabMessageMeta = {
+                thinkingDurationSec: metrics.thinkingDurationSec ?? 0,
+                messageEndTime: metrics.messageEndTime ?? 0,
+            };
+            if (metrics.turnDurationMs !== undefined) meta.turnDurationMs = metrics.turnDurationMs;
+            if (metrics.totalTurnDurationMs !== undefined) {
+                meta.totalTurnDurationMs = metrics.totalTurnDurationMs;
+                latestTotalTurnDurationMs = Math.max(
+                    latestTotalTurnDurationMs,
+                    metrics.totalTurnDurationMs,
+                );
+            }
+            if (metrics.modelWaitMs !== undefined) meta.modelWaitMs = metrics.modelWaitMs;
+            if (metrics.compactionMs !== undefined) meta.compactionMs = metrics.compactionMs;
+            if (metrics.toolStats) meta.toolStats = metrics.toolStats;
+            if (metrics.childToolStats) meta.childToolStats = metrics.childToolStats;
+            if (metrics.combinedToolStats) meta.combinedToolStats = metrics.combinedToolStats;
+            if (metrics.subagentStats) {
+                // Hand the rows back to the tab so the manager's next snapshot
+                // recognises them instead of minting fresh ones, and so a child
+                // that settles after the reload restates the turn that owns it.
+                meta.subagentStats = metrics.subagentStats.map((entry) => {
+                    const live = tab.subagentStats.get(entry.agentId);
+                    if (live) return live;
+                    tab.adoptSubagentStat(entry);
+                    return entry;
+                });
+                for (const entry of meta.subagentStats) {
+                    tab.subagentTurnKey.set(entry.agentId, metrics.key);
+                }
+            }
+            tab.recordMessageMeta(metrics.key, meta);
+
+            for (const [toolCallId, durationMs] of Object.entries(metrics.toolDurations ?? {})) {
+                tab.recordToolDuration(toolCallId, durationMs);
+            }
+        }
+        // Without this the running total restarts at zero and a late turn would
+        // claim a smaller "turns total" than the turn it contains.
+        if (latestTotalTurnDurationMs > tab.totalTurnDurationMs) {
+            tab.totalTurnDurationMs = latestTotalTurnDurationMs;
         }
     }
 
@@ -481,6 +619,8 @@ export class ChatService {
             if (turnCombinedToolStats.length > 0) meta.combinedToolStats = turnCombinedToolStats;
             if (turnSubagentStats.length > 0) meta.subagentStats = turnSubagentStats;
             tab.recordMessageMeta(key, meta);
+            for (const agentId of tab.turnSubagentIds) tab.subagentTurnKey.set(agentId, key);
+            this._persistTurnMetrics(tab, key);
         }
 
         tab.streamingText = '';
@@ -851,15 +991,29 @@ export class ChatService {
         // context and the rendered transcript are annotated the same way. There
         // is deliberately no positional alignment step: compaction rewrites the
         // compact context, and matching by position there mismatched turns.
-        const transcriptMessages = state.transcript?.items.map((item) => item.message) ?? [];
         annotateAssistantMeta(state.messages, tab.messageMeta);
-        annotateAssistantMeta(transcriptMessages, tab.messageMeta);
-
         // Tool results carry a stable call id, so per-action durations can be
         // matched exactly instead of being aligned positionally.
         annotateToolDurations(state.messages, tab.toolDurations);
-        annotateToolDurations(transcriptMessages, tab.toolDurations);
+        this.annotateTranscriptPage(tab, state.transcript);
         return state;
+    }
+
+    /**
+     * Stamp turn metadata onto one transcript page.
+     *
+     * Both delivery paths must go through here. `buildState` ships the latest
+     * page, but a page fetched by scrolling back arrives through the
+     * `getTranscriptPage` command — annotate only the first and history loses
+     * its turn durations, tool breakdowns, and per-call timings on the way in.
+     */
+    annotateTranscriptPage<TPage>(tab: ChatServiceTab, page: TPage): TPage {
+        const items = (page as { items?: unknown } | undefined)?.items;
+        if (!Array.isArray(items)) return page;
+        const messages = items.map((item) => (item as { message?: any })?.message);
+        annotateAssistantMeta(messages, tab.messageMeta);
+        annotateToolDurations(messages, tab.toolDurations);
+        return page;
     }
 }
 

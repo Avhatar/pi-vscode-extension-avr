@@ -36,7 +36,7 @@ If the relevant environment is unavailable, verification remains pending. Do not
 | Performance improved | comparable measurement under the same workload |
 | Flake fixed | repeated runs under representative load |
 | Ready to merge | requirements checked, diff reviewed, relevant tests/build/manual checks pass |
-| Ready to release | changelog/version policy satisfied and installed-VSIX smoke passes |
+| Ready to release | `CHANGELOG.md` and version stamped, `RELEASES.md` entry written for the version going to users, and installed-VSIX smoke passes |
 
 Use the narrowest evidence that proves the claim, then broader checks proportional to blast radius. Do not claim all tests pass when only a focused subset ran.
 

@@ -32,6 +32,7 @@ function createHarness() {
     const chat = {
         updateTabName: vi.fn((tab: ChatHostTab) => ({ changed: false, name: tab.name })),
         resetSessionProjection: vi.fn(),
+        restoreTurnMetrics: vi.fn(),
         buildState: vi.fn((_tab: ChatHostTab, context: any) => ({
             activeTabId: context.activeTabId,
             tabs: context.getTabs(),

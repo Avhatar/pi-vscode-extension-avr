@@ -15,6 +15,8 @@ README.md
 # `vsce package --changelog-path` installs as the VSIX's changelog.md and the
 # Marketplace renders on its Changelog tab.
 CHANGELOG.md
+# Maintainer bookkeeping: which version was last handed to users.
+release-state.json
 .dev-notes/**
 docs/**
 standalone/**

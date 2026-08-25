@@ -9,6 +9,7 @@ function createHarness() {
         undoFileChange: vi.fn(async () => undefined),
         restoreCheckpoint: vi.fn(async () => ['a.txt']),
         redoCheckpoint: vi.fn(async () => ['a.txt']),
+        annotateTranscriptPage: vi.fn((_tab: unknown, page: unknown) => page),
     };
     const session = {
         getModels: vi.fn(() => [{ provider: 'p', id: 'm' }]),
@@ -80,6 +81,23 @@ describe('portable ChatCommandService', () => {
         for (const [message, intent] of cases) {
             await expect(service.dispatch(tab, message, callbacks)).resolves.toEqual({ intent });
         }
+    });
+
+    it('stamps turn metadata onto a history page fetched by scrolling back', async () => {
+        const { service, chat, session, tab, callbacks } = createHarness();
+        const page = { sessionId: 's', items: [], hasMoreBefore: true, totalUserMessages: 3 };
+        session.getTranscriptPage.mockReturnValueOnce(page as any);
+
+        const outcome = await service.dispatch(
+            tab,
+            { type: 'getTranscriptPage', sessionId: 's', beforeEntryId: 'entry-9', limit: 40 },
+            callbacks,
+        );
+
+        // Without this the page arrives stripped of durations and breakdowns,
+        // because only `buildState` annotated the page it shipped itself.
+        expect(chat.annotateTranscriptPage).toHaveBeenCalledWith(tab, page);
+        expect(outcome).toEqual({ result: page });
     });
 
     it('routes prompt, streaming, queue, and rename commands through existing portable services', async () => {

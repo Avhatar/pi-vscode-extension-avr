@@ -2,7 +2,9 @@ import type { AgentToolUpdateCallback } from '@earendil-works/pi-agent-core';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import type { AgentDefinition, ModelRef, SubagentInvocation, SubagentRunStatus } from './types';
-import { describeSubagentFailure, SubagentRunError, type SubagentExecutionResult } from './runtime';
+import {
+    describeSubagentFailure, describeSubagentResult, SubagentRunError, type SubagentExecutionResult,
+} from './runtime';
 
 export const SUBAGENT_TOOL_NAME = 'subagent';
 
@@ -69,6 +71,8 @@ export interface SubagentToolDetails {
     model?: ModelRef;
     turnCount?: number;
     truncated?: boolean;
+    /** Preserved worktree holding the child's edits, when it ran isolated. */
+    isolationPath?: string;
 }
 
 export interface SubagentControlResult {
@@ -104,6 +108,7 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
             'Use `model: "inherit"` to select the parent model explicitly instead of the configured child default.',
             'Spawn and resume wait for the child and return only its bounded final result.',
             'Persistent agent IDs support inspect, send, stop, resume, dismiss, review, apply, and cleanup lifecycle actions.',
+            'Resume reopens the child\'s own session and reattaches its worktree, so a child that ran out of turns continues with everything it had already worked out.',
             'Use `review` to return the isolated worktree patch from a completed child.',
             'The parent orchestrator owns review, apply, and cleanup decisions; these lifecycle actions never ask the user to manage child worktrees.',
             catalog,
@@ -119,7 +124,9 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
             'Use exact `provider/id` model references, or `model: "inherit"` for an explicit parent-model clone. An unavailable explicit model fails and never silently falls back.',
             'Leave `maxTurns` unset unless the work genuinely needs more than the configured default. One turn is one model response including its tool calls, so a child that reads six files and edits two has already spent eight; budgets sized like conversation turns strand the child mid-task.',
             'Use worktree isolation for parallel or background writers. Do not send overlapping write tasks to siblings unless the parent is prepared to resolve their conflicts.',
-            'Use lifecycle actions only with an agentId returned by an earlier call; stale IDs fail explicitly.',
+            'Every completed spawn and resume ends with a `Subagent handle:` line naming its agentId, and names the preserved worktree when the child ran isolated. That id stays valid for the whole chat regardless of how long the work in between takes, so never rush or reorder steps to keep a handle alive; only an invented or dismissed id fails.',
+            'Prefer `resume` over a fresh spawn for follow-up work on something a child already did. It reopens that child\'s own session, so its accumulated understanding of the code is intact, reattaches the worktree it was working in rather than rebuilding it, and starts its turn budget over. A new spawn pays to rediscover everything. Spawn a new child only for genuinely new, independent work.',
+            'A worktree child\'s edits are not in the workspace until you `apply` them. Reach that worktree only through `review`, `apply`, and `cleanup` — never locate one by hand, edit it directly, or point another child at it.',
             'Call `review` to retrieve and inspect the child\'s isolated raw diff before requesting `apply`.',
             'Call `apply` only when the reviewed patch is ready, then run parent-owned verification and call `cleanup`; discard rejected work with `cleanup`.',
             'The parent owns synthesis, conflict resolution, review, apply, verification, cleanup, and the final user-facing report.',
@@ -186,9 +193,10 @@ export function registerSubagentTool(api: ExtensionAPI, services: SubagentToolSe
                 model: { provider: result.model.provider, id: result.model.id },
                 turnCount: result.turnCount,
                 truncated: result.truncated,
+                ...(result.isolationPath ? { isolationPath: result.isolationPath } : {}),
             };
             return {
-                content: [{ type: 'text', text: result.result }],
+                content: [{ type: 'text', text: describeSubagentResult(result) }],
                 details,
             };
         },

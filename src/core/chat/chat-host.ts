@@ -650,6 +650,8 @@ export class ChatHost<TTab extends ChatHostTab> {
                     projectToolDefault,
                     tab.session.getTranscriptUserTurnCount(),
                 );
+                // Strictly after the reset, which clears the maps it fills.
+                this.chat.restoreTurnMetrics(tab as any);
                 this._options.effects.persistTabs();
                 this._options.effects.tabsChanged();
                 this._options.effects.tabRenamed(tab.id, tab.name);
@@ -665,6 +667,8 @@ export class ChatHost<TTab extends ChatHostTab> {
                     undefined,
                     tab.session.getTranscriptUserTurnCount(),
                 );
+                // Strictly after the reset, which clears the maps it fills.
+                this.chat.restoreTurnMetrics(tab as any);
                 this.refreshTabName(tab);
                 this._options.effects.persistTabs();
                 this._options.effects.publishState(tab.id);

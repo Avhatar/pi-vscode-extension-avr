@@ -7,10 +7,16 @@ description: >-
   otherwise rebuild and install the current version without changing it.
   A standalone '-' in the request means a test deploy: build and install only, with no
   version bump, changelog handling, or release bookkeeping.
+  Owns both changelogs: the per-build CHANGELOG.md, and the user-facing RELEASES.md,
+  whose top entry the bump rolls forward and whose bullets are written as the builds
+  happen. Which version users actually received lives in release-state.json and is
+  recorded only when the user says so, via npm run mark-released.
   Use when: user asks to build, compile, deploy, package, install, update the extension,
-  create a VSIX, apply code changes, bump version, or release.
-  Triggers: build, deploy, package, install, vsix, compile, ship, release, update extension,
-  bump version, version, changelog.
+  create a VSIX, apply code changes, bump version, release, publish, states that a
+  specific build goes to users, asks to write or update release notes or patch notes,
+  or asks what changed since the version users are running.
+  Triggers: build, deploy, package, install, vsix, compile, ship, release, publish,
+  update extension, bump version, version, changelog, release notes, patch notes.
 ---
 
 # Build & Deploy — Pi Code VS Code Extension
@@ -32,6 +38,9 @@ If the build/deploy request includes a standalone `-` sign (for example `build-d
 - Run plain `npm run deploy` only.
 - Do not check whether a version bump is needed.
 - Do not edit, validate, or require `CHANGELOG.md`.
+- Do not touch `RELEASES.md`. A test build is not a release and must not appear
+  in the user-facing notes. `npm run package` still verifies the file, but that
+  check only reads it.
 - Do not run `npm run deploy:patch`, `npm run deploy:minor`, or `npm run deploy:major`.
 - Ignore unreleased local changes for versioning purposes; the user wants to package and
   install the current `package.json` version exactly as-is for manual testing.
@@ -56,6 +65,11 @@ For all other build/deploy requests:
      ```bash
      npm run deploy:patch   # or deploy:minor / deploy:major
      ```
+4. **Write the user-facing bullets for what you just changed** into the top
+   `RELEASES.md` entry, which the bump has already retitled to the new version.
+   Assume the build stays local — almost all of them do — and never record a
+   handout on your own initiative. Recording one is `npm run mark-released`,
+   run only when the user says that version went out. See the section below.
 
 Plain deploy without a bump:
 ```bash
@@ -67,8 +81,10 @@ Versioned deploy commands will:
 - Bump version in `package.json`
 - Stamp `[Unreleased]` → `[x.y.z] - YYYY-MM-DD` in CHANGELOG.md
 - Add a fresh empty `[Unreleased]` section on top
+- Retitle the top `RELEASES.md` entry to the new version and today's date, or
+  open a fresh entry above it if the top one is the published version
 - Sync `package-lock.json`
-- Compile, prune, package VSIX, restore deps, install into VS Code
+- Compile, prune, verify, package VSIX, restore deps, install into VS Code
 
 Plain `npm run deploy` will:
 - Compile the extension
@@ -104,17 +120,74 @@ Plain `npm run deploy` will:
 ### RELEASES.md — the user-facing notes
 
 `CHANGELOG.md` is the per-build history for contributors and is excluded from
-the VSIX. `RELEASES.md` holds one entry per version actually published to
-users, each consolidating everything since the previous published version;
-`npm run package` ships it as the VSIX's `changelog.md` via
-`vsce --changelog-path`, which is what the Marketplace Changelog tab and the
-in-chat `/changelog` command show.
+the VSIX. `RELEASES.md` is the user-facing history; `npm run package` ships it
+as the VSIX's `changelog.md` via `vsce --changelog-path`, which is what the
+Marketplace Changelog tab and the in-chat `/changelog` command show.
 
-- Version bumps stamp `CHANGELOG.md` only — `RELEASES.md` is written by hand.
-- Add a `RELEASES.md` entry when a build is actually handed to users, not on
-  every bump. Most bumps never reach anyone.
-- Consolidate intermediate builds into themed bullets and drop anything a user
-  cannot observe (refactors, internal diagnostics, packaging plumbing).
+**How the file is shaped.** Newest entry on top. Each entry consolidates
+everything that arrived since the entry directly below it, so a user reads
+exactly one entry — the one for the version they are upgrading to. Versions
+that were only ever built locally never get an entry of their own; their
+changes are folded into the entry above them and their numbers are not
+mentioned.
+
+**The top entry is the newest build, not a release.** It accumulates: the bump
+retitles it to the version just built and its bullets keep growing build after
+build, until the maintainer hands that build out. A top entry naming a version
+nobody received is therefore correct and must be extended, never deleted.
+
+**The handout is recorded separately, in `release-state.json`.**
+`lastPublishedVersion` is the only place that knows what users actually have.
+Read it instead of asking; do not infer a handout from git tags, from the
+`.vsix` files lying in the repo root, from `CHANGELOG.md`, or from a commit
+message that happens to say "release".
+
+**Every build with user-visible changes owes bullets, in the same work.** The
+bump has already retitled the top entry and rewritten its
+*"Everything new since X."* line from the marker; what it cannot do is decide
+what a user can observe. So after the bump:
+
+1. Take every `CHANGELOG.md` section added since the previous published
+   version that is not represented in the entry yet — usually just the one you
+   stamped, since the earlier ones were folded in as they happened.
+2. Merge them into the entry's existing themed bullets, grouped as `Added` /
+   `Changed` / `Fixed` / `Security`. One theme per bullet, not one build per
+   bullet: extend the bullet that already covers the area instead of appending
+   a near-duplicate.
+3. Drop anything a user cannot observe: refactors, port extractions, internal
+   diagnostics, packaging plumbing, test coverage, and work on the private
+   standalone app, which is not part of this extension at all.
+
+**Recording a handout.** The trigger is the user saying so — *"we're giving
+users 0.72.0"*, *"publish this one"*, *"this build goes out"* — and nothing
+else. Then, without being asked twice:
+
+1. `npm run mark-released -- <version>`. It refuses any version that is not the
+   newest entry, and refuses an entry still holding its placeholder or with no
+   bullets.
+2. Make sure that entry actually reads as the whole story since the previous
+   published version.
+3. Rebuild, because the notes ship *inside* the package and cannot be added to
+   an existing VSIX; then verify the packaged `changelog.md`.
+4. Report. Do not hand the release notes back as a follow-up task.
+
+Ask only what the repository cannot answer: which artefact, if the named
+version is not `package.json`'s; whether to rebuild, when tree and VSIX
+disagree; and what was last published, only if `release-state.json` records
+nothing yet.
+
+**Rules.**
+
+- Never record a handout on your own initiative, and never delete an entry to
+  "correct" the file — an unpublished top entry is the accumulator working as
+  designed.
+- `npm run package` runs `verify:release-notes`. It fails when the top entry's
+  version does not match `package.json`, when an entry's since-line does not
+  name the entry below it, or when `release-state.json` points at a version
+  with no entry. A placeholder or an empty entry is only a warning, because the
+  check cannot tell a local build from a release.
+- If it is genuinely unclear whether the build is going to users, that is the
+  one thing worth asking about.
 
 ### Version-only bump (no deploy)
 
@@ -206,6 +279,11 @@ smoke test passes, publish only on an explicit user request with maintainer cred
 npx @vscode/vsce publish --packagePath pi-code-<version>.vsix
 ```
 
+Publishing is the moment a version becomes real for users, so the VSIX being
+published must already carry its `RELEASES.md` entry — it ships inside the
+package as the Changelog tab and cannot be added afterwards without repackaging.
+Write the entry and rebuild before publishing, never after.
+
 Then verify `Avhatar.pi-code` reports the intended version through the Marketplace page
 or Gallery API. GitHub Releases are created separately by pushing a matching `v<version>`
 tag; CI rejects a tag whose version does not match `package.json`. Do not publish, tag,
@@ -232,6 +310,8 @@ npm run watch
 | `npm run watch` | esbuild in watch mode |
 | `npm run repair:runtime-dependencies` | Remove the vulnerable shrinkwrapped `brace-expansion` copy so Pi resolves root 5.0.9 |
 | `npm run verify:runtime-dependencies` | Fail unless Pi physically resolves a patched `brace-expansion` version |
+| `npm run verify:release-notes` | Fail unless `RELEASES.md` agrees with `package.json` and `release-state.json` |
+| `npm run mark-released -- <version>` | Record that this version was handed to users (maintainer's word only) |
 | `npm run deploy` | compile → prune → package → install (no version bump) |
 | `npm run deploy:patch` | bump patch + deploy |
 | `npm run deploy:minor` | bump minor + deploy |
@@ -253,6 +333,11 @@ After deploy + window reload:
 5. Agent responds to a prompt
 6. `package.json` version matches the VSIX filename
 7. CHANGELOG.md has stamped version with today's date
+8. The top `RELEASES.md` entry names the version just built and carries this
+   build's user-visible changes
+9. For a build going to users: `release-state.json` names that version, and
+   `unzip -p pi-code-<version>.vsix extension/changelog.md | head` shows the
+   release notes rather than the per-build history
 
 ## Troubleshooting
 

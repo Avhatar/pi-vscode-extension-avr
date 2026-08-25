@@ -32,7 +32,7 @@ Otherwise keep work sequential or combine coupled slices.
 
 ### Usually unsafe
 
-- siblings editing `src/shared/protocol.ts`, `package.json`, `package-lock.json`, `CHANGELOG.md`, `AGENTS.md`, or the same session/controller files;
+- siblings editing `src/shared/protocol.ts`, `package.json`, `package-lock.json`, `CHANGELOG.md`, `RELEASES.md`, `AGENTS.md`, or the same session/controller files;
 - one slice defining a contract another slice consumes before the contract is settled;
 - concurrent shared-workspace writers without the harness writer lease;
 - several agents running package/deploy/install flows or mutating `out/` and dependencies;

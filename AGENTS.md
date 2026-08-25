@@ -181,7 +181,7 @@ These skills apply to work on this TypeScript VS Code extension. The `pi-code-` 
 | `pi-code-code-reviewer` | Performing an independent review: requirement compliance first, then Pi Code implementation quality and production readiness. | `.agents/skills/pi-code-code-reviewer/SKILL.md` |
 | `pi-code-receiving-code-review` | Evaluating or implementing review feedback; verify each technical claim and push back with evidence when needed. | `.agents/skills/pi-code-receiving-code-review/SKILL.md` |
 | `pi-code-verification-before-completion` | Before claiming work is fixed, complete, passing, performant, merge-ready, package-ready, or release-ready. Unavailable checks remain explicitly unverified. | `.agents/skills/pi-code-verification-before-completion/SKILL.md` |
-| `build-deploy` | The user asks to build, compile, package, deploy, install, create a VSIX, bump/release a version, or supplies the documented standalone test-deploy shortcut. | `.agents/skills/build-deploy/SKILL.md` |
+| `build-deploy` | The user asks to build, compile, package, deploy, install, create a VSIX, bump/release a version, publish, hand a build to users, write or update release notes, or supplies the documented standalone test-deploy shortcut. Owns both `CHANGELOG.md` and `RELEASES.md`. | `.agents/skills/build-deploy/SKILL.md` |
 | `commit` | The user asks to inspect/finalize uncommitted work, draft a commit message, or commit changes. | `.agents/skills/commit/SKILL.md` |
 | `wiki-read` | Orienting on any system, tool, or pipeline in this repo before greping code or planning changes touching it. Read the wiki before the code so reasoning starts from real context. Skip when the wiki is empty (no `wiki/parts/**` content), when reading a specific file you already know, or when the task is a small localized edit inside a file you just touched. | `.agents/skills/wiki-read/SKILL.md` |
 | `wiki-maintain` | After every repository change, check whether existing wiki facts are affected and update the relevant articles in the same work. Also use it for explicit sync requests and drift audits. Escalate only before creating a new article, chapter, or appendix entry, or when the correct documentation cannot be determined from the approved change. | `.agents/skills/wiki-maintain/SKILL.md` |
@@ -194,7 +194,7 @@ These skills apply to work on this TypeScript VS Code extension. The `pi-code-` 
 - **Parallel work:** apply `pi-code-dispatching-parallel-agents` only after decomposition proves independence; all root subagent isolation and parent-ownership rules still apply.
 - **Review:** for meaningful or risky changes, use `pi-code-requesting-code-review`; the reviewer follows `pi-code-code-reviewer`. Process findings with `pi-code-receiving-code-review`, then re-review materially changed areas.
 - **Completion:** apply `pi-code-verification-before-completion` before final status claims. Verification is proportional to the claim; compile, unit, integration, manual F5, and installed-VSIX checks prove different boundaries.
-- **Deployment and commit:** `build-deploy` and `commit` are explicit user-intent workflows, not automatic final steps. Never package, install, bump a version, or commit merely because implementation finished.
+- **Deployment and commit:** `build-deploy` and `commit` are explicit user-intent workflows, not automatic final steps. Never package, install, bump a version, or commit merely because implementation finished. Which build reaches users is the user's decision and cannot be inferred from the repository; but once they name that version, everything the release owes is part of that same work — `CHANGELOG.md` entries, the version bump, the `RELEASES.md` entry, and the rebuild that puts it inside the VSIX — and none of it waits for a further request.
 - **Repo orientation (soft):** When working with an unfamiliar system, tool, or pipeline in this repo, consult the wiki at [`wiki/`](wiki/) via `wiki-read` before greping code — the wiki is hypothesis-priming, not authoritative. If the wiki is still empty (no `wiki/parts/**` content), skip this step and fall back to source-first investigation; report the gap so it can be filled later. This is guidance, not a gate — trivial local edits and tasks in files you just touched don't need it.
 - **Wiki sync (required):** After every repository change, assess whether the behavior, architecture, configuration, workflow, rule, pitfall, identifier, path, or user-visible fact described by the existing wiki has changed. When it has, invoke `wiki-maintain` automatically and update the affected existing articles plus `wiki/changelog.md` in the same work and commit as the source change; do not wait for a separate user request. Run the wiki validators before completion. Changes with no documented impact still require the assessment but no wiki edit. Escalate only when a new article / chapter / appendix entry may be needed, when an approved source change leaves the correct documentation genuinely ambiguous, or when the source change itself appears to violate an unresolved project invariant.
 
@@ -346,26 +346,79 @@ Rules:
 only ever installed locally. It is a contributor artefact and is excluded from
 the VSIX by `.vscodeignore`.
 
-`RELEASES.md` records **only the versions actually handed to users**, newest
-first, and each entry consolidates everything that changed since the *previous
-published version* — so a user reads exactly one entry, the one for the version
-they are upgrading to. `npm run package` passes it through
-`vsce --changelog-path RELEASES.md`, which installs it into the VSIX as
+`RELEASES.md` is the **user-facing** history. `npm run package` passes it
+through `vsce --changelog-path RELEASES.md`, which installs it into the VSIX as
 `changelog.md`; that file is what the Marketplace renders on its Changelog tab
-and what the in-chat `/changelog` command opens.
+and what the in-chat `/changelog` command opens. Keeping the two apart is
+deliberate: the per-build history is noise to a user who receives one version
+in ten.
 
-Keeping them separate is deliberate: the per-build history is noise to a user
-who receives one version in ten, and consolidating it at publish time is the
-only point where the difference between two published versions is known.
+**Shape of the file.** Newest entry on top. Each entry consolidates everything
+that arrived since the entry directly below it, so a user reads exactly one
+entry — the one for the version they are upgrading to. Versions that were only
+ever built locally never get an entry of their own; their changes are folded
+into the entry above them, and their numbers are not mentioned.
+
+**The top entry is the newest build, not a release.** It is an accumulator: the
+bump retitles it to the version just built, and user-facing changes keep being
+added to it build after build until the maintainer hands that build out. So a
+top entry naming a version nobody received is correct, not a mistake — extend
+it, never delete it.
+
+**Which version users actually have is recorded in `release-state.json`**
+(`lastPublishedVersion`). Nothing else in the repository knows it: git tags are
+incomplete, the root `.vsix` files include local-only builds, `CHANGELOG.md`
+stamps every bump, and the newest `RELEASES.md` entry is a build rather than a
+handout. Read that file instead of asking the user what they last shipped.
+
+The pipeline:
+
+- `npm run version:*` and `deploy:*` stamp `CHANGELOG.md` and roll
+  `RELEASES.md` forward — retitling the top entry to the new version and
+  today's date while it is still unpublished, or opening a fresh entry above it
+  once the top one is the published version. The bump never writes bullets:
+  deciding what a user can observe is a judgement call.
+- **After a bump that changed anything user-visible, write those bullets into
+  the top entry as part of the same work.** That is the point of the rolling
+  entry — the notes accumulate as the builds happen instead of being
+  reconstructed from twenty `CHANGELOG.md` sections at publish time.
+- `npm run package` runs `verify:release-notes`, which fails the build when the
+  top entry's version does not match `package.json`, when an entry's
+  "Everything new since X" line does not name the entry below it, or when
+  `release-state.json` points at a version with no entry. An unfilled
+  placeholder or an entry with no bullets is a warning, because nothing there
+  can tell a local build from a release.
+- When the user says a version went to users, run
+  `npm run mark-released -- <version>`. It refuses any version that is not the
+  newest entry and refuses an entry that is still a stub. From then on the next
+  bump opens a new entry instead of extending that one.
 
 Rules:
-- The version bump only stamps `CHANGELOG.md`. `RELEASES.md` is curated by hand.
-- Add a `RELEASES.md` entry **when a version is actually published to users**,
-  not on every bump. Ask the user which build is being handed out if it is not
-  obvious.
-- Consolidate: merge the intermediate builds into themed bullets, drop pure
-  refactors, internal diagnostics, and anything a user cannot observe.
-- Never let `RELEASES.md` claim a version that was not published.
+- **Never record a handout on your own initiative.** Which build reaches users
+  is the user's decision and only theirs: bumping, packaging, `npm run deploy`
+  and installing locally all happen constantly for versions that never leave
+  the maintainer's machine. Never infer a release from a commit message, a
+  built `.vsix`, or a finished release-looking task.
+- Write bullets from the user's perspective, grouped as `Added` / `Changed` /
+  `Fixed` / `Security`, one theme per bullet rather than one build per bullet.
+  Drop pure refactors, port extractions, internal diagnostics, packaging
+  plumbing, test coverage, and work on the private standalone app.
+- The `-` test-deploy shortcut still never edits `RELEASES.md`;
+  `verify:release-notes` only reads it.
+
+When the user names the version that goes to users, run the whole procedure
+without further prompting — mark it, make sure its entry is complete, rebuild
+so the entry is inside the VSIX, verify the packaged `changelog.md`, and
+report. Ask only what the repository genuinely cannot answer:
+
+- **Which artefact**, if the named version is not the one in `package.json` —
+  for example when an older `.vsix` from the repo root is being handed out.
+- **Whether to rebuild**, if the working tree has changes that are not inside
+  the already-built VSIX. The artefact and the source disagree, and only the
+  user knows which one ships. Note that the notes themselves ship *inside* the
+  package, so an entry completed after packaging requires a rebuild regardless.
+- **What was last published**, only if `release-state.json` has no version
+  recorded yet.
 
 When deploying, use one of:
 ```bash
@@ -379,7 +432,8 @@ These commands automatically:
 2. Bump version in `package.json`
 3. Stamp `[Unreleased]` → `[x.y.z] - YYYY-MM-DD`
 4. Add a fresh empty `[Unreleased]` section on top
-5. Compile, prune, package VSIX, restore deps, install into VS Code
+5. Retitle the top `RELEASES.md` entry to the new version, or open a new one
+6. Compile, prune, verify, package VSIX, restore deps, install into VS Code
 
 ## Common Pitfalls
 

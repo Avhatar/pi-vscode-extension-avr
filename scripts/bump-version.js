@@ -1,20 +1,30 @@
 #!/usr/bin/env node
-// Usage: node scripts/bump-version.js <patch|minor|major> [--hierarchical-npm-install]
+// Usage: node scripts/bump-version.js <patch|minor|major> [--sync-lock]
 //
 // 1. Reads [Unreleased] section from CHANGELOG.md
 // 2. Validates it has content (fails if empty)
 // 3. Bumps version in package.json
 // 4. Stamps [Unreleased] → [x.y.z] - YYYY-MM-DD in CHANGELOG.md
 // 5. Adds a fresh empty [Unreleased] section
-// 6. Optionally runs npm install to sync package-lock.json
+// 6. Rolls RELEASES.md forward: the top entry is retitled to the new version
+//    while it is still unpublished, or a fresh entry is opened above it once
+//    the top one has been handed to users (per release-state.json)
+// 7. Optionally runs npm install to sync package-lock.json
+//
+// The user-facing bullets are never generated here -- consolidating CHANGELOG.md
+// into what a user can observe is a judgement call. This only keeps the heading,
+// the date and the "Everything new since X" line honest.
 
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const releaseNotes = require('./release-notes-core');
+const { readState } = require('./release-state');
 
 const ROOT = path.resolve(__dirname, '..');
 const PKG_PATH = path.join(ROOT, 'package.json');
 const CHANGELOG_PATH = path.join(ROOT, 'CHANGELOG.md');
+const RELEASES_PATH = path.join(ROOT, 'RELEASES.md');
 
 // ── Parse args ──
 
@@ -79,6 +89,28 @@ changelog = changelog.replace(
 
 fs.writeFileSync(CHANGELOG_PATH, changelog);
 console.log(`CHANGELOG.md: [Unreleased] → [${newVersion}] - ${today}`);
+
+// ── Roll RELEASES.md forward ──
+
+const releaseState = readState();
+const lastPublished = releaseState.lastPublishedVersion;
+const releases = fs.readFileSync(RELEASES_PATH, 'utf8');
+
+const rolled = releaseNotes.updateForBump(releases, {
+    newVersion,
+    date: today,
+    lastPublishedVersion: lastPublished,
+});
+
+fs.writeFileSync(RELEASES_PATH, rolled.text);
+
+const consolidatesFrom = lastPublished || 'the start';
+if (rolled.action === 'retitled') {
+    console.log(`RELEASES.md: top entry ${rolled.retitledFrom} → ${newVersion} — ${today}, still consolidating from ${consolidatesFrom}`);
+} else {
+    console.log(`RELEASES.md: opened a new entry ${newVersion} — ${today}, consolidating from ${consolidatesFrom} (${lastPublished} is what users have)`);
+}
+console.log(`  → add this build's user-facing changes to that entry; everything since ${consolidatesFrom} belongs in it.`);
 
 // ── Sync package-lock.json ──
 

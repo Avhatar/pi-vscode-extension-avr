@@ -438,6 +438,210 @@ describe('portable ChatService event and state projection', () => {
         expect(tab.messageMeta.get('4009')?.modelWaitMs).toBe(4000);
     });
 
+    it('persists a closed turn and restates it when a background child settles', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        const written: any[] = [];
+        (tab.session as any).recordTurnMetrics = (metrics: any) => written.push(metrics);
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 7001, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.reduceEvent(tab, { type: 'tool_execution_start', toolCallId: 'c1', toolName: 'grep' });
+        clock = 3000;
+        service.reduceEvent(tab, { type: 'tool_execution_end', toolCallId: 'c1', toolName: 'grep' });
+        service.syncSubagentRuns(tab, [
+            { agentId: 'bg', name: 'Explorer', status: 'running', startedAt: 1000 },
+        ]);
+        clock = 9000;
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        expect(written).toHaveLength(1);
+        expect(written[0]).toMatchObject({
+            key: '7001',
+            turnDurationMs: 8000,
+            toolStats: [{ name: 'Grep', calls: 1, durationMs: 2000 }],
+            toolDurations: { c1: 2000 },
+        });
+        expect(written[0].subagentStats[0]).toMatchObject({ status: 'active' });
+
+        // The child settles long after the turn closed.
+        clock = 30_000;
+        service.syncSubagentRuns(tab, [
+            { agentId: 'bg', name: 'Explorer', status: 'completed', startedAt: 1000, finishedAt: 21_000 },
+        ]);
+
+        expect(written).toHaveLength(2);
+        expect(written[1]).toMatchObject({ key: '7001' });
+        expect(written[1].subagentStats[0]).toMatchObject({
+            status: 'completed',
+            durationMs: 20_000,
+        });
+        // The first write must not have been mutated into the second.
+        expect(written[0].subagentStats[0].status).toBe('active');
+    });
+
+    it('restores persisted turn metrics, including the running turn total', () => {
+        const service = new ChatService({ now: () => 1000 });
+        const tab = createTab();
+        (tab.session as any).getPersistedTurnMetrics = () => [
+            {
+                key: '7001',
+                turnDurationMs: 4000,
+                totalTurnDurationMs: 4000,
+                toolStats: [{ name: 'Grep', calls: 1, durationMs: 2000 }],
+                toolDurations: { c1: 2000 },
+            },
+            {
+                key: '7002',
+                turnDurationMs: 6000,
+                totalTurnDurationMs: 10_000,
+                modelWaitMs: 5000,
+                compactionMs: 900,
+            },
+        ];
+
+        service.restoreTurnMetrics(tab);
+
+        expect(tab.messageMeta.get('7001')).toMatchObject({
+            turnDurationMs: 4000,
+            toolStats: [{ name: 'Grep', calls: 1, durationMs: 2000 }],
+        });
+        expect(tab.messageMeta.get('7002')).toMatchObject({
+            modelWaitMs: 5000,
+            compactionMs: 900,
+        });
+        expect(tab.toolDurations.get('c1')).toBe(2000);
+        // Otherwise the next turn would report a "turns total" below its own turn.
+        expect(tab.totalTurnDurationMs).toBe(10_000);
+    });
+
+    it('survives a session without persistence support', () => {
+        const service = new ChatService({ now: () => 1000 });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 7003, content: [{ type: 'text', text: 'done' }],
+        }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        expect(() => service.restoreTurnMetrics(tab)).not.toThrow();
+        expect(() => service.completeAgentEnd(
+            tab,
+            service.beginAgentEnd(tab, 'completed'),
+        )).not.toThrow();
+    });
+
+    it('annotates a history page requested on demand, not only the shipped one', () => {
+        const service = new ChatService({ now: () => 1000 });
+        const tab = createTab();
+        const assistant = {
+            role: 'assistant', timestamp: 6001, content: [{ type: 'text', text: 'older' }],
+        };
+        tab.messageMeta.set('6001', {
+            thinkingDurationSec: 0,
+            messageEndTime: 900,
+            turnDurationMs: 4000,
+            toolStats: [{ name: 'Grep', calls: 2, durationMs: 452_000 }],
+        });
+        tab.recordToolDuration('call-9', 3000);
+
+        const page = service.annotateTranscriptPage(tab, {
+            sessionId: 'session-1',
+            items: [
+                { id: 'i0', entryId: 'e0', message: { ...assistant } },
+                {
+                    id: 'i1',
+                    entryId: 'e1',
+                    message: { role: 'toolResult', toolCallId: 'call-9', toolName: 'grep' },
+                },
+            ],
+            hasMoreBefore: true,
+            totalUserMessages: 5,
+        });
+
+        expect(page.items[0].message).toMatchObject({
+            _turnDurationMs: 4000,
+            _toolStats: [{ name: 'Grep', calls: 2, durationMs: 452_000 }],
+        });
+        expect(page.items[1].message).toMatchObject({ _toolDurationMs: 3000 });
+    });
+
+    it('tolerates a page shape it cannot annotate', () => {
+        const service = new ChatService({ now: () => 1000 });
+        const tab = createTab();
+
+        expect(service.annotateTranscriptPage(tab, undefined)).toBeUndefined();
+        expect(service.annotateTranscriptPage(tab, { items: 'nope' }))
+            .toEqual({ items: 'nope' });
+    });
+
+    it('keeps a finished turn breakdown once the next prompt starts a new turn', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        const firstAssistant = {
+            role: 'assistant', timestamp: 5001, content: [{ type: 'text', text: 'first' }],
+        };
+        tab.session.messages = [
+            { role: 'user', timestamp: 5000, content: 'task' },
+            firstAssistant,
+        ];
+        const transcript = () => ({
+            sessionId: 'session-1',
+            items: tab.session.messages.map((message, index) => ({
+                id: `item-${index}`,
+                entryId: `entry-${index}`,
+                message: { ...message },
+            })),
+            hasMoreBefore: false,
+            totalUserMessages: 1,
+        });
+        vi.spyOn(tab.session, 'serializeState').mockImplementation(() => ({
+            messages: tab.session.messages.map((message) => ({ ...message })),
+            isStreaming: false,
+            tools: [],
+            transcript: transcript(),
+        }));
+        const context = {
+            activeTabId: 'tab-1',
+            getTabs: () => [] as TabInfo[],
+            cacheMode: 'auto' as const,
+            getCacheEffective: () => 'short' as const,
+            getFileUndoViewEnabled: () => false,
+        };
+
+        // Turn one runs a tool and closes.
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.reduceEvent(tab, { type: 'tool_execution_start', toolCallId: 'c1', toolName: 'grep' });
+        clock = 3000;
+        service.reduceEvent(tab, { type: 'tool_execution_end', toolCallId: 'c1', toolName: 'grep' });
+        service.reduceEvent(tab, { type: 'message_end', message: firstAssistant });
+        clock = 9000;
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        const afterTurnOne = service.buildState(tab, context);
+        expect(afterTurnOne.transcript?.items[1].message).toMatchObject({
+            _toolStats: [{ name: 'Grep', calls: 1, durationMs: 2000 }],
+        });
+
+        // The user sends the next message and a second turn begins.
+        tab.session.messages = [
+            ...tab.session.messages,
+            { role: 'user', timestamp: 9500, content: 'next task' },
+        ];
+        clock = 10_000;
+        service.reduceEvent(tab, { type: 'agent_start' });
+        const duringTurnTwo = service.buildState(tab, context);
+
+        // The first turn's breakdown must survive the new turn.
+        expect(duringTurnTwo.transcript?.items[1].message).toMatchObject({
+            _toolStats: [{ name: 'Grep', calls: 1, durationMs: 2000 }],
+            _turnDurationMs: 8000,
+        });
+    });
+
     it('takes in-turn compaction out of the model residual', () => {
         let clock = 1000;
         const service = new ChatService({ now: () => clock });
@@ -612,8 +816,8 @@ describe('portable ChatService event and state projection', () => {
         clock = 1000;
         service.reduceEvent(tab, { type: 'agent_start' });
         service.syncSubagentRuns(tab, [
-            { agentId: 'a1', name: 'Explorer', status: 'running', queuedAt: 900, startedAt: 1000 },
-            { agentId: 'a2', name: 'Implementer', status: 'queued', queuedAt: 950 },
+            { agentId: 'a1', name: 'Explorer', status: 'running', queuedAt: 1000, startedAt: 1000 },
+            { agentId: 'a2', name: 'Implementer', status: 'queued', queuedAt: 1000 },
         ]);
 
         service.recordSubagentToolEvent(tab, {
@@ -701,6 +905,108 @@ describe('portable ChatService event and state projection', () => {
 
         expect(tab.subagentStats.get('restored')).toMatchObject({ durationMs: 1000 });
         expect(tab.turnSubagentIds.size).toBe(0);
+    });
+
+    it('does not charge restored delegated runs to a turn that re-sights them', () => {
+        let clock = 500_000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4013, content: [{ type: 'text', text: 'done' }],
+        }];
+        // Session load clears the rows a restored history had already created.
+        service.syncSubagentRuns(tab, [
+            { agentId: 'old', name: 'Explorer', status: 'completed', queuedAt: 1000, finishedAt: 400_000 },
+        ]);
+        tab.subagentStats.clear();
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        // The manager re-announces its retained history mid-turn: a terminal
+        // run's retention timer expiring is enough to emit a fresh snapshot.
+        clock = 510_000;
+        service.syncSubagentRuns(tab, [
+            { agentId: 'old', name: 'Explorer', status: 'completed', queuedAt: 1000, finishedAt: 400_000 },
+        ]);
+        clock = 520_000;
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        expect(tab.turnSubagentIds.size).toBe(0);
+        expect(tab.messageMeta.get('4013')?.subagentStats).toBeUndefined();
+    });
+
+    it('leaves a running earlier child out of the open turn breakdown', () => {
+        let clock = 1000;
+        const service = new ChatService({ now: () => clock });
+        const tab = createTab();
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4014, content: [{ type: 'text', text: 'spawned' }],
+        }];
+
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.syncSubagentRuns(tab, [
+            { agentId: 'bg', name: 'Explorer', status: 'running', queuedAt: 1000, startedAt: 1000 },
+        ]);
+        clock = 4000;
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        // Next turn: the background child is still grepping, but its seconds
+        // belong to the turn that delegated it, not to this one.
+        clock = 5000;
+        tab.session.messages = [{
+            role: 'assistant', timestamp: 4015, content: [{ type: 'text', text: 'done' }],
+        }];
+        service.reduceEvent(tab, { type: 'agent_start' });
+        service.recordSubagentToolEvent(tab, {
+            type: 'tool_execution_start', agentId: 'bg', toolCallId: 'bg:c1', toolName: 'grep',
+        });
+        clock = 9000;
+        service.recordSubagentToolEvent(tab, {
+            type: 'tool_execution_end', agentId: 'bg', toolCallId: 'bg:c1', toolName: 'grep',
+        });
+        service.completeAgentEnd(tab, service.beginAgentEnd(tab, 'completed'));
+
+        expect(tab.messageMeta.get('4015')?.childToolStats).toBeUndefined();
+        expect(tab.messageMeta.get('4015')?.subagentStats).toBeUndefined();
+        // The run's own row still absorbed the call.
+        expect(tab.subagentStats.get('bg')).toMatchObject({ toolDurationMs: 4000, toolCalls: 1 });
+    });
+
+    it('rehydrates delegated rows so a restored turn keeps tracking its runs', () => {
+        const service = new ChatService({ now: () => 60_000 });
+        const tab = createTab();
+        (tab.session as any).getPersistedTurnMetrics = () => [{
+            key: '7003',
+            subagentStats: [{
+                agentId: 'bg',
+                name: 'Explorer',
+                status: 'active',
+                durationMs: 4000,
+                queueWaitMs: 0,
+                toolDurationMs: 0,
+                toolCalls: 0,
+            }],
+        }];
+        const written: any[] = [];
+        (tab.session as any).recordTurnMetrics = (metrics: any) => written.push(metrics);
+
+        service.restoreTurnMetrics(tab);
+        expect(tab.subagentStats.get('bg')).toBeDefined();
+
+        // The child settles after the reload; the turn that owns it is restated
+        // rather than a duplicate row appearing on whatever turn comes next.
+        service.syncSubagentRuns(tab, [
+            { agentId: 'bg', name: 'Explorer', status: 'completed', queuedAt: 1000, finishedAt: 31_000 },
+        ]);
+
+        expect(tab.subagentStats.size).toBe(1);
+        expect(written).toHaveLength(1);
+        expect(written[0]).toMatchObject({ key: '7003' });
+        expect(written[0].subagentStats[0]).toMatchObject({
+            status: 'completed', durationMs: 30_000,
+        });
+        expect(tab.messageMeta.get('7003')?.subagentStats?.[0]).toMatchObject({
+            status: 'completed',
+        });
     });
 
     it('ignores a child tool end without a recorded start', () => {

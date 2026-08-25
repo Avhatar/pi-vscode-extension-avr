@@ -1,40 +1,54 @@
+<!--
+  MAINTAINERS / AGENTS: this is the user-facing history. The newest entry is an
+  accumulator named after the newest build, not proof that users received it.
+  release-state.json is the only record of the last version handed to users.
+
+  Which build reaches users is the maintainer's call and cannot be inferred
+  from this repo — most versions never leave the machine. Each bump rolls the
+  accumulator forward; add that build's user-visible changes as they happen.
+  When the maintainer names a handout, record it with mark-released, make sure
+  the entry tells the whole story since the previous handout, and rebuild so
+  those notes are inside the VSIX. Full rules: AGENTS.md § Two changelogs, and
+  .agents/skills/build-deploy/SKILL.md.
+-->
+
 # Pi Code — Release Notes
 
-What changed in each version that was actually published to users, newest first.
-Every entry covers everything that arrived since the **previous published
-version**, so you can read exactly one entry: the one for the version you are
-upgrading to.
-
-Development builds between these releases are not listed here. Contributors can
-find the full per-build history in
+Each entry covers everything that arrived since the version directly below it,
+so you can read exactly one entry: the one for the version you are upgrading to.
+The newest entry follows the latest build and accumulates changes until that
+build is handed to users; intermediate development builds are not kept as
+separate entries. Contributors can find the full per-build history in
 [CHANGELOG.md](https://github.com/Avhatar/pi-vscode-extension-avr/blob/main/CHANGELOG.md).
 
 ---
 
-## 0.70.0 — 2026-08-23
+## 0.72.0 — 2026-08-24
 
 *Everything new since 0.67.9.*
 
 ### Added
 
 - **DeepSeek can now see images.** DeepSeek's vision model is offered in the model picker, so screenshots and images can be sent to DeepSeek at last. It costs and holds exactly what DeepSeek V4 Flash does and still calls tools, so it works as a normal agent model.
-- **Every turn tells you where its time went.** Completed tool calls show their wall-clock duration, and each finished turn expands into a per-tool breakdown with call counts and totals. When a turn delegated work, the breakdown splits into four named sections — what your agent ran itself, what its children ran, the combined total, and each delegated run with its outcome — plus rows for model wait, child startup, context compaction, and time children spent queued waiting for a slot. Context compaction is routinely the largest single cost in a turn and used to be invisible entirely.
+- **Every turn tells you where its time went.** Completed tool calls show their wall-clock duration, and each finished turn expands into a per-tool breakdown with call counts and totals. When a turn delegated work, the breakdown splits into four named sections — what your agent ran itself, what its children ran, the combined total, and each delegated run with its outcome — plus rows for model wait, child startup, context compaction, and time children spent queued waiting for a slot. Context compaction is routinely the largest single cost in a turn and used to be invisible entirely. All of it is stored with the conversation, so it survives a window reload and is still there when you scroll back into earlier turns.
+- **Delegated work can be continued instead of restarted.** Your agent can go back to a subagent it already used and ask it to carry on, even when that child was working in its own isolated worktree — which used to be refused outright. The child picks up its own conversation, so it still knows the code it just read and the decisions it just made, resumes in the same worktree with its unfinished edits intact, and gets a full turn budget again. A chain like "implementer, then a thorough reviewer, then hand the review back to the same implementer" now runs to the end instead of expiring partway through and being redone from scratch, and a finished child says which worktree its edits are waiting in rather than leaving them to be found by hand.
 - **Child agents can navigate code semantically.** Whenever Language Server tools are enabled, delegated children get the read-only ones — find references, go to definition, hover, document and workspace symbols, implementations, type definitions, call hierarchy. A child answers "where is this used" in one call instead of a long grep-and-read sequence.
 - **New `Allow shell access for children` setting** (off by default) grants child agents the `bash` tool. Worktree isolation bounds a child's file edits, not what a shell can reach, so this hands children the same machine access the parent has without the parent's review step — but it lets read-only children answer with one `git diff` instead of many turns.
 
 ### Changed
 
 - **Plan Mode waits for your approval.** The agent presents a plan and stops instead of executing it in the same turn. Ask for changes and it revises the plan and waits again; approve it and it carries out the whole plan. Your next request starts a fresh plan-and-approve cycle.
-- **The subagent turn limit has no upper bound** in settings or in agent definitions — any value of 1 or more is accepted. Keep in mind that one turn is one model response including every tool call it makes, so tool-heavy work consumes turns quickly.
-- **These release notes are new.** The Changelog tab and the `/changelog` command used to show every internal build — 173 of them, against 11 versions ever handed out — so working out what an upgrade actually gave you meant reading and merging up to two dozen sections. You now get one entry per released version, covering everything since the previous release.
+- **The subagent turn limit is used exactly as you set it** — there is no upper bound in settings or in agent definitions, and no hidden cap at 100 behind the scenes. Keep in mind that one turn is one model response including every tool call it makes, so tool-heavy work consumes turns quickly.
 
 ### Fixed
 
 - **A chat whose window crashed can be opened again.** Its session file used to keep an exclusive write lock that was never reclaimed, so the chat stayed permanently unopenable from history and had to be unblocked by deleting a lock file by hand. Pi Code now reclaims a lock whose owner is provably gone, including after a power loss that left the lock file truncated, or when the operating system reused the dead process's id for something else after the reboot. A chat genuinely open elsewhere is still protected, and lock errors now name the owner and the file to remove.
 - **Child agents no longer fail en masse with "exceeded its maximum turn count".** A turn is one model response including every tool call it makes, and nothing said so — so orchestrators handed children budgets sized like conversation turns and the children were stopped mid-task. Children are now told their budget up front, are asked to wrap up one turn before it runs out, and hand back the work they already produced when they are stopped anyway, in both foreground and background runs. A child that delivered its result at the very end of its budget is no longer reported as failed.
 - **Switching an image-bearing chat to a model without image support no longer breaks it.** Images in the history are replaced with a short placeholder for those requests and come back as soon as an image-capable model is selected again. Providers that keep vision in a separate model — DeepSeek does — used to turn that switch into a dead end, with every following request rejected outright.
+- **A turn that delegated nothing no longer shows other turns' subagents in its statistics.** After a window reload the whole retained history of finished delegations could be charged to whichever turn happened to be running, so a seven-minute turn claimed hours of delegated work. Runs are now attributed to the turn that actually started them, and a background child left over from an earlier turn no longer adds its tool time to the current turn's breakdown.
 - Background subagent completion cards now sit where the child actually finished instead of all landing below the turn's final report, and each card names the completion time.
 - A turn's footer details — duration, tokens per second, and the breakdown — no longer disappear when the context is compacted right after that turn, and a compacted chat can no longer show one turn the timings of an unrelated earlier one.
+- Setting up an isolated worktree for a child no longer fails when a previous one was deleted from disk behind Git's back.
 - ToDo tool result cards no longer render as empty rows; the task number, subject, and blocked-by chips are visible again.
 
 ---
@@ -72,11 +86,9 @@ find the full per-build history in
 - **Raw Mode** — opt-in developer diagnostics that record the complete unredacted stream of provider payloads and agent events for a chat into a local file under VS Code global storage. Disabled by default; turn it on with `pi-code.rawMode.enabled`, open it with **Pi Code: Open Raw View for Active Chat** or the inspect icon in the chat toolbar, and clear recordings per session or all at once from Pi Code Settings. Nothing is uploaded, and nothing is redacted — this is a diagnostic tool.
 - **Faster startup and restoration.** The extension warms up in the background at VS Code startup so the first click no longer pays the SDK import cost, the Codex model catalog is cached across window reloads, and an optional full prewarm (`pi-code.prewarm.full`) brings the entire session up eagerly. Chat panels show a loading overlay and a status-bar progress indicator while a new or restored session prepares, instead of appearing frozen.
 - **Claude compatibility controls** — a master switch (`pi-code.claudeCompat.enabled`) and a per-workspace mode (`auto` / `on` / `off`) decide when the Claude bridge activates.
-- Diagnostics for slow startup: `pi-code.perf.enabled` records activation and session bring-up timings to a local file, and both it and the Raw Mode toggle are now available in Pi Code Settings.
 
 ### Changed
 
-- Child agents now get 60 turns and 30 minutes by default, which stops longer delegated tasks from failing prematurely.
 - A project whose only Claude marker is a `CLAUDE.md` that simply redirects to `AGENTS.md` no longer activates the compatibility bridge — Pi already loads `AGENTS.md` natively, so the redirect no longer duplicates project rules or spends tokens.
 - Updated the bundled Pi SDK to 0.82.1 for the latest model runtime, provider authentication, retry behaviour, and model catalog support.
 

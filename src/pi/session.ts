@@ -18,6 +18,11 @@ import {
     getLatestTurnLifecycleStatus,
     hasIncompleteTurnTail,
 } from '../shared/interrupted-turn';
+import {
+    TURN_METRICS_CUSTOM_TYPE,
+    collectPersistedTurnMetrics,
+    type PersistedTurnMetrics,
+} from '../shared/turn-metrics';
 import { EventRouter } from './events';
 import { createRawRecorderExtension } from './raw-recorder-extension';
 import { createImageCompatGuard } from './image-compat-guard';
@@ -53,7 +58,7 @@ import { AgentRegistry } from './subagents/registry';
 import { resolveAgentSpec } from './subagents/resolver';
 import { createSubagentExtension } from './subagents/extension';
 import type { SubagentInvocation, SubagentRun } from './subagents/types';
-import { describeSubagentFailure, SubagentRunError } from './subagents/runtime';
+import { describeSubagentFailure, describeSubagentResult, SubagentRunError } from './subagents/runtime';
 import type {
     SubagentExecutionResult, SubagentForegroundResult, SubagentManagerSnapshot,
 } from './subagents/runtime';
@@ -1072,6 +1077,20 @@ export class PiSessionManager {
         this._turnLifecycleOpen = false;
     }
 
+    /**
+     * Store one turn's timing in the session branch. A plain custom entry is
+     * metadata only — it never becomes a context message, so this costs no
+     * tokens and is deleted with the session it belongs to.
+     */
+    recordTurnMetrics(metrics: PersistedTurnMetrics): void {
+        if (this._shutdownRequested) return;
+        this._sessionManager?.appendCustomEntry(TURN_METRICS_CUSTOM_TYPE, metrics);
+    }
+
+    getPersistedTurnMetrics(): PersistedTurnMetrics[] {
+        return collectPersistedTurnMetrics(this._sessionManager?.getBranch() ?? []);
+    }
+
     serializeState(): SerializedAgentState {
         const s = this._session;
         if (!s) {
@@ -1292,14 +1311,23 @@ export class PiSessionManager {
         const manager = this._subagentManager;
         const agentId = params.agentId?.trim();
         if (!manager || !agentId) throw new Error('Subagent lifecycle control requires a ready runtime and agentId.');
-        const existing = manager.getSnapshot().runs.find((run) => run.agentId === agentId);
-        if (!existing) throw new Error(`Unknown or stale subagent id: ${agentId}.`);
+        // Resolved through the manager rather than its snapshot: a finished
+        // child leaves the in-memory list after ten minutes while its record
+        // survives for weeks, and the parent must not have to race that.
+        const existing = await manager.resolveRun(agentId);
+        if (!existing) {
+            throw new Error(
+                `Unknown subagent id: ${agentId}. No run with that id belongs to this chat, `
+                + 'or its record was dismissed or has expired.',
+            );
+        }
         const detailsFor = (run: SubagentRun): SubagentToolDetails => ({
             agentId: run.agentId,
             name: run.name,
             status: run.status,
             ...(run.model ? { model: { provider: run.model.provider, id: run.model.id } } : {}),
             turnCount: run.turnCount,
+            ...(run.isolationPath ? { isolationPath: run.isolationPath } : {}),
         });
 
         if (action === 'resume') {
@@ -1307,7 +1335,7 @@ export class PiSessionManager {
             if (!task) throw new Error('Subagent resume requires a non-empty follow-up task.');
             const result = await manager.resumeForeground(agentId, task, signal, (run) => onProgress(detailsFor(run)));
             return {
-                text: result.result,
+                text: describeSubagentResult(result),
                 details: {
                     agentId,
                     name: existing.name,
@@ -1315,6 +1343,7 @@ export class PiSessionManager {
                     model: { provider: result.model.provider, id: result.model.id },
                     turnCount: result.turnCount,
                     truncated: result.truncated,
+                    ...(result.isolationPath ? { isolationPath: result.isolationPath } : {}),
                 },
             };
         }
@@ -1390,6 +1419,15 @@ export class PiSessionManager {
             '<subagent-notification>',
             `Background subagent ${run.name} (${run.agentId}) ${outcome}.`,
             `Model: ${run.model ? `${run.model.provider}/${run.model.id}` : 'unknown'}`,
+            // Background writers are required to run isolated, so this is the
+            // notification where naming the worktree matters most: without it
+            // the parent is told the work is done but not that it is still
+            // sitting outside the workspace.
+            ...(run.isolationPath ? [
+                `Preserved worktree: ${run.isolationPath}`,
+                'Those edits are not in the workspace yet. Use action="review" with this agentId to read '
+                + 'the patch, action="apply" to accept it, then action="cleanup".',
+            ] : []),
             'Result:',
             body,
             '</subagent-notification>',
@@ -1468,6 +1506,7 @@ export class PiSessionManager {
                 dismissRun: async (agentId) => {
                     await this._subagentStore!.dismiss(session.sessionId, agentId);
                 },
+                loadRun: (agentId) => this._subagentStore!.get(session.sessionId, agentId),
             } : {}),
             onMutationEvent: (event) => this._onSubagentMutation.fire(event),
             onBackgroundSettled: async (run, result, error) => {

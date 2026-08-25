@@ -41,6 +41,8 @@ export interface ChildSessionFactory {
     resume?(spec: ResolvedAgentSpec, transcriptPath: string, context: {
         agentId: string;
         signal: AbortSignal;
+        /** Worktree the run recorded, to be reattached rather than recreated. */
+        isolationPath?: string;
     }): Promise<ChildSessionHandle>;
 }
 
@@ -49,6 +51,8 @@ export interface SubagentForegroundResult extends SubagentCompletion {
     model: AvailableModel;
     turnCount: number;
     truncated: boolean;
+    /** Preserved worktree holding the child's edits, when it ran isolated. */
+    isolationPath?: string;
     background?: false;
 }
 
@@ -113,4 +117,38 @@ export function describeSubagentFailure(error: SubagentRunError): string {
         + 'The child produced this before it stopped. It is unverified and may be incomplete, '
         + 'but it is real work — use it instead of re-running the same task from scratch:\n'
         + bounded;
+}
+
+/**
+ * Appends the parent-facing handle to a finished child's result.
+ *
+ * Every lifecycle action keys off `agentId`, and a worktree child's edits exist
+ * only inside its preserved worktree — yet both facts used to live exclusively
+ * in the tool call's `details`, which the model never reads. A parent that
+ * cannot see the id has no legal way to review the work it just delegated, and
+ * one that cannot see the worktree does not even know the changes are absent
+ * from the workspace. The observed failure mode is a parent that starts
+ * locating worktrees by hand and dispatching writers into a sibling's isolated
+ * checkout. Naming both in the result text is what closes that gap.
+ *
+ * Kept deliberately short: this trailer is paid for on every foreground spawn.
+ */
+export function describeSubagentResult(result: SubagentForegroundResult): string {
+    const lines = [
+        '---',
+        `Subagent handle: agentId=${result.agentId} `
+        + `model=${result.model.provider}/${result.model.id} turns=${result.turnCount}`,
+    ];
+    if (result.isolationPath) {
+        lines.push(
+            `Preserved worktree: ${result.isolationPath}`,
+            'The child edited that isolated checkout, so none of its changes are in the workspace yet. '
+            + 'Call this tool with action="review" and this agentId to read the patch, action="apply" to '
+            + 'accept it, then action="cleanup" when you are done. Never edit another agent\'s worktree '
+            + 'directly and never send a shared-workspace child into one.',
+        );
+    } else {
+        lines.push('Use this agentId for inspect, resume, send, or dismiss.');
+    }
+    return `${result.result}\n\n${lines.join('\n')}`;
 }
