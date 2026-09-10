@@ -1472,6 +1472,7 @@ export class ChatController implements vscode.Disposable {
                     images?: ImageAttachment[],
                     files?: FileAttachment[],
                 ) => tab.session.prompt(text, images, files),
+                isSessionBusy: () => tab.session.isStreaming || tab.isCompacting,
                 prepareRequest: () => this._prepareCacheForRequest(tab),
                 logPrompt: () => this._logPromptToolState(tab, 'prompt'),
                 publishState: () => this.sendStateSync(tab.id),

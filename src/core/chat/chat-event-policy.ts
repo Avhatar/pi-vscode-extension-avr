@@ -70,6 +70,13 @@ export function shouldDispatchQueueAfterTerminal(
 ): boolean {
     if (eventType === 'agent_end') return !state.isSessionStreaming;
     if (eventType === 'agent_settled') return !state.isStreamingLocal;
+    // A compaction that runs outside an agent run — a direct `/compact`, or Pi's
+    // pre-prompt overflow check — is never followed by `agent_settled`, so the
+    // queue would sit untouched until some later turn ended. Compaction inside a
+    // run keeps waiting for settlement: the session is still busy there.
+    if (eventType === 'compaction_end') {
+        return !state.isStreamingLocal && !state.isSessionStreaming;
+    }
     return false;
 }
 

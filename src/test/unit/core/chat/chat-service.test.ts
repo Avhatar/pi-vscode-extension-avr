@@ -1199,6 +1199,7 @@ function createDirectPromptCallbacks(overrides: Record<string, unknown> = {}): a
         augmentPrompt: vi.fn(async (text: string) => text),
         compact: vi.fn(async () => undefined),
         prompt: vi.fn(async () => undefined),
+        isSessionBusy: vi.fn(() => false),
         prepareRequest: vi.fn(),
         logPrompt: vi.fn(),
         publishState: vi.fn(),
@@ -1424,6 +1425,53 @@ describe('portable ChatService direct prompt lifecycle', () => {
         expect(callbacks.prompt).not.toHaveBeenCalled();
         expect(tab.turnCounter).toBe(0);
         expect(tab.checkpointManager.startTurn).not.toHaveBeenCalled();
+    });
+
+    it('queues a direct prompt while the session is still busy instead of losing it', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        const callbacks = createDirectPromptCallbacks({
+            isSessionBusy: vi.fn(() => true),
+        });
+
+        await expect(service.dispatchDirectPrompt(tab, { text: 'next task' }, callbacks))
+            .resolves.toEqual({ kind: 'queued', queueLength: 1 });
+
+        expect(tab.queuedMessages).toEqual(['next task']);
+        expect(callbacks.prompt).not.toHaveBeenCalled();
+        expect(callbacks.prepareRequest).not.toHaveBeenCalled();
+        expect(callbacks.publishState).toHaveBeenCalledOnce();
+        expect(tab.turnCounter).toBe(0);
+        expect(tab.checkpointManager.startTurn).not.toHaveBeenCalled();
+    });
+
+    it('runs a direct compact even while the session is busy', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        const callbacks = createDirectPromptCallbacks({
+            isSessionBusy: vi.fn(() => true),
+        });
+
+        await expect(service.dispatchDirectPrompt(tab, { text: '/compact' }, callbacks))
+            .resolves.toEqual({ kind: 'compacted' });
+
+        expect(callbacks.compact).toHaveBeenCalledWith(undefined);
+        expect(tab.queuedMessages).toEqual([]);
+    });
+
+    it('refuses attachments while busy rather than queueing text without them', async () => {
+        const service = new ChatService({ now: () => 0 });
+        const tab = createTab();
+        const callbacks = createDirectPromptCallbacks({
+            isSessionBusy: vi.fn(() => true),
+        });
+        const images = [{ type: 'image', data: 'abc', mimeType: 'image/png' }] as any;
+
+        await expect(service.dispatchDirectPrompt(tab, { text: 'look', images }, callbacks))
+            .rejects.toThrow('Attachments cannot be queued while the agent is busy.');
+
+        expect(tab.queuedMessages).toEqual([]);
+        expect(callbacks.prompt).not.toHaveBeenCalled();
     });
 });
 

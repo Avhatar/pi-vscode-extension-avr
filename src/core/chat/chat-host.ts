@@ -441,6 +441,10 @@ export class ChatHost<TTab extends ChatHostTab> {
                 eventEffects?.streamingContextChanged?.(false);
             }
             this._options.effects.tabsChanged();
+            dispatchQueuedAfterEvent = shouldDispatchQueueAfterTerminal(event.type, {
+                isStreamingLocal: runtime.isStreamingLocal,
+                isSessionStreaming: runtime.session.isStreaming === true,
+            });
         }
 
         if (event.type === 'agent_end') {

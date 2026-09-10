@@ -95,6 +95,21 @@ describe('portable terminal event policy', () => {
             isSessionStreaming: false,
         })).toBe(false);
 
+        // A compaction outside a run never reaches `agent_settled`, so the queue
+        // has to be released here; one inside a run still waits for settlement.
+        expect(shouldDispatchQueueAfterTerminal('compaction_end', {
+            isStreamingLocal: false,
+            isSessionStreaming: false,
+        })).toBe(true);
+        expect(shouldDispatchQueueAfterTerminal('compaction_end', {
+            isStreamingLocal: false,
+            isSessionStreaming: true,
+        })).toBe(false);
+        expect(shouldDispatchQueueAfterTerminal('compaction_end', {
+            isStreamingLocal: true,
+            isSessionStreaming: false,
+        })).toBe(false);
+
         expect(shouldSyncStateForEvent('agent_start')).toBe(true);
         expect(shouldSyncStateForEvent('agent_end')).toBe(true);
         expect(shouldSyncStateForEvent('message_end')).toBe(true);

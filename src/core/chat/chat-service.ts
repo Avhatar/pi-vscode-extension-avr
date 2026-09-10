@@ -142,6 +142,8 @@ export interface DirectPromptCallbacks {
     augmentPrompt(text: string): Promise<string>;
     compact(instructions?: string): Promise<void>;
     prompt(text: string, images?: ImageAttachment[], files?: FileAttachment[]): Promise<void>;
+    /** True while the SDK still rejects a plain prompt: an open run, or a compaction. */
+    isSessionBusy(): boolean;
     prepareRequest(): void;
     logPrompt(): void;
     publishState(): void;
@@ -150,7 +152,8 @@ export interface DirectPromptCallbacks {
 
 export type DirectPromptDispatchResult =
     | { readonly kind: 'prompt_dispatched' }
-    | { readonly kind: 'compacted' };
+    | { readonly kind: 'compacted' }
+    | { readonly kind: 'queued'; readonly queueLength: number };
 
 export type StreamingCommand = Extract<
     AgentClientMessage,
@@ -708,6 +711,23 @@ export class ChatService {
             }
             callbacks.publishState();
             return { kind: 'compacted' };
+        }
+
+        // The client decides between a direct prompt and a queued one from the
+        // published state, which lags the session by at least one event. The SDK
+        // stays busy after `agent_end` until settlement and during a compaction,
+        // and rejects a plain prompt outright until then. Queue instead of
+        // surfacing the SDK's `streamingBehavior` error and losing the message.
+        if (callbacks.isSessionBusy()) {
+            if (request.images?.length || request.files?.length) {
+                throw new Error(
+                    'Attachments cannot be queued while the agent is busy. '
+                    + 'Send them after the current response finishes.',
+                );
+            }
+            this.applyQueueControl(tab, { type: 'queueMessage', text: request.text });
+            callbacks.publishState();
+            return { kind: 'queued', queueLength: tab.queuedMessages.length };
         }
 
         const promptText = callbacks.decoratePrompt(request.text);

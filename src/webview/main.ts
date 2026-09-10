@@ -35,6 +35,7 @@ import {
     prependTranscriptPage,
     type ClientTranscriptState,
 } from './transcript-state';
+import { decideInputSubmit, isCompactCommandText } from './input-submit-policy';
 
 declare function acquireVsCodeApi(): {
     postMessage(message: unknown): void;
@@ -1331,7 +1332,7 @@ function updateInputArea(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (input) {
         input.placeholder = state.isCompacting
-            ? 'Compacting context...'
+            ? 'Compacting context; Enter queues...'
             : state.isStreaming
                 ? 'Type; Enter queues, Ctrl+Enter steers, Esc stops...'
                 : 'Ask Pi anything...';
@@ -1397,7 +1398,9 @@ function updateInputArea(): void {
         if (state.isStreaming) {
             vscode.postMessage({ type: 'abort' });
         } else {
-            sendMessage();
+            // A compaction outside a turn keeps the send affordance, but the
+            // message still has to go through the queue: the SDK is busy.
+            submitInput({ steerRequested: false });
         }
     });
 
@@ -4551,37 +4554,7 @@ function bindStableEvents(): void {
 
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (state.isStreaming) {
-                const text = input.value.trim();
-                if (isCompactSlashCommand(text)) {
-                    if (currentImageAttachments.length > 0 || currentFileAttachments.length > 0) {
-                        showError('Slash commands cannot include attachments. Remove attachments before running /compact.');
-                        return;
-                    }
-                    vscode.postMessage({ type: 'prompt', text });
-                    input.value = '';
-                    input.style.height = 'auto';
-                    updateInputHighlights(input);
-                    return;
-                }
-                if (currentImageAttachments.length > 0 || currentFileAttachments.length > 0) {
-                    showError('Attachments cannot be queued while the agent is streaming. Send them after the current response finishes.');
-                    return;
-                }
-                if (text) {
-                    if (e.ctrlKey || e.metaKey) {
-                        vscode.postMessage({ type: 'steer', text });
-                        showSteerToast(text);
-                    } else {
-                        vscode.postMessage({ type: 'queueMessage', text });
-                    }
-                    input.value = '';
-                    input.style.height = 'auto';
-                    updateInputHighlights(input);
-                }
-            } else {
-                sendMessage();
-            }
+            submitInput({ steerRequested: e.ctrlKey || e.metaKey });
         }
         if (e.key === 'Escape' && state.isStreaming) {
             e.preventDefault();
@@ -4783,6 +4756,42 @@ function bindChangedFileItems(): void {
     });
 }
 
+/** Route a submitted input to a prompt, the queue, or mid-stream steering. */
+function submitInput(options: { steerRequested: boolean }): void {
+    const input = document.getElementById('input') as HTMLTextAreaElement | null;
+    if (!input) return;
+    const decision = decideInputSubmit({
+        text: input.value,
+        isStreaming: state.isStreaming,
+        isCompacting: state.isCompacting,
+        hasAttachments: currentImageAttachments.length > 0 || currentFileAttachments.length > 0,
+        steerRequested: options.steerRequested,
+    });
+
+    if (decision.kind === 'ignore') return;
+    if (decision.kind === 'reject') {
+        showError(decision.message);
+        return;
+    }
+    if (decision.kind === 'send') {
+        sendMessage();
+        return;
+    }
+
+    const text = input.value.trim();
+    if (decision.kind === 'compact') {
+        vscode.postMessage({ type: 'prompt', text });
+    } else if (decision.kind === 'steer') {
+        vscode.postMessage({ type: 'steer', text });
+        showSteerToast(text);
+    } else {
+        vscode.postMessage({ type: 'queueMessage', text });
+    }
+    input.value = '';
+    input.style.height = 'auto';
+    updateInputHighlights(input);
+}
+
 function sendMessage(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (!input) return;
@@ -4809,7 +4818,7 @@ function sendMessage(): void {
         showError('The /name command cannot include attachments. Remove attachments and try again.');
         return;
     }
-    if (isCompactSlashCommand(typedText) && (images?.length || files?.length)) {
+    if (isCompactCommandText(typedText) && (images?.length || files?.length)) {
         showError('Slash commands cannot include attachments. Remove attachments before running /compact.');
         return;
     }
@@ -5194,11 +5203,6 @@ function escAttr(s: string): string {
 function isNameSlashCommand(text: string): boolean {
     const trimmed = text.trim();
     return trimmed === '/name' || /^\/name\s/.test(trimmed);
-}
-
-function isCompactSlashCommand(text: string): boolean {
-    const trimmed = text.trim();
-    return trimmed === '/compact' || trimmed.startsWith('/compact ');
 }
 
 function getThinkingPreview(text: string): string {

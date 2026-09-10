@@ -388,6 +388,39 @@ describe('portable ChatHost', () => {
         expect(order).toEqual(['reserve', 'state:tab-1', 'event', 'dispatch']);
     });
 
+    it('releases the queue when a compaction outside a run ends', async () => {
+        const { host, chat, eventEffects, order } = createHarness();
+        const tab = createTab('tab-1') as any;
+        tab.queuedMessages = ['after compaction'];
+        tab.session.isStreaming = false;
+        host.register(tab, { activate: true });
+        chat.reserveQueuedDispatch.mockImplementationOnce(() => {
+            order.push('reserve');
+            return true;
+        });
+        eventEffects.dispatchNextQueued.mockImplementationOnce(async () => { order.push('dispatch'); });
+        order.length = 0;
+
+        await host.handleEvent(tab, { type: 'compaction_end' });
+
+        expect(order).toContain('reserve');
+        expect(order).toContain('dispatch');
+        expect(eventEffects.dispatchNextQueued).toHaveBeenCalledWith(tab);
+    });
+
+    it('leaves the queue alone when a compaction ends inside an open run', async () => {
+        const { host, chat, eventEffects } = createHarness();
+        const tab = createTab('tab-1') as any;
+        tab.queuedMessages = ['after the turn'];
+        tab.session.isStreaming = true;
+        host.register(tab, { activate: true });
+
+        await host.handleEvent(tab, { type: 'compaction_end' });
+
+        expect(chat.reserveQueuedDispatch).not.toHaveBeenCalled();
+        expect(eventEffects.dispatchNextQueued).not.toHaveBeenCalled();
+    });
+
     it('defers the message_end state publish so the SDK branch append lands first', async () => {
         const { host, chat, effects, order } = createHarness();
         const tab = createTab('tab-1') as any;
