@@ -1,5 +1,5 @@
 {
-  "lastPublishedVersion": "0.67.9",
-  "publishedAt": null,
+  "lastPublishedVersion": "0.72.0",
+  "publishedAt": "2026-08-25",
   "howToUpdate": "Run `npm run mark-released -- <version>` when the maintainer says that version was handed to users. Nothing else in the repository implies a handout: bumping, packaging and installing all happen for builds nobody else receives."
 }
