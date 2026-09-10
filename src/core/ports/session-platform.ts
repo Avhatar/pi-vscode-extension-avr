@@ -28,6 +28,9 @@ export interface SessionSettingValues {
     'todo.promptGuidelines': string | undefined;
     'lsp.enabled': boolean;
     'mcp.importClaudeCode': boolean;
+    'claudeCompat.enabled': boolean;
+    // Narrowed to 'auto' | 'on' | 'off' at the call site, like `thinkingLevel`.
+    'claudeCompat.mode': string;
     'rawMode.enabled': boolean;
     thinkingLevel: string;
     defaultModel: string;

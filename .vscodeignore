@@ -40,3 +40,17 @@ node_modules/pi-web-access/skills/**
 node_modules/pi-mcp-adapter/banner.png
 node_modules/pi-mcp-adapter/cli.js
 node_modules/@mixmark-io/domino/test/**
+
+# Cross-platform esbuild binaries, ~250 MB uncompressed. Pi 0.85 added
+# `@earendil-works/chord`, which depends on `esbuild`; because Pi's shrinkwrap
+# enumerates all 26 of esbuild's optional platform packages, npm installs every
+# one of them instead of just the host's. A user can run exactly one, and none
+# of them is reachable here: `chord` is referenced only from Pi's own
+# `dist/bundle/` CLI chunks, while the extension host imports the package root
+# (`dist/index.js`), whose graph never touches it. Keeping them more than
+# doubled the VSIX (87 MB → 204 MB).
+#
+# The `esbuild` JS package itself is deliberately left in, so a code path that
+# merely resolves it still finds a module. Narrow glob: this does not filter
+# node_modules/** broadly and does not touch hoisted transitive deps.
+node_modules/**/@esbuild/**

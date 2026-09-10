@@ -10,6 +10,7 @@ const CODEX_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models';
 // select compatible server catalog entries; Pi Code does not emulate Codex CLI.
 const CODEX_MODELS_CLIENT_VERSION = '0.144.0';
 const GPT_56_MODEL_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const;
+const GPT_6_MODEL_IDS = ['gpt-6-astra'] as const;
 
 export type ModelMetadataLog = (message: string) => void;
 
@@ -31,11 +32,23 @@ type ContextWindowOverride = {
  * The OpenAI Models API does not currently return context-window metadata.
  * Use the published direct-API limit while still allowing newer SDK metadata
  * and explicit values that differ from the known conservative default.
+ *
+ * Only the direct `openai` provider is corrected here. The bundled
+ * `openai-codex` catalog lists every model at the same conservative 272K, but
+ * those windows are plan-specific and are refreshed from the authenticated
+ * Codex catalog by `applyCodexCatalogMetadata`, so hardcoding a documented
+ * value for them would overwrite account truth with a guess.
  */
 const DOCUMENTED_API_OVERRIDES: readonly ContextWindowOverride[] = [
     {
         provider: 'openai',
         modelIds: GPT_56_MODEL_IDS,
+        upstreamValue: 272_000,
+        correctedValue: 1_050_000,
+    },
+    {
+        provider: 'openai',
+        modelIds: GPT_6_MODEL_IDS,
         upstreamValue: 272_000,
         correctedValue: 1_050_000,
     },

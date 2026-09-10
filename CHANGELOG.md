@@ -7,8 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- GPT-6 Astra is now offered in the model picker, both for a direct OpenAI API key and for a ChatGPT subscription through Codex. Its full 1,050,000-token context window is reported on the direct API, where the published catalog understates it as 272,000; on Codex the window keeps coming from your own account's catalog, because that figure is plan-specific.
+
 ### Changed
+- The download is no longer more than twice its previous size. Updating the bundled Pi SDK pulled in prebuilt compiler binaries for twenty-six operating systems, of which any given machine can use one and this extension uses none; excluding them brings the package back to its usual size.
 - Release notes are now written as the builds happen rather than reconstructed at publish time. The version bump rolls the top `RELEASES.md` entry forward — retitling it to the version just built, or opening a fresh one once the previous top entry has been handed out — and `npm run package` refuses to build when that file disagrees with `package.json` or with the new `release-state.json`, which is the only record of the version users actually received. `npm run mark-released -- <version>` writes that record. No user-visible behaviour changes.
+
+### Fixed
+- One unusable stored API key no longer takes the rest down with it. Keys are applied provider by provider, and a provider that cannot be configured is now reported and skipped instead of aborting the whole pass — previously every provider after it in the list was left unconfigured and the chat failed to start at all. The skipped provider is retried the next time keys are synchronized.
+- Skills grouped into subdirectories under `.agents/skills/` are now discovered instead of silently ignored, and a `README.md` sitting in a skill folder is no longer reported as a broken skill.
+- A context file or settings file saved with a UTF-8 byte-order mark now loads instead of being silently skipped.
+- Reopening a chat from history no longer corrupts the next message written to it.
+- Long conversations compact more reliably: an oversized tool result is no longer handed to the model before compaction runs, and compaction is no longer skipped outright when the provider reports no token usage while streaming.
+- Stopping a response on Windows no longer crashes the agent when `taskkill.exe` is missing from `PATH`.
 
 ## [0.72.0] - 2026-08-24
 

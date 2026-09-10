@@ -31,6 +31,19 @@ describe('provider model metadata', () => {
             .every(item => item.contextWindow === 1_050_000)).toBe(true);
     });
 
+    it('corrects the GPT-6 Astra window on the direct API but leaves Codex to its catalog', () => {
+        const models = [
+            model('openai', 'gpt-6-astra', 272_000),
+            model('openai-codex', 'gpt-6-astra', 272_000),
+        ];
+        const runtime = { getModels: () => models } as any;
+
+        expect(applyDocumentedApiMetadata(runtime)).toBe(1);
+        expect(models[0].contextWindow).toBe(1_050_000);
+        // Codex windows are plan-specific; `applyCodexCatalogMetadata` owns them.
+        expect(models[1].contextWindow).toBe(272_000);
+    });
+
     it('parses and applies the account-specific Codex catalog window', () => {
         const models = [
             model('openai-codex', 'gpt-5.6-sol', 372_000),

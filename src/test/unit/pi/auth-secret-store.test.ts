@@ -32,7 +32,11 @@ describe('auth portable secret store', () => {
 
         const setRuntimeApiKey = vi.spyOn(runtime, 'setRuntimeApiKey');
         const removeRuntimeApiKey = vi.spyOn(runtime, 'removeRuntimeApiKey');
-        const refresh = vi.spyOn(runtime, 'refresh');
+        // The SDK synchronizes a credential change through its internal models
+        // registry rather than the public `refresh()`, so assert the invariant
+        // that actually matters — a SecretStorage change never reaches the
+        // network — instead of spying on which refresh entry point is used.
+        const fetchSpy = vi.spyOn(globalThis, 'fetch');
         await reloadCredentials();
         expect(setRuntimeApiKey).not.toHaveBeenCalled();
 
@@ -40,7 +44,7 @@ describe('auth portable secret store', () => {
         await reloadCredentials();
 
         expect(removeRuntimeApiKey).toHaveBeenCalledWith('deepseek');
-        expect(refresh).toHaveBeenCalledWith({ allowNetwork: false });
+        expect(fetchSpy).not.toHaveBeenCalled();
         expect(secrets.get).toHaveBeenCalledWith('pi-code.apiKey.deepseek');
         expect(secrets.store).not.toHaveBeenCalled();
     });
@@ -52,6 +56,29 @@ describe('auth portable secret store', () => {
         ]);
 
         expect(first).toBe(second);
+    });
+
+    it('keeps applying keys after one provider fails, and retries it later', async () => {
+        values.set('pi-code.apiKey.anthropic', 'anthropic-key');
+        values.set('pi-code.apiKey.deepseek', 'deepseek-key');
+        const runtime = await getModelRuntime();
+
+        // `setRuntimeApiKey` rejects on composition, catalog, and availability
+        // errors, so a single broken provider must not strand the ones behind
+        // it in KNOWN_PROVIDERS or fail the whole session bring-up.
+        const setRuntimeApiKey = vi.spyOn(runtime, 'setRuntimeApiKey')
+            .mockImplementationOnce(async () => { throw new Error('sync failed'); });
+
+        await expect(getModelRuntime(secrets)).resolves.toBe(runtime);
+        expect(setRuntimeApiKey.mock.calls.map(([provider]) => provider))
+            .toEqual(['anthropic', 'deepseek']);
+
+        // The failed provider was never recorded as applied, so the next sync
+        // retries it while the provider that succeeded is deduplicated away.
+        setRuntimeApiKey.mockClear();
+        await reloadCredentials();
+        expect(setRuntimeApiKey.mock.calls.map(([provider]) => provider))
+            .toEqual(['anthropic']);
     });
 
     it('projects Qwen only while its SecretStorage override exists', async () => {

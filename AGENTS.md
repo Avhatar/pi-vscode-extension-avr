@@ -47,15 +47,19 @@ with a `!node_modules/@earendil-works/**` exception -- that strips the
 hoisted transitive deps (`proper-lockfile`, `undici`, `glob`, ...) and
 breaks activation with `Cannot find package 'proper-lockfile'`.
 
-The Pi SDK 0.82.1 package ships an `npm-shrinkwrap.json` that pins a vulnerable
-nested `brace-expansion` 5.0.7 even though its semver range accepts the patched
-5.0.9 release. The root declares 5.0.9 explicitly, and `npm install` runs
-`scripts/ensure-safe-brace-expansion.js --repair` to remove the nested copy so
-Pi's `minimatch` resolves the safe root package. Because `npm prune` restores
-the shrinkwrapped copy, `npm run package` repairs once more and then verifies the
-physical resolution before creating a VSIX. Until the upstream shrinkwrap is
-updated, `npm audit` can still report the removed nested copy from lock metadata;
-do not suppress the package-time verifier or remove the direct fallback.
+The Pi SDK ships its own `npm-shrinkwrap.json`, which historically pinned a
+vulnerable nested `brace-expansion` 5.0.7 even though its semver range accepted
+the patched 5.0.9 release. The root declares 5.0.9 explicitly, and `npm install`
+runs `scripts/ensure-safe-brace-expansion.js --repair`, which removes the nested
+copy only while it is vulnerable so Pi's `minimatch` resolves a safe package.
+`npm run package` repairs once more after `npm prune` and then verifies the
+physical resolution before creating a VSIX.
+
+As of Pi SDK 0.84.4 the shrinkwrap pins the patched 5.0.9 itself, so the repair
+is a no-op and the verifier simply confirms the nested copy. Keep both steps:
+they guard the resolution that actually ships, and a future SDK release can
+regress the pin. Do not suppress the package-time verifier or remove the direct
+fallback.
 
 **Dependency-change approval boundary.** Never add, remove, upgrade, downgrade,
 pin, override, deduplicate, or introduce repair logic for any production or

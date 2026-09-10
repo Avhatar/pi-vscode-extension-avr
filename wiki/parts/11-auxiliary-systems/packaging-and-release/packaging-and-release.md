@@ -9,7 +9,7 @@ The release pipeline is **strict and scripted**. `[Unreleased]` in `CHANGELOG.md
 Manifest scripts [package.json](../../../../package.json):
 
 - `compile` → `node esbuild.js`
-- `postinstall` / `repair:runtime-dependencies` → remove the Pi SDK's shrinkwrapped vulnerable `brace-expansion` copy so its `minimatch` resolves root 5.0.9
+- `postinstall` / `repair:runtime-dependencies` → remove the Pi SDK's shrinkwrapped `brace-expansion` copy when it is vulnerable, so its `minimatch` resolves root 5.0.9. Since Pi SDK 0.84.4 the shrinkwrap pins the patched 5.0.9 itself, so the step verifies the nested copy instead of removing it
 - `verify:runtime-dependencies` → fail unless Pi physically resolves patched `brace-expansion`
 - `package` → post-prune runtime repair + runtime-dependency verification + VSIX boundary verification + release-notes verification + `vsce package --readme-path MARKETPLACE.md --changelog-path RELEASES.md`
 - `verify:release-notes` → fail unless `RELEASES.md` agrees with `package.json` and `release-state.json`
@@ -26,7 +26,7 @@ Manifest scripts [package.json](../../../../package.json):
 - `vitest.config.ts`, `tsconfig*.json`, `esbuild.js` — excluded
 - `AGENTS.md`, `CLAUDE.md`, `README.md`, `CHANGELOG.md`, `release-state.json` — excluded; both the README and the changelog are replaced at package time from `MARKETPLACE.md` and `RELEASES.md`
 - `**/*.map`, `*.vsix` — excluded; source maps require the recursive glob because a bare `*.map` matches only the package root
-- **Never filter `node_modules/**`** — hoisted transitive deps must remain intact (see [Part I § bundle-targets-and-esbuild](../../01-extension-host-substrate/bundle-targets-and-esbuild/bundle-targets-and-esbuild.md))
+- **Never filter `node_modules/**` broadly** — hoisted transitive deps must remain intact (see [Part I § bundle-targets-and-esbuild](../../01-extension-host-substrate/bundle-targets-and-esbuild/bundle-targets-and-esbuild.md)). Narrow per-package globs are allowed and are used for bundled-package baggage and for `node_modules/**/@esbuild/**`; what is forbidden is a blanket rule with allowlist exceptions
 
 Version bump [scripts/bump-version.js:1](../../../../scripts/bump-version.js#L1):
 
@@ -82,6 +82,8 @@ Deploy chain (all `deploy:*` scripts):
 6. `code --install-extension pi-code-<version>.vsix --force` — local install for smoke test.
 
 Pruning guarantees that only production dependencies remain; it does not make the package small by itself. After source-map and bundled-package baggage exclusions, the current SDK, provider integrations, web tooling, and native helpers produce a compressed VSIX of roughly 90 MB; dependency upgrades can change that size.
+
+A dependency upgrade can also drag in per-platform binaries that no single user can use. Pi 0.85 added `@earendil-works/chord`, which depends on `esbuild`; because Pi's shrinkwrap enumerates all 26 of esbuild's optional platform packages, npm installs every one and the VSIX went from 87 MB to 204 MB. `node_modules/**/@esbuild/**` is excluded, which is safe here because `chord` is reachable only from Pi's own `dist/bundle/` CLI chunks and the extension host imports the package root instead. Verified by loading the SDK out of the installed extension directory with the binaries absent, not by reasoning alone.
 
 Marketplace publication is a separate explicit maintainer action after the installed-VSIX smoke test:
 
@@ -154,7 +156,9 @@ After publishing, verify the intended version on the Marketplace page or Gallery
 - **Pattern — sync-lock is optional but recommended.** `--sync-lock` runs `npm install --package-lock-only`; guarantees `package-lock.json` reflects the new version. Skip only if you know the lock is already correct.
 - **Pitfall — `code --install-extension --force` overwrites the existing install.** Fine for developer machines; do not run inside CI without a clean profile.
 - **Pitfall — the boundary verifier hardcodes `['standalone/']`.** If a new subtree needs to be excluded from the VSIX, add it to the list; do not rely on `.vscodeignore` alone.
+- **Pitfall — `npm run test:integration` exits 0 without running the suite.** [runTest.ts](../../../../src/test/integration/runTest.ts) spawns the `code.cmd` CLI wrapper returned by `resolveCliArgsFromVSCodeExecutablePath()`, which is meant for CLI operations such as installing an extension. On Windows, with VS Code already running, that wrapper forwards its arguments to the live instance and exits 0 immediately, so mocha never starts and the exit code proves nothing. Confirmed by adding a test that writes a marker file: exit 0, no marker. Treat the integration gate as unproven until it launches the Electron binary through `runTests()`.
+- **Rule — check the VSIX size after every dependency upgrade.** A transitive dependency can add per-platform binaries that npm installs for all platforms at once; the pipeline has no size gate, so the only signal is the `vsce` summary line. See the `@esbuild` case above.
 - **Pattern — deploy is local by default.** The `deploy:*` scripts install the VSIX into local VS Code; publishing requires an explicit `vsce publish --packagePath ...` maintainer action after smoke testing.
 - **Rule — release tags must match the manifest.** The GitHub workflow accepts only `v<package.json version>` tags before packaging and creating a GitHub Release.
-- **Rule — package the physically resolved dependency tree, not audit metadata alone.** Pi SDK 0.82.1 shrinkwraps vulnerable `brace-expansion` 5.0.7. Install-time repair removes that nested copy, and packaging aborts unless Pi resolves root 5.0.9; the upstream lock metadata can continue to trigger an `npm audit` advisory until its shrinkwrap is updated.
+- **Rule — package the physically resolved dependency tree, not audit metadata alone.** Pi SDK 0.82.1 shrinkwrapped vulnerable `brace-expansion` 5.0.7; 0.84.4 ships the patched 5.0.9 nested instead. Install-time repair removes a nested copy only while it is vulnerable, and packaging aborts unless Pi physically resolves a safe `brace-expansion`. The guard stays because the resolution, not the upstream lock metadata, is what ships.
 - **Rule — dependency changes require separate approval.** Release preparation and audit review may report dependency advisories and propose a tested upgrade, but must not change dependency versions, pins, overrides, lockfiles, or repair logic without the user's explicit approval for that separate change.
