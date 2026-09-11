@@ -43,7 +43,7 @@ describe('auth portable secret store', () => {
         values.delete('pi-code.apiKey.deepseek');
         await reloadCredentials();
 
-        expect(removeRuntimeApiKey).toHaveBeenCalledWith('deepseek');
+        expect(removeRuntimeApiKey).toHaveBeenCalledWith('deepseek', expect.anything());
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(secrets.get).toHaveBeenCalledWith('pi-code.apiKey.deepseek');
         expect(secrets.store).not.toHaveBeenCalled();
@@ -79,6 +79,33 @@ describe('auth portable secret store', () => {
         await reloadCredentials();
         expect(setRuntimeApiKey.mock.calls.map(([provider]) => provider))
             .toEqual(['anthropic']);
+    });
+
+    it('bounds each credential sync so a stalled provider cannot wedge the runtime', async () => {
+        values.set('pi-code.apiKey.anthropic', 'anthropic-key');
+        const runtime = await getModelRuntime();
+
+        // The SDK substitutes a never-firing signal when the caller supplies
+        // none, and provider availability refresh is not covered by the
+        // `allowNetwork: false` it applies to the catalog refresh. Every sync
+        // shares one process-wide chain, so an unbounded call here blocks
+        // every later getModelRuntime() and every new chat tab with it.
+        // Reject immediately rather than waiting the real timeout out: the
+        // regression guarded here is a call made with no signal at all, so
+        // what matters is that a bounded one is supplied and that a failure
+        // leaves the provider retryable.
+        const setRuntimeApiKey = vi.spyOn(runtime, 'setRuntimeApiKey')
+            .mockRejectedValue(new Error('TimeoutError'));
+
+        await expect(getModelRuntime(secrets)).resolves.toBe(runtime);
+        const [, , options] = setRuntimeApiKey.mock.calls[0];
+        expect(options?.signal).toBeInstanceOf(AbortSignal);
+        expect(options?.signal?.aborted).toBe(false);
+
+        // A timed-out provider is not recorded, so the next sync retries it.
+        setRuntimeApiKey.mockClear();
+        await reloadCredentials();
+        expect(setRuntimeApiKey).toHaveBeenCalledWith('anthropic', 'anthropic-key', expect.anything());
     });
 
     it('projects Qwen only while its SecretStorage override exists', async () => {

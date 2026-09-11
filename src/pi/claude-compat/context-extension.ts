@@ -266,7 +266,27 @@ export interface ClaudeContextExtensionOptions extends ClaudeContextOptions {
     contextEnabled?: boolean;
     rulesEnabled?: boolean;
     resources?: ClaudeResourceIndex;
+    /** Host-side log sink for bridge events the user may need to act on. */
+    onDiagnostic?: (message: string) => void;
 }
+
+/**
+ * Consecutive blocked tool calls tolerated before the bridge stops blocking.
+ *
+ * A block is not free: it costs a full model round-trip, because the agent
+ * has to come back and retry the call. One or two are the mechanism working
+ * as designed — the agent reads the resources it was handed, then proceeds.
+ * A run of them means the opposite: every retry keeps matching another
+ * unapplied directory-scoped skill, so the bridge is standing between the
+ * agent and its work instead of informing it. A project with dozens of
+ * skills can chain these long enough to look like a hang, and the user has
+ * no way to tell that a compatibility layer is doing it.
+ *
+ * Three in a row is past any legitimate review-then-retry exchange. The
+ * counter resets as soon as one tool call passes unblocked, so ordinary
+ * interleaved use never approaches the limit.
+ */
+const MAX_CONSECUTIVE_TOOL_BLOCKS = 3;
 
 const PI_BUILTIN_COMMANDS = new Set([
     'settings', 'model', 'scoped-models', 'export', 'import', 'share', 'copy', 'name', 'session',
@@ -315,6 +335,12 @@ export function createClaudeContextExtension(
     return (pi) => {
         const contextEnabled = options.contextEnabled ?? true;
         const rulesEnabled = options.rulesEnabled ?? true;
+        // Circuit-breaker state for the tool_call gate. Session-scoped: the
+        // extension instance is created per session, and a trip must survive
+        // compaction, which resets the applied-resource bookkeeping and would
+        // otherwise let the whole storm start over.
+        let consecutiveToolBlocks = 0;
+        let toolBlockingDisabled = false;
         const hasVisibleSkills = options.resources?.skills.some((skill) =>
             !skill.disableModelInvocation && !skill.appliesToDirectory,
         ) === true;
@@ -432,7 +458,38 @@ export function createClaudeContextExtension(
                 }
             }
 
-            if (nestedSkills.length === 0 && !requiresRuleBlock) return;
+            // The resources above are injected either way. Only the block —
+            // the part that costs a round-trip and can stall the agent — is
+            // subject to the breaker.
+            if (nestedSkills.length === 0 && !requiresRuleBlock) {
+                consecutiveToolBlocks = 0;
+                return;
+            }
+            if (toolBlockingDisabled) return;
+
+            consecutiveToolBlocks += 1;
+            if (consecutiveToolBlocks >= MAX_CONSECUTIVE_TOOL_BLOCKS) {
+                toolBlockingDisabled = true;
+                options.onDiagnostic?.(
+                    `[claude compatibility] Stopped blocking tool calls after ${consecutiveToolBlocks} in a row. `
+                    + 'Directory-scoped resources are still added to context; the agent is no longer asked to retry. '
+                    + 'Set pi-code.claudeCompat.mode=off for this workspace to disable the bridge entirely.',
+                );
+                pi.sendMessage(
+                    {
+                        customType: 'claude-compat-blocking-disabled',
+                        content: wrapClaudeCompatibilityContent(
+                            `Claude compatibility stopped blocking tool calls after ${consecutiveToolBlocks} consecutive blocks in this session. `
+                            + 'Directory-scoped resources are still added to context, but tool calls now run without being interrupted for review. '
+                            + 'Proceed with the task using the resources already provided.',
+                        ),
+                        display: true,
+                    },
+                    { deliverAs: 'steer', triggerTurn: false },
+                );
+                return;
+            }
+
             return {
                 block: true,
                 reason: 'Directory-scoped Claude resources were added to context. Retry this tool call after reviewing them.',

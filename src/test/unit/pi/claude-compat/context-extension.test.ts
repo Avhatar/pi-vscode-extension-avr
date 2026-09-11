@@ -30,6 +30,7 @@ function createHarness(cwd: string, options: {
     const entries: any[] = [];
     const sentMessages: any[] = [];
     const sentUserMessages: any[] = [];
+    const diagnostics: string[] = [];
     const pi = {
         on(name: string, handler: (event: any, context: any) => Promise<any>) {
             hooks.set(name, handler);
@@ -55,6 +56,7 @@ function createHarness(cwd: string, options: {
     };
     createClaudeContextExtension({
         userClaudeDirectory: path.join(cwd, '.test-user-claude'),
+        onDiagnostic: (message: string) => diagnostics.push(message),
         ...options,
     })(pi as any);
     const context = {
@@ -66,7 +68,7 @@ function createHarness(cwd: string, options: {
             getSessionId: () => options.sessionId ?? 'pi-test-session',
         },
     };
-    return { hooks, commands, entries, sentMessages, sentUserMessages, context };
+    return { hooks, commands, entries, sentMessages, sentUserMessages, diagnostics, context };
 }
 
 afterEach(() => {
@@ -281,6 +283,63 @@ describe('Claude context extension', () => {
         expect(harness.sentMessages[0].message.content).toContain('SCOPED_RULE_SENTINEL');
         expect(harness.sentMessages[0].options.deliverAs).toBe('steer');
         expect(retry).toBeUndefined();
+    });
+
+    it('stops blocking after three consecutive blocks and keeps injecting resources', async () => {
+        const cwd = createWorkspace();
+        for (const name of ['a', 'b', 'c', 'd']) {
+            writeFile(path.join(cwd, '.claude', 'rules', `${name}.md`), [
+                '---',
+                `paths: ["src/${name}/**"]`,
+                '---',
+                `RULE_SENTINEL_${name.toUpperCase()}`,
+            ].join('\n'));
+        }
+        const harness = createHarness(cwd);
+        harness.entries.push({ type: 'message', id: 'assistant-1', message: { role: 'assistant' } });
+        const call = (name: string, id: string) => harness.hooks.get('tool_call')!(
+            { toolName: 'read', toolCallId: id, input: { path: `src/${name}/file.ts` } },
+            harness.context,
+        );
+
+        // Each call matches a different unapplied rule, so nothing in the
+        // existing bookkeeping stops the run — only the breaker does.
+        expect((await call('a', 'call-1')).block).toBe(true);
+        expect((await call('b', 'call-2')).block).toBe(true);
+        const tripping = await call('c', 'call-3');
+        const afterTrip = await call('d', 'call-4');
+
+        expect(tripping).toBeUndefined();
+        expect(afterTrip).toBeUndefined();
+        expect(harness.diagnostics).toHaveLength(1);
+        expect(harness.diagnostics[0]).toContain('Stopped blocking tool calls after 3 in a row');
+        // Resources keep flowing: the trip removes the interruption, not the bridge.
+        expect(harness.sentMessages.at(-1).message.content).toContain('RULE_SENTINEL_D');
+    });
+
+    it('resets the consecutive-block count when a tool call passes through', async () => {
+        const cwd = createWorkspace();
+        for (const name of ['a', 'b', 'c']) {
+            writeFile(path.join(cwd, '.claude', 'rules', `${name}.md`), [
+                '---',
+                `paths: ["src/${name}/**"]`,
+                '---',
+                `RULE_SENTINEL_${name.toUpperCase()}`,
+            ].join('\n'));
+        }
+        const harness = createHarness(cwd);
+        harness.entries.push({ type: 'message', id: 'assistant-1', message: { role: 'assistant' } });
+        const call = (relativePath: string, id: string) => harness.hooks.get('tool_call')!(
+            { toolName: 'read', toolCallId: id, input: { path: relativePath } },
+            harness.context,
+        );
+
+        expect((await call('src/a/file.ts', 'call-1')).block).toBe(true);
+        expect((await call('src/b/file.ts', 'call-2')).block).toBe(true);
+        // No rule covers this path, so the call runs and clears the streak.
+        expect(await call('docs/readme.md', 'call-3')).toBeUndefined();
+        expect((await call('src/c/file.ts', 'call-4')).block).toBe(true);
+        expect(harness.diagnostics).toHaveLength(0);
     });
 
     it('reapplies path rules after compaction or a rule content change', async () => {

@@ -4,6 +4,19 @@ import { TypedEventEmitter } from '../shared/typed-event';
 
 const API_KEY_PREFIX = 'pi-code.apiKey.';
 
+/**
+ * Ceiling for one provider's credential synchronization.
+ *
+ * `setRuntimeApiKey`/`removeRuntimeApiKey` refresh provider availability, and
+ * that path reaches `checkAuth` and `getAvailable`, neither of which is
+ * covered by the `allowNetwork: false` the SDK applies to the catalog refresh.
+ * Without a signal the SDK substitutes `new AbortController().signal`, which
+ * never fires, so a provider stalled on the network hangs the call forever —
+ * and because every sync runs on one process-wide chain, that wedges every
+ * later `getModelRuntime()` and with it the creation of any new chat tab.
+ */
+const CREDENTIAL_SYNC_TIMEOUT_MS = 10_000;
+
 const KNOWN_PROVIDERS = [
     'anthropic', 'openai', 'google', 'deepseek', 'mistral', 'groq',
     'cerebras', 'xai', 'openrouter', 'fireworks', 'huggingface',
@@ -67,10 +80,10 @@ export async function getProviderAccessToken(providerId: string): Promise<string
 
 async function createModelRuntime(): Promise<ModelRuntime> {
     const { ModelRuntime: Runtime } = await import('@earendil-works/pi-coding-agent');
-    // `create()` is the only remaining catalog refresh that can reach the
-    // network: `setRuntimeApiKey` and `removeRuntimeApiKey` now synchronize
-    // just their own provider with `allowNetwork: false` hardcoded. Create
-    // this app-owned runtime in offline-catalog mode anyway so bring-up never
+    // `create()` is the only catalog refresh here that can reach the network:
+    // `setRuntimeApiKey` and `removeRuntimeApiKey` scope their own refresh to
+    // the affected provider with `allowNetwork: false` hardcoded. Create this
+    // app-owned runtime in offline-catalog mode anyway so bring-up never
     // blocks on a provider or OAuth network refresh.
     const previousOffline = process.env.PI_OFFLINE;
     process.env.PI_OFFLINE = '1';
@@ -91,13 +104,15 @@ async function queueSecretSync(runtime: ModelRuntime, secrets: SecretStore): Pro
 /**
  * Apply every stored key to the runtime, one provider at a time.
  *
- * Each provider is isolated because the credential operations now reject on
- * failure: `CredentialSynchronizationError` wraps composition, catalog, and
- * availability errors that earlier SDK releases only collected into a result
- * map. Letting that propagate would abort the loop, so one broken key would
- * leave every provider after it in the list unconfigured and fail the whole
- * session bring-up. `appliedRuntimeKeys` is only updated once the operation
- * succeeds, which makes the next sync retry the failed provider.
+ * Each provider is isolated by its own `try`/`catch`, because the credential
+ * operations reject on failure: `CredentialSynchronizationError` wraps the
+ * composition, catalog, and availability errors that earlier SDK releases
+ * only collected into a result map. Letting that propagate would abort the
+ * loop, strand every provider behind it in `KNOWN_PROVIDERS`, and fail the
+ * whole session bring-up. `appliedRuntimeKeys` is only updated once the
+ * operation succeeds, which makes the next sync retry the failed provider —
+ * including one that hit `CREDENTIAL_SYNC_TIMEOUT_MS`, since a timeout
+ * arrives here as a rejection like any other failure.
  */
 async function applySecretsToRuntime(runtime: ModelRuntime, secrets: SecretStore): Promise<void> {
     for (const provider of KNOWN_PROVIDERS) {
@@ -106,10 +121,14 @@ async function applySecretsToRuntime(runtime: ModelRuntime, secrets: SecretStore
         try {
             if (key) {
                 if (key === applied) continue;
-                await runtime.setRuntimeApiKey(provider, key);
+                await runtime.setRuntimeApiKey(provider, key, {
+                    signal: AbortSignal.timeout(CREDENTIAL_SYNC_TIMEOUT_MS),
+                });
                 appliedRuntimeKeys.set(provider, key);
             } else if (applied !== undefined) {
-                await runtime.removeRuntimeApiKey(provider);
+                await runtime.removeRuntimeApiKey(provider, {
+                    signal: AbortSignal.timeout(CREDENTIAL_SYNC_TIMEOUT_MS),
+                });
                 appliedRuntimeKeys.delete(provider);
             }
         } catch (err) {

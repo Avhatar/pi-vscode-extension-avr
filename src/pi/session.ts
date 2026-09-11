@@ -675,7 +675,12 @@ export class PiSessionManager {
                 projectSkillFiles: claudeInfrastructure.nestedSkillFiles,
                 projectCommandDirectories: claudeInfrastructure.commandDirectories,
             });
-            factories.push(createClaudeContextExtension({ contextEnabled, rulesEnabled, resources }));
+            factories.push(createClaudeContextExtension({
+                contextEnabled,
+                rulesEnabled,
+                resources,
+                onDiagnostic: (message) => this._outputChannel.appendLine(message),
+            }));
             this._outputChannel.appendLine(
                 `Claude compatibility activated: ${claudeInfrastructure.activationReasons.join(', ')} ` +
                 `(context=${contextEnabled}, rules=${rulesEnabled}, skills=${resources.skills.length}, commands=${resources.commands.length})`,
