@@ -53,17 +53,15 @@ export function decideInputSubmit(context: InputSubmitContext): InputSubmitDecis
         return { kind: 'compact' };
     }
 
-    if (context.hasAttachments) {
-        return {
-            kind: 'reject',
-            message: 'Attachments cannot be queued while the agent is busy. Send them after the current response finishes.',
-        };
+    if (!text && !context.hasAttachments) return { kind: 'ignore' };
+
+    // Steering injects into the current turn, which the SDK can only carry as
+    // text; a live turn cannot receive images or files. Anything with
+    // attachments therefore queues for the next turn even when Ctrl/Cmd+Enter
+    // asked to steer. Without a turn to inject into (compaction), a steer
+    // request also queues like a plain Enter.
+    if (context.steerRequested && context.isStreaming && !context.hasAttachments) {
+        return { kind: 'steer' };
     }
-
-    if (!text) return { kind: 'ignore' };
-
-    // Steering injects into the current turn; without a turn there is nothing to
-    // inject into, so a compaction-time Ctrl+Enter queues like a plain Enter.
-    if (context.steerRequested && context.isStreaming) return { kind: 'steer' };
     return { kind: 'queue' };
 }

@@ -201,7 +201,12 @@ export interface QueuedDispatchCallbacks {
     decoratePrompt(text: string): string;
     augmentPrompt(text: string): Promise<string>;
     compact(instructions?: string): Promise<void>;
-    prompt(text: string, onAgentStart: () => void): Promise<void>;
+    prompt(
+        text: string,
+        onAgentStart: () => void,
+        images?: ImageAttachment[],
+        files?: FileAttachment[],
+    ): Promise<void>;
     isSessionStreaming(): boolean;
     handleLocalCommand(text: string): boolean;
     scheduleRetry(retry: () => Promise<void>): void;
@@ -719,13 +724,12 @@ export class ChatService {
         // and rejects a plain prompt outright until then. Queue instead of
         // surfacing the SDK's `streamingBehavior` error and losing the message.
         if (callbacks.isSessionBusy()) {
-            if (request.images?.length || request.files?.length) {
-                throw new Error(
-                    'Attachments cannot be queued while the agent is busy. '
-                    + 'Send them after the current response finishes.',
-                );
-            }
-            this.applyQueueControl(tab, { type: 'queueMessage', text: request.text });
+            this.applyQueueControl(tab, {
+                type: 'queueMessage',
+                text: request.text,
+                images: request.images,
+                files: request.files,
+            });
             callbacks.publishState();
             return { kind: 'queued', queueLength: tab.queuedMessages.length };
         }
@@ -776,7 +780,11 @@ export class ChatService {
         let changed = false;
         switch (command.type) {
             case 'queueMessage':
-                tab.queuedMessages.push(command.text);
+                tab.queuedMessages.push({
+                    text: command.text,
+                    images: command.images,
+                    files: command.files,
+                });
                 changed = true;
                 break;
             case 'editQueuedMessage': {
@@ -785,7 +793,8 @@ export class ChatService {
                     && command.index >= 0
                     && command.index < tab.queuedMessages.length
                     && trimmed) {
-                    tab.queuedMessages[command.index] = trimmed;
+                    // Preserve the queued attachments; only the text is editable.
+                    tab.queuedMessages[command.index].text = trimmed;
                     changed = true;
                 }
                 break;
@@ -820,8 +829,11 @@ export class ChatService {
         tab: ChatServiceTab,
         callbacks: QueuedDispatchCallbacks,
     ): Promise<void> {
-        const text = tab.queuedMessages[0];
-        if (text === undefined) return;
+        const queued = tab.queuedMessages[0];
+        if (queued === undefined) return;
+        // The head is tracked by its text so an edit during preparation restarts
+        // it; the object is carried alongside only to preserve its attachments.
+        const text = queued.text;
         if (tab.queuedRetryHead !== text) {
             tab.queuedRetryHead = text;
             tab.queuedRetryAttempts = 0;
@@ -873,8 +885,9 @@ export class ChatService {
         }
 
         // Queue controls remain available during asynchronous preparation.
-        // Never dispatch an expansion prepared for a head that has changed.
-        if (tab.queuedMessages[0] !== text) {
+        // Never dispatch an expansion prepared for a head that has changed
+        // (removed, reordered, or edited in place).
+        if (tab.queuedMessages[0]?.text !== text) {
             await this.dispatchNextQueued(tab, callbacks);
             return;
         }
@@ -899,18 +912,18 @@ export class ChatService {
             () => callbacks.prompt(queuedPrompt, () => {
                 agentStarted = true;
                 this._clearQueuedRetry(tab);
-            }),
+            }, queued.images, queued.files),
         ).catch((error) => {
-            if (!agentStarted) tab.queuedMessages.unshift(text);
+            if (!agentStarted) tab.queuedMessages.unshift(queued);
             callbacks.reportError(error);
         }).finally(() => {
             if (!agentStarted && !callbacks.isSessionStreaming()) {
                 tab.isStreamingLocal = false;
                 callbacks.publishState();
-                if (tab.queuedMessages[0] === text && tab.queuedRetryAttempts < 1) {
+                if (tab.queuedMessages[0]?.text === text && tab.queuedRetryAttempts < 1) {
                     tab.queuedRetryAttempts++;
                     callbacks.scheduleRetry(async () => {
-                        if (tab.queuedMessages[0] !== text || callbacks.isSessionStreaming()) return;
+                        if (tab.queuedMessages[0]?.text !== text || callbacks.isSessionStreaming()) return;
                         if (!this.reserveQueuedDispatch(tab)) return;
                         callbacks.publishState();
                         await this.dispatchNextQueued(tab, callbacks);

@@ -231,7 +231,7 @@ describe('ChatController command dispatch results', () => {
     });
 
     it('applies queue controls through the service and publishes every command', async () => {
-        const tab = { id: 'tab-1', queuedMessages: [] as string[] };
+        const tab = { id: 'tab-1', queuedMessages: [] as { text: string }[] };
         const controller = Object.create(ChatController.prototype) as any;
         controller._tabs = createTabRegistry([tab], 'tab-1');
         controller._chatService = new ChatService({ now: () => 0 });

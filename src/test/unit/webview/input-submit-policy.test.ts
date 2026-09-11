@@ -44,16 +44,26 @@ describe('webview input submit policy', () => {
         expect(rejected).toMatchObject({ message: expect.stringContaining('already running') });
     });
 
-    it('refuses attachments while busy so they are not silently dropped from the queue', () => {
+    it('queues attachments while busy instead of dropping them', () => {
         const busyStates = [{ isStreaming: true }, { isCompacting: true }];
         for (const busy of busyStates) {
-            const decision = decideInputSubmit(context({ ...busy, hasAttachments: true }));
-            expect(decision.kind).toBe('reject');
-            expect(decision).toMatchObject({
-                message: expect.stringContaining('Attachments cannot be queued'),
-            });
+            expect(decideInputSubmit(context({ ...busy, hasAttachments: true })))
+                .toEqual({ kind: 'queue' });
+            // Attachment-only (no text) is still a real submission while busy.
+            expect(decideInputSubmit(context({ ...busy, text: '   ', hasAttachments: true })))
+                .toEqual({ kind: 'queue' });
         }
+    });
 
+    it('queues rather than steers when attachments are present, since a live turn is text-only', () => {
+        expect(decideInputSubmit(context({
+            isStreaming: true,
+            steerRequested: true,
+            hasAttachments: true,
+        }))).toEqual({ kind: 'queue' });
+    });
+
+    it('still refuses attachments on a /compact command', () => {
         const slashDecision = decideInputSubmit(context({
             text: '/compact',
             isStreaming: true,
@@ -65,7 +75,7 @@ describe('webview input submit policy', () => {
         });
     });
 
-    it('ignores an empty submission while busy', () => {
+    it('ignores an empty submission with no attachments while busy', () => {
         expect(decideInputSubmit(context({ text: '   ', isCompacting: true })))
             .toEqual({ kind: 'ignore' });
     });

@@ -81,7 +81,7 @@ describe('portable ChatService event and state projection', () => {
         tab.isThinking = true;
         tab.thinkingStartTime = 123;
         tab.streamingThinkingDuration = 4;
-        tab.queuedMessages = ['next'];
+        tab.queuedMessages = [{ text: 'next' }];
         tab.pendingTools.set('tool-1', {
             name: 'bash',
             startTime: 321,
@@ -145,7 +145,7 @@ describe('portable ChatService event and state projection', () => {
             isThinking: true,
             thinkingStartTime: 123,
             streamingThinkingDuration: 4,
-            queuedMessages: ['next'],
+            queuedMessages: [{ text: 'next' }],
             cacheMode: 'auto',
             cacheEffective: 'long',
             fileUndoViewEnabled: true,
@@ -1437,7 +1437,7 @@ describe('portable ChatService direct prompt lifecycle', () => {
         await expect(service.dispatchDirectPrompt(tab, { text: 'next task' }, callbacks))
             .resolves.toEqual({ kind: 'queued', queueLength: 1 });
 
-        expect(tab.queuedMessages).toEqual(['next task']);
+        expect(tab.queuedMessages).toEqual([{ text: 'next task' }]);
         expect(callbacks.prompt).not.toHaveBeenCalled();
         expect(callbacks.prepareRequest).not.toHaveBeenCalled();
         expect(callbacks.publishState).toHaveBeenCalledOnce();
@@ -1459,18 +1459,19 @@ describe('portable ChatService direct prompt lifecycle', () => {
         expect(tab.queuedMessages).toEqual([]);
     });
 
-    it('refuses attachments while busy rather than queueing text without them', async () => {
+    it('queues a busy submission together with its attachments', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
         const callbacks = createDirectPromptCallbacks({
             isSessionBusy: vi.fn(() => true),
         });
         const images = [{ type: 'image', data: 'abc', mimeType: 'image/png' }] as any;
+        const files = [{ type: 'file', data: 'Zg==', mimeType: 'text/plain', name: 'a.txt', size: 1 }] as any;
 
-        await expect(service.dispatchDirectPrompt(tab, { text: 'look', images }, callbacks))
-            .rejects.toThrow('Attachments cannot be queued while the agent is busy.');
+        await expect(service.dispatchDirectPrompt(tab, { text: 'look', images, files }, callbacks))
+            .resolves.toEqual({ kind: 'queued', queueLength: 1 });
 
-        expect(tab.queuedMessages).toEqual([]);
+        expect(tab.queuedMessages).toEqual([{ text: 'look', images, files }]);
         expect(callbacks.prompt).not.toHaveBeenCalled();
     });
 });
@@ -1620,7 +1621,7 @@ describe('portable ChatService queue orchestration', () => {
     it('decorates a queued prompt before file-mention augmentation', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.queuedMessages = ['queued task'];
+        tab.queuedMessages = [{ text: 'queued task' }];
         const callbacks = createQueueCallbacks({
             decoratePrompt: vi.fn((text: string) => `PLAN\n${text}`),
             augmentPrompt: vi.fn(async (text: string) => `FILES\n${text}`),
@@ -1631,27 +1632,27 @@ describe('portable ChatService queue orchestration', () => {
 
         expect(callbacks.decoratePrompt).toHaveBeenCalledWith('queued task');
         expect(callbacks.augmentPrompt).toHaveBeenCalledWith('PLAN\nqueued task');
-        expect(callbacks.prompt).toHaveBeenCalledWith('FILES\nPLAN\nqueued task', expect.any(Function));
+        expect(callbacks.prompt).toHaveBeenCalledWith('FILES\nPLAN\nqueued task', expect.any(Function), undefined, undefined);
     });
 
     it('applies validated queue controls to only the supplied tab', () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
         const otherTab = createTab();
-        otherTab.queuedMessages = ['other'];
+        otherTab.queuedMessages = [{ text: 'other' }];
 
         expect(service.applyQueueControl(tab, {
             type: 'queueMessage',
             text: '  raw queued text  ',
         })).toEqual({ changed: true, queueLength: 1 });
-        expect(tab.queuedMessages).toEqual(['  raw queued text  ']);
+        expect(tab.queuedMessages).toEqual([{ text: '  raw queued text  ' }]);
 
         expect(service.applyQueueControl(tab, {
             type: 'editQueuedMessage',
             index: 0,
             text: '  edited text  ',
         })).toEqual({ changed: true, queueLength: 1 });
-        expect(tab.queuedMessages).toEqual(['edited text']);
+        expect(tab.queuedMessages).toEqual([{ text: 'edited text' }]);
 
         expect(service.applyQueueControl(tab, {
             type: 'editQueuedMessage',
@@ -1677,7 +1678,7 @@ describe('portable ChatService queue orchestration', () => {
             type: 'removeQueuedMessage',
             index: 0,
         })).toEqual({ changed: true, queueLength: 1 });
-        expect(tab.queuedMessages).toEqual(['second']);
+        expect(tab.queuedMessages).toEqual([{ text: 'second' }]);
 
         const previousQueue = tab.queuedMessages;
         expect(service.applyQueueControl(tab, { type: 'cancelQueue' })).toEqual({
@@ -1686,7 +1687,7 @@ describe('portable ChatService queue orchestration', () => {
         });
         expect(tab.queuedMessages).toEqual([]);
         expect(tab.queuedMessages).not.toBe(previousQueue);
-        expect(otherTab.queuedMessages).toEqual(['other']);
+        expect(otherTab.queuedMessages).toEqual([{ text: 'other' }]);
     });
 
     it('reserves only a tab with a queued head', () => {
@@ -1698,10 +1699,10 @@ describe('portable ChatService queue orchestration', () => {
         expect(service.reserveQueuedDispatch(tab)).toBe(false);
         expect(tab.isStreamingLocal).toBe(false);
 
-        tab.queuedMessages.push('next');
+        tab.queuedMessages.push({ text: 'next' });
         expect(service.reserveQueuedDispatch(tab)).toBe(true);
         expect(tab.isStreamingLocal).toBe(true);
-        expect(tab.queuedMessages).toEqual(['next']);
+        expect(tab.queuedMessages).toEqual([{ text: 'next' }]);
     });
 
     it('leaves an empty dispatch side-effect free', async () => {
@@ -1721,7 +1722,7 @@ describe('portable ChatService queue orchestration', () => {
     it('prepares and starts one queued prompt in the existing operation order', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.queuedMessages = ['read @file'];
+        tab.queuedMessages = [{ text: 'read @file' }];
         tab.suspendedMessages = [{ role: 'assistant', content: 'old branch' }];
         const order: string[] = [];
         tab.checkpointManager.discardSuspended.mockImplementation(() => {
@@ -1769,7 +1770,7 @@ describe('portable ChatService queue orchestration', () => {
     it('restores only a queued prompt rejected before agent_start', async () => {
         const service = new ChatService({ now: () => 0 });
         const beforeStart = createTab();
-        beforeStart.queuedMessages = ['retry raw text'];
+        beforeStart.queuedMessages = [{ text: 'retry raw text' }];
         const beforeError = new Error('before start');
         const beforeCallbacks = createQueueCallbacks({
             augmentPrompt: vi.fn(async () => 'augmented retry'),
@@ -1778,13 +1779,13 @@ describe('portable ChatService queue orchestration', () => {
 
         service.reserveQueuedDispatch(beforeStart);
         await service.dispatchNextQueued(beforeStart, beforeCallbacks);
-        await vi.waitFor(() => expect(beforeStart.queuedMessages).toEqual(['retry raw text']));
+        await vi.waitFor(() => expect(beforeStart.queuedMessages).toEqual([{ text: 'retry raw text' }]));
         expect(beforeCallbacks.reportError).toHaveBeenCalledWith(beforeError);
         expect(beforeStart.isStreamingLocal).toBe(false);
         expect(beforeCallbacks.publishState).toHaveBeenCalled();
 
         const afterStart = createTab();
-        afterStart.queuedMessages = ['do not restore'];
+        afterStart.queuedMessages = [{ text: 'do not restore' }];
         const afterError = new Error('after start');
         const afterCallbacks = createQueueCallbacks({
             prompt: vi.fn(async (_text: string, onAgentStart: () => void) => {
@@ -1803,7 +1804,7 @@ describe('portable ChatService queue orchestration', () => {
     it('schedules only one automatic retry for a head rejected before agent_start', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.queuedMessages = ['retry once'];
+        tab.queuedMessages = [{ text: 'retry once' }];
         let scheduledRetry: (() => Promise<void>) | undefined;
         const callbacks = createQueueCallbacks({
             prompt: vi.fn(async () => { throw new Error('preflight rejected'); }),
@@ -1817,14 +1818,14 @@ describe('portable ChatService queue orchestration', () => {
         await vi.waitFor(() => expect(callbacks.prompt).toHaveBeenCalledTimes(2));
 
         expect(callbacks.scheduleRetry).toHaveBeenCalledOnce();
-        expect(tab.queuedMessages).toEqual(['retry once']);
+        expect(tab.queuedMessages).toEqual([{ text: 'retry once' }]);
         expect(tab.isStreamingLocal).toBe(false);
     });
 
     it('consumes an edited queued local command without contacting the model', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.queuedMessages = ['/name Edited queue'];
+        tab.queuedMessages = [{ text: '/name Edited queue' }];
         const callbacks = createQueueCallbacks({
             handleLocalCommand: vi.fn(() => true),
         });
@@ -1842,7 +1843,7 @@ describe('portable ChatService queue orchestration', () => {
     it('completes queued compaction before reserving and dispatching the next head', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.queuedMessages = ['/compact focus on tests', 'continue'];
+        tab.queuedMessages = [{ text: '/compact focus on tests' }, { text: 'continue' }];
         const publishedStreaming: boolean[] = [];
         const callbacks = createQueueCallbacks({
             augmentPrompt: vi.fn(async (text: string) => `augmented ${text}`),
@@ -1854,7 +1855,7 @@ describe('portable ChatService queue orchestration', () => {
 
         expect(callbacks.compact).toHaveBeenCalledWith('focus on tests');
         expect(callbacks.augmentPrompt).toHaveBeenCalledWith('continue');
-        expect(callbacks.prompt).toHaveBeenCalledWith('augmented continue', expect.any(Function));
+        expect(callbacks.prompt).toHaveBeenCalledWith('augmented continue', expect.any(Function), undefined, undefined);
         expect(tab.queuedMessages).toEqual([]);
         expect(publishedStreaming).toEqual([false, true, true]);
     });
@@ -1862,7 +1863,7 @@ describe('portable ChatService queue orchestration', () => {
     it('restarts preparation from the current head when controls change during augmentation', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.queuedMessages = ['stale head'];
+        tab.queuedMessages = [{ text: 'stale head' }];
         let finishStale!: (text: string) => void;
         const staleAugmentation = new Promise<string>((resolve) => { finishStale = resolve; });
         const callbacks = createQueueCallbacks({
@@ -1883,14 +1884,14 @@ describe('portable ChatService queue orchestration', () => {
         await dispatch;
 
         expect(callbacks.augmentPrompt).toHaveBeenNthCalledWith(2, 'current head');
-        expect(callbacks.prompt).toHaveBeenCalledWith('augmented current head', expect.any(Function));
-        expect(callbacks.prompt).not.toHaveBeenCalledWith('stale expansion', expect.any(Function));
+        expect(callbacks.prompt).toHaveBeenCalledWith('augmented current head', expect.any(Function), undefined, undefined);
+        expect(callbacks.prompt).not.toHaveBeenCalledWith('stale expansion', expect.any(Function), undefined, undefined);
     });
 
     it('keeps the raw head and publishes an idle state when augmentation fails', async () => {
         const service = new ChatService({ now: () => 0 });
         const tab = createTab();
-        tab.queuedMessages = ['read @missing'];
+        tab.queuedMessages = [{ text: 'read @missing' }];
         tab.isStreamingLocal = true;
         const error = new Error('index failed');
         const callbacks = createQueueCallbacks({
@@ -1899,7 +1900,7 @@ describe('portable ChatService queue orchestration', () => {
 
         await service.dispatchNextQueued(tab, callbacks);
 
-        expect(tab.queuedMessages).toEqual(['read @missing']);
+        expect(tab.queuedMessages).toEqual([{ text: 'read @missing' }]);
         expect(tab.isStreamingLocal).toBe(false);
         expect(callbacks.reportError).toHaveBeenCalledWith(error);
         expect(callbacks.publishState).toHaveBeenCalledOnce();

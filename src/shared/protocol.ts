@@ -30,6 +30,7 @@ export type {
     ImageAttachment,
     ModelInfo,
     PendingToolInfo,
+    QueuedMessage,
     SerializedAgentState,
     SessionInfo,
     SkillInfo,

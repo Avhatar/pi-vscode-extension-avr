@@ -70,7 +70,7 @@ const serverMessages: ServerMessage[] = [
             isThinking: true,
             thinkingStartTime: 100,
             streamingThinkingDuration: 50,
-            queuedMessages: ['next'],
+            queuedMessages: [{ text: 'next' }],
             cacheMode: 'auto',
             cacheEffective: 'short',
             fileUndoViewEnabled: true,

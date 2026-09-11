@@ -47,6 +47,12 @@ const TextCommandFields = {
     files: Type.Optional(Type.Array(FileAttachmentSchema)),
 };
 
+const QueuedMessageSchema = Type.Object({
+    text: Type.String(),
+    images: Type.Optional(Type.Array(ImageAttachmentSchema)),
+    files: Type.Optional(Type.Array(FileAttachmentSchema)),
+}, StrictObject);
+
 export const AgentClientMessageSchema = Type.Union([
     Type.Object({ type: Type.Literal('prompt'), ...TextCommandFields }, StrictObject),
     Type.Object({ type: Type.Literal('steer'), ...TextCommandFields }, StrictObject),
@@ -91,7 +97,7 @@ export const AgentClientMessageSchema = Type.Union([
         query: Type.String(),
         requestId: Type.Number(),
     }, StrictObject),
-    Type.Object({ type: Type.Literal('queueMessage'), text: Type.String() }, StrictObject),
+    Type.Object({ type: Type.Literal('queueMessage'), ...TextCommandFields }, StrictObject),
     Type.Object({
         type: Type.Literal('editQueuedMessage'),
         index: Type.Integer({ minimum: 0 }),
@@ -324,7 +330,7 @@ const SerializedAgentStateSchema = Type.Object({
     isThinking: Type.Optional(Type.Boolean()),
     thinkingStartTime: Type.Optional(Type.Number()),
     streamingThinkingDuration: Type.Optional(Type.Number()),
-    queuedMessages: Type.Optional(Type.Array(Type.String())),
+    queuedMessages: Type.Optional(Type.Array(QueuedMessageSchema)),
     cacheMode: Type.Optional(CacheModeSchema),
     cacheEffective: Type.Optional(Type.Union([Type.Literal('short'), Type.Literal('long')])),
     fileUndoViewEnabled: Type.Optional(Type.Boolean()),

@@ -370,7 +370,7 @@ describe('portable ChatHost', () => {
     it('settles events and reserves queued work before asynchronous dispatch', async () => {
         const { host, chat, effects, eventEffects, order } = createHarness();
         const tab = createTab('tab-1') as any;
-        tab.queuedMessages = ['next'];
+        tab.queuedMessages = [{ text: 'next' }];
         tab.session.isStreaming = false;
         host.register(tab, { activate: true });
         chat.settleAgent.mockReturnValueOnce({ tabName: 'tab-1', outcome: 'success', durationMs: 10 });
@@ -391,7 +391,7 @@ describe('portable ChatHost', () => {
     it('releases the queue when a compaction outside a run ends', async () => {
         const { host, chat, eventEffects, order } = createHarness();
         const tab = createTab('tab-1') as any;
-        tab.queuedMessages = ['after compaction'];
+        tab.queuedMessages = [{ text: 'after compaction' }];
         tab.session.isStreaming = false;
         host.register(tab, { activate: true });
         chat.reserveQueuedDispatch.mockImplementationOnce(() => {
@@ -411,7 +411,7 @@ describe('portable ChatHost', () => {
     it('leaves the queue alone when a compaction ends inside an open run', async () => {
         const { host, chat, eventEffects } = createHarness();
         const tab = createTab('tab-1') as any;
-        tab.queuedMessages = ['after the turn'];
+        tab.queuedMessages = [{ text: 'after the turn' }];
         tab.session.isStreaming = true;
         host.register(tab, { activate: true });
 

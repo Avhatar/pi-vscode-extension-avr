@@ -1,5 +1,5 @@
 import { marked } from 'marked';
-import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, DeepSeekUsageSnapshot, ImageAttachment, FileAttachment, WorkspaceFileSuggestion, PendingToolInfo, TranscriptPage } from '../shared/protocol';
+import type { ClientMessage, ServerMessage, SerializedAgentState, FileChangeInfo, TabInfo, SkillInfo, CodexUsageSnapshot, DeepSeekUsageSnapshot, ImageAttachment, FileAttachment, QueuedMessage, WorkspaceFileSuggestion, PendingToolInfo, TranscriptPage } from '../shared/protocol';
 import { getCacheCapability } from '../shared/cache-info';
 import { isCodexUsageStale, selectCodexUsageBucket } from '../shared/codex-usage';
 import { formatUsdAmount } from '../shared/deepseek-usage';
@@ -225,7 +225,7 @@ const state: {
     tabs: TabInfo[];
     activeTabId: string;
     skills: SkillInfo[];
-    queuedMessages: string[];
+    queuedMessages: QueuedMessage[];
     codexUsage: CodexUsageSnapshot | null;
     codexUsageError: string | null;
     deepSeekUsage: DeepSeekUsageSnapshot | null;
@@ -1772,17 +1772,25 @@ function updateQueuedMessageBanner(): void {
         </summary>
         <div class="queued-list">
             ${state.queuedMessages.map((msg, i) => {
+                const attachmentCount = (msg.images?.length ?? 0) + (msg.files?.length ?? 0);
+                const attachmentLabels: string[] = [];
+                if (msg.images?.length) attachmentLabels.push(`${msg.images.length} image${msg.images.length === 1 ? '' : 's'}`);
+                if (msg.files?.length) attachmentLabels.push(`${msg.files.length} file${msg.files.length === 1 ? '' : 's'}`);
+                const attachmentChip = attachmentCount > 0
+                    ? `<span class="queued-item-attachments" title="${escAttr(attachmentLabels.join(', '))}">&#128206; ${escHtml(attachmentLabels.join(', '))}</span>`
+                    : '';
                 if (i === queuedEditingIndex) {
                     return `<div class="queued-item queued-item-editing" data-index="${i}">
                         <span class="queued-item-icon">&#9675;</span>
-                        <input class="queued-edit-input" data-index="${i}" type="text" value="${escAttr(msg)}">
+                        <input class="queued-edit-input" data-index="${i}" type="text" value="${escAttr(msg.text)}">
                         <button class="queued-edit-save" data-index="${i}" title="Save">&#10003;</button>
                         <button class="queued-edit-cancel" data-index="${i}" title="Cancel">&#10005;</button>
                     </div>`;
                 }
                 return `<div class="queued-item" data-index="${i}">
                     <span class="queued-item-icon">&#9675;</span>
-                    <span class="queued-item-text">${escHtml(msg)}</span>
+                    <span class="queued-item-text">${escHtml(msg.text)}</span>
+                    ${attachmentChip}
                     <span class="queued-item-actions">
                         <button class="queued-item-btn queued-item-edit" data-index="${i}" title="Edit"><img class="queued-btn-icon" src="${iconsBaseUri}/pencil.png" alt="edit"></button>
                         <button class="queued-item-btn queued-item-delete" data-index="${i}" title="Remove"><img class="queued-btn-icon" src="${iconsBaseUri}/trash.png" alt="remove"></button>
@@ -4785,7 +4793,20 @@ function submitInput(options: { steerRequested: boolean }): void {
         vscode.postMessage({ type: 'steer', text });
         showSteerToast(text);
     } else {
-        vscode.postMessage({ type: 'queueMessage', text });
+        // Queue path: carry the current attachments so the queued turn dispatches
+        // with the same images and files a direct send would have.
+        const images = currentImageAttachments.length > 0 ? [...currentImageAttachments] : undefined;
+        const files = currentFileAttachments.length > 0 ? [...currentFileAttachments] : undefined;
+        if (images?.length && !currentModelSupportsImages()) {
+            showError('The current model does not support images. Select an image-capable model before sending image attachments.');
+            return;
+        }
+        const queuedText = text || createAttachmentOnlyPromptText(
+            images?.length ?? 0,
+            files?.map(file => file.name) ?? [],
+        );
+        vscode.postMessage({ type: 'queueMessage', text: queuedText, images, files });
+        clearAttachments();
     }
     input.value = '';
     input.style.height = 'auto';

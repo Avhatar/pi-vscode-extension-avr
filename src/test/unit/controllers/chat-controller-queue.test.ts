@@ -8,11 +8,12 @@ import { EventRouter } from '../../../pi/events';
 interface FakeSession {
     readonly events: EventRouter;
     readonly prompts: string[];
+    readonly promptCalls: Array<{ text: string; images?: any[]; files?: any[] }>;
     readonly todoStore: { subscribe(listener: () => void): () => void };
     readonly session: undefined;
     readonly sessionPath: undefined;
     readonly isStreaming: boolean;
-    prompt(text: string): Promise<void>;
+    prompt(text: string, images?: any[], files?: any[]): Promise<void>;
     compact(instructions?: string): Promise<void>;
     getMessages(): any[];
     getFirstTranscriptUserMessage(): undefined;
@@ -58,36 +59,36 @@ describe('ChatController queued messages', () => {
 
         expect(firstTab.session.prompts).toEqual([]);
         expect(secondTab.session.prompts).toEqual([]);
-        expect(firstTab.queuedMessages).toEqual(['a-1', 'a-2']);
-        expect(secondTab.queuedMessages).toEqual(['b-1']);
+        expect(firstTab.queuedMessages).toEqual([{ text: 'a-1' }, { text: 'a-2' }]);
+        expect(secondTab.queuedMessages).toEqual([{ text: 'b-1' }]);
 
         firstTab.session.events.dispatch({ type: 'agent_end' } as any);
         await vi.waitFor(() => expect(firstTab.isStreamingLocal).toBe(false));
-        expect(firstTab.queuedMessages).toEqual(['a-1', 'a-2']);
+        expect(firstTab.queuedMessages).toEqual([{ text: 'a-1' }, { text: 'a-2' }]);
         expect(firstTab.session.prompts).toEqual([]);
 
         const firstPrompt = firstTab.session.waitForNextPrompt();
         firstTab.session.markIdle();
         firstTab.session.events.dispatch({ type: 'agent_settled' } as any);
         await expect(firstPrompt).resolves.toBe('a-1');
-        expect(firstTab.queuedMessages).toEqual(['a-2']);
-        expect(secondTab.queuedMessages).toEqual(['b-1']);
+        expect(firstTab.queuedMessages).toEqual([{ text: 'a-2' }]);
+        expect(secondTab.queuedMessages).toEqual([{ text: 'b-1' }]);
         expect(secondTab.session.prompts).toEqual([]);
 
         firstTab.session.events.dispatch({ type: 'agent_end' } as any);
         await vi.waitFor(() => expect(firstTab.isStreamingLocal).toBe(false));
-        expect(firstTab.queuedMessages).toEqual(['a-2']);
+        expect(firstTab.queuedMessages).toEqual([{ text: 'a-2' }]);
 
         const secondPrompt = firstTab.session.waitForNextPrompt();
         firstTab.session.markIdle();
         firstTab.session.events.dispatch({ type: 'agent_settled' } as any);
         await expect(secondPrompt).resolves.toBe('a-2');
         expect(firstTab.queuedMessages).toEqual([]);
-        expect(secondTab.queuedMessages).toEqual(['b-1']);
+        expect(secondTab.queuedMessages).toEqual([{ text: 'b-1' }]);
 
         secondTab.session.events.dispatch({ type: 'agent_end' } as any);
         await vi.waitFor(() => expect(secondTab.isStreamingLocal).toBe(false));
-        expect(secondTab.queuedMessages).toEqual(['b-1']);
+        expect(secondTab.queuedMessages).toEqual([{ text: 'b-1' }]);
 
         const otherTabPrompt = secondTab.session.waitForNextPrompt();
         secondTab.session.markIdle();
@@ -99,6 +100,32 @@ describe('ChatController queued messages', () => {
         expect(secondTab.session.prompts).toEqual(['b-1']);
         expect(firstTab.checkpointManager.startTurn.mock.calls).toEqual([[1], [2]]);
         expect(secondTab.checkpointManager.startTurn.mock.calls).toEqual([[1]]);
+    });
+
+    it('carries queued attachments through to the session prompt', async () => {
+        controller = createControllerHarness();
+        const tab = createTab('tab-a');
+        registerTab(controller, tab);
+        controller._subscribeTab(tab);
+
+        const images = [{ type: 'image', data: 'abc', mimeType: 'image/png' }];
+        const files = [{ type: 'file', data: 'Zg==', mimeType: 'text/plain', name: 'a.txt', size: 1 }];
+        await controller.handleMessage(
+            { type: 'queueMessage', text: 'look at this', images, files },
+            tab.id,
+        );
+        expect(tab.queuedMessages).toEqual([{ text: 'look at this', images, files }]);
+
+        tab.session.events.dispatch({ type: 'agent_end' } as any);
+        await vi.waitFor(() => expect(tab.isStreamingLocal).toBe(false));
+
+        const nextPrompt = tab.session.waitForNextPrompt();
+        tab.session.markIdle();
+        tab.session.events.dispatch({ type: 'agent_settled' } as any);
+        await expect(nextPrompt).resolves.toBe('look at this');
+
+        expect(tab.session.promptCalls).toEqual([{ text: 'look at this', images, files }]);
+        expect(tab.queuedMessages).toEqual([]);
     });
 
     it('reserves the tab while queued file mentions are prepared', async () => {
@@ -121,14 +148,14 @@ describe('ChatController queued messages', () => {
         await vi.waitFor(() => expect(controller._fileMentions.augmentPromptIfNeeded).toHaveBeenCalledOnce());
         expect(controller.sendStateSync).toHaveBeenCalledWith(tab.id);
         expect(tab.isStreamingLocal).toBe(true);
-        expect(tab.queuedMessages).toEqual(['read @slow-file']);
+        expect(tab.queuedMessages).toEqual([{ text: 'read @slow-file' }]);
 
         await controller.handleMessage({ type: 'queueMessage', text: 'second task' }, tab.id);
         const nextPrompt = tab.session.waitForNextPrompt();
         finishAugmentation('read expanded file');
 
         await expect(nextPrompt).resolves.toBe('read expanded file');
-        expect(tab.queuedMessages).toEqual(['second task']);
+        expect(tab.queuedMessages).toEqual([{ text: 'second task' }]);
         expect(tab.checkpointManager.startTurn).toHaveBeenCalledOnce();
     });
 
@@ -216,7 +243,7 @@ describe('ChatController queued messages', () => {
 
         tab.session.markIdle();
         tab.session.events.dispatch({ type: 'agent_settled' } as any);
-        await vi.waitFor(() => expect(tab.queuedMessages).toEqual(['after accounting']));
+        await vi.waitFor(() => expect(tab.queuedMessages).toEqual([{ text: 'after accounting' }]));
         expect(tab.session.prompts).toEqual([]);
         expect(tab.isStreamingLocal).toBe(true);
 
@@ -281,6 +308,7 @@ function createTab(id: string): any {
 function createFakeSession(): FakeSession {
     const promptWaiters: Array<(text: string) => void> = [];
     const prompts: string[] = [];
+    const promptCalls: Array<{ text: string; images?: any[]; files?: any[] }> = [];
     const events = new EventRouter();
     let isBusy = true;
     let promptFailure: 'before-start' | 'after-start' | undefined;
@@ -289,13 +317,14 @@ function createFakeSession(): FakeSession {
     return {
         events,
         prompts,
+        promptCalls,
         todoStore: { subscribe: () => () => undefined },
         session: undefined,
         sessionPath: undefined,
         get isStreaming(): boolean {
             return isBusy;
         },
-        async prompt(text: string): Promise<void> {
+        async prompt(text: string, images?: any[], files?: any[]): Promise<void> {
             if (isBusy) {
                 throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
             }
@@ -311,6 +340,7 @@ function createFakeSession(): FakeSession {
                 throw new Error('failed after agent_start');
             }
             prompts.push(text);
+            promptCalls.push({ text, images, files });
             promptWaiters.shift()?.(text);
         },
         compact: vi.fn(async () => undefined),
