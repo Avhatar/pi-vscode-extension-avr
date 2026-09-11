@@ -43,7 +43,7 @@ describe('TabRuntime', () => {
         expect(first.messageMeta).toEqual(new Map());
         expect(first.pendingTools).toEqual(new Map());
 
-        first.queuedMessages.push('first-only');
+        first.queuedMessages.push({ text: 'first-only' });
         first.messageMeta.set('1', { thinkingDurationSec: 1, messageEndTime: 2 });
         first.pendingTools.set('call-1', { name: 'read', startTime: 3 });
 
@@ -83,7 +83,7 @@ describe('TabRuntime', () => {
         runtime.agentStartTime = 12;
         runtime.totalTurnDurationMs = 13;
         runtime.messageMeta.set('0', { thinkingDurationSec: 1, messageEndTime: 2 });
-        runtime.queuedMessages.push('queued');
+        runtime.queuedMessages.push({ text: 'queued' });
         runtime.isStreamingLocal = true;
         runtime.isCompacting = true;
         runtime.lastTurnEndAt = 14;
@@ -189,13 +189,13 @@ describe('TabRuntime', () => {
     it('does not affect another tab when one runtime is disposed', async () => {
         const first = createRuntime('tab-a');
         const second = createRuntime('tab-b');
-        second.queuedMessages.push('keep');
+        second.queuedMessages.push({ text: 'keep' });
         const secondUnsubscribe = vi.fn();
         second.addSubscription(secondUnsubscribe);
 
         await first.disposeResources();
 
-        expect(second.queuedMessages).toEqual(['keep']);
+        expect(second.queuedMessages).toEqual([{ text: 'keep' }]);
         expect(secondUnsubscribe).not.toHaveBeenCalled();
         expect(second.session.dispose).not.toHaveBeenCalled();
     });

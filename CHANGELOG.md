@@ -9,6 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - GPT-6 Astra is now offered in the model picker, both for a direct OpenAI API key and for a ChatGPT subscription through Codex. Its full 1,050,000-token context window is reported on the direct API, where the published catalog understates it as 272,000; on Codex the window keeps coming from your own account's catalog, because that figure is plan-specific.
+- Images and files can now be queued while the agent is streaming. Pressing Enter with attachments during a response no longer refuses them with "Attachments cannot be queued while the agent is busy" — the message and its attachments join the queue and dispatch together on the next turn, exactly as a direct send would. Queued items with attachments show a paper-clip count in the queue list, and editing a queued item still changes only its text, leaving its attachments intact. Mid-stream steering (Ctrl/Cmd+Enter) stays text-only because a live turn cannot carry attachments, so a steer submitted with attachments queues for the next turn instead; a `/compact` command with attachments is still refused.
 
 ### Changed
 - The download is no longer more than twice its previous size. Updating the bundled Pi SDK pulled in prebuilt compiler binaries for twenty-six operating systems, of which any given machine can use one and this extension uses none; excluding them brings the package back to its usual size.

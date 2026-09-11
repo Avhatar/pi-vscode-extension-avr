@@ -4,6 +4,7 @@ import type {
     CodexTurnUsage,
     CodexUsageSnapshot,
     DeepSeekTurnUsage,
+    QueuedMessage,
 } from '../../shared/agent-protocol';
 import type { ProjectToolSelectionDefault } from '../../shared/project-tool-default';
 import type { SubagentStatEntry, ToolStatEntry } from '../../shared/tool-timing';
@@ -113,7 +114,7 @@ export class TabRuntime<
     readonly messageMeta: Map<string, TabMessageMeta>;
     readonly turnNotificationGate: TurnNotificationGate;
     hasNotification: boolean;
-    queuedMessages: string[];
+    queuedMessages: QueuedMessage[];
     queuedRetryHead?: string;
     queuedRetryAttempts: number;
     isStreamingLocal: boolean;

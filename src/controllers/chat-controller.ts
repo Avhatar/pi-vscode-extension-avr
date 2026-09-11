@@ -1320,9 +1320,9 @@ export class ChatController implements vscode.Disposable {
             decoratePrompt: (text) => decorateDirectPrompt(text, this._isPlanModeEnabledFor(tab)),
             augmentPrompt: (text) => this._fileMentions.augmentPromptIfNeeded(text),
             compact: (instructions) => tab.session.compact(instructions),
-            prompt: (text, onAgentStart) => {
+            prompt: (text, onAgentStart, images, files) => {
                 const stopWatchingAgentStart = tab.session.events.on('agent_start', onAgentStart);
-                return tab.session.prompt(text).finally(stopWatchingAgentStart);
+                return tab.session.prompt(text, images, files).finally(stopWatchingAgentStart);
             },
             isSessionStreaming: () => tab.session.isStreaming,
             handleLocalCommand: (text) => this._handleNameCommand(tab, text, false, false),

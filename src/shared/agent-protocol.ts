@@ -186,7 +186,7 @@ export interface SerializedAgentState {
     isThinking?: boolean;
     thinkingStartTime?: number;
     streamingThinkingDuration?: number;
-    queuedMessages?: string[];
+    queuedMessages?: QueuedMessage[];
     /** User preference for prompt cache retention. Global, persisted in extension state. */
     cacheMode?: CacheMode;
     /** Effective retention applied to the next request for this tab (computed in `auto`). */
@@ -224,6 +224,17 @@ export interface FileAttachment {
     name: string;
     size: number;
     binary?: boolean;
+}
+
+/**
+ * A message waiting in a tab's queue while the agent is busy. Carries the
+ * attachments captured at submit time so a queued turn dispatches with the same
+ * images and files a direct send would have, rather than silently dropping them.
+ */
+export interface QueuedMessage {
+    text: string;
+    images?: ImageAttachment[];
+    files?: FileAttachment[];
 }
 
 export interface SkillInfo {
@@ -272,7 +283,7 @@ export type AgentClientMessage =
     | { type: 'switchTab'; tabId: string }
     | { type: 'getSkills' }
     | { type: 'searchWorkspaceFiles'; query: string; requestId: number }
-    | { type: 'queueMessage'; text: string }
+    | { type: 'queueMessage'; text: string; images?: ImageAttachment[]; files?: FileAttachment[] }
     | { type: 'editQueuedMessage'; index: number; text: string }
     | { type: 'removeQueuedMessage'; index: number }
     | { type: 'cancelQueue' }
