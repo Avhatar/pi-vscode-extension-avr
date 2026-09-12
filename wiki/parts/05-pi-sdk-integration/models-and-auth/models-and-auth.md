@@ -13,6 +13,7 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 - `KNOWN_PROVIDERS` lists provider ids whose manual keys are synchronized from `pi-code.apiKey.<id>` secrets.
 - `getModelRuntime(secrets?)` dynamically imports the externalized SDK, coalesces initialization, caches the runtime, and optionally queues SecretStorage synchronization.
 - `reloadCredentials()` serially re-reads all known keys. Changed values call `setRuntimeApiKey()`; removed values call `removeRuntimeApiKey()`. Neither takes a network flag: the SDK synchronizes only the affected provider and hardcodes `allowNetwork: false`.
+- The pass reads every `KNOWN_PROVIDERS` secret up front with `Promise.all`, then applies them sequentially. Each read is an IPC round-trip to the host credential store, so reading them one at a time made the chain the dominant cost of session bring-up; applying stays sequential so one provider cannot disturb another.
 - Each provider in that pass is isolated by a `try`/`catch` that logs and continues, because the credential operations reject (`CredentialSynchronizationError`) on composition, catalog, and availability errors that earlier SDK releases only collected into a result map. A single unusable key would otherwise abort the loop, strand every provider behind it in `KNOWN_PROVIDERS`, and fail session bring-up. `appliedRuntimeKeys` records a provider only after success, so the next synchronization retries the failed one.
 - Both calls carry an `AbortSignal.timeout(CREDENTIAL_SYNC_TIMEOUT_MS)`. The SDK substitutes a never-firing `new AbortController().signal` when the caller passes none, and the availability half of the credential sync (`checkAuth`, `getAvailable`) is not covered by the `allowNetwork: false` the SDK applies to the catalog refresh — so an unbounded call can stall indefinitely on the network. A timeout surfaces as an ordinary rejection and is handled by the same per-provider `catch`.
 - `getProviderAccessToken(providerId)` resolves the current credential through `ModelRuntime.getAuth()`. This allows SDK-managed OAuth refresh and is used by account-scoped Codex and DeepSeek consumers.
@@ -21,9 +22,9 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 
 [src/pi/models.ts](../../../../src/pi/models.ts) projects model state:
 
-- `prepareModelRuntime(runtime, log?)` synchronizes custom providers, applies the DeepSeek vision catalog shim, and applies metadata.
+- `prepareModelRuntime(runtime, log?)` synchronizes custom providers, applies the DeepSeek catalog shim, and applies metadata.
 - `syncCustomProviders(runtime)` conditionally registers or unregisters `qwen` and `qwen-cn` according to Pi Code's applied SecretStorage override map (`hasRuntimeSecretOverride()`). Registration state is tracked per runtime with a `WeakMap`, so disposal/recreation is safe.
-- `syncDeepSeekVisionModel(runtime, log?)` applies the temporary DeepSeek vision entry and swallows failures after logging them, so a catalog shape it does not recognize cannot cost the user the whole model list.
+- `syncDeepSeekFlashModel(runtime, log?)` applies the temporary DeepSeek V4.1 Flash entry and swallows failures after logging them, so a catalog shape it does not recognize cannot cost the user the whole model list.
 - `refreshModelRuntime(log?)` refreshes the SDK snapshot without catalog networking, then re-runs custom-provider and metadata preparation.
 - `getAvailableModels(runtime)` converts `getAvailableSnapshot()` entries into shared `ModelInfo` values.
 - `findModel(runtime, provider, modelId)` delegates to `runtime.getModel()`.
@@ -34,7 +35,7 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 
 [src/pi/providers/qwen.ts](../../../../src/pi/providers/qwen.ts) registers DashScope's international and China endpoints directly on the runtime. Their models use Qwen-specific flags such as `supportsDeveloperRole: false`, `supportsStore: false`, `supportsLongCacheRetention: false`, and `thinkingFormat: 'qwen'`.
 
-[src/pi/providers/deepseek.ts](../../../../src/pi/providers/deepseek.ts) adds `deepseek-v4-flash-vision-exp` to the built-in `deepseek` provider until the SDK catalog carries it. `registerDeepSeekVisionModel(runtime)` clones the provider's existing models verbatim and appends one entry derived from `deepseek-v4-flash` with `input: ['text', 'image']`; the SDK stays the source of truth for cost, context window, `compat`, and thinking levels. Unlike the Qwen registrations this composes over a provider the SDK already ships, so API-key resolution and streaming stay with the built-in provider and no placeholder key is needed. The shim skips itself when `runtime.getModel()` already resolves the vision id — which makes repeated preparation idempotent and retires the shim automatically once an SDK release ships the model — and when the `deepseek-v4-flash` template is absent.
+[src/pi/providers/deepseek.ts](../../../../src/pi/providers/deepseek.ts) adds `deepseek-flash` (DeepSeek V4.1 Flash, released 2026-09-10) to the built-in `deepseek` provider until the SDK catalog carries it. `registerDeepSeekFlashModel(runtime)` clones the provider's existing models and appends one entry derived from `deepseek-v4-flash` with `input: ['text', 'image']` and the published V4.1 prices; the SDK stays the source of truth for context window, `compat`, and thinking levels. The same pass corrects the two ids DeepSeek retired and now routes to V4.1 Flash — `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` — because a catalog generated before the release describes the old SKUs: it adds `image` to their `input` whenever it is missing, and replaces the cost only when the entry still quotes the exact superseded V4 triple (`0.14` / `0.28` / `0.0028`). `deepseek-v4-pro` is deliberately excluded; it is still served under its own id. Unlike the Qwen registrations this composes over a provider the SDK already ships, so API-key resolution and streaming stay with the built-in provider and no placeholder key is needed. The shim skips itself when `runtime.getModel()` already resolves `deepseek-flash` — which makes repeated preparation idempotent and retires shim and corrections together once an SDK release ships the model, since a catalog new enough to carry V4.1 Flash is regenerated from a `models.dev` that has already repriced the routed ids — and when the `deepseek-v4-flash` template is absent.
 
 [src/providers/settings-panel.ts](../../../../src/providers/settings-panel.ts) projects OAuth-capable providers from `runtime.getProviders()`, checks sign-in state with `runtime.checkAuth()`, and invokes `runtime.login(providerId, 'oauth', interaction)` or `runtime.logout(providerId)`. [`OAuthLoginFlow`](../../../../src/pi/oauth-login-flow.ts) implements the SDK `AuthInteraction` contract with prompt, selection, browser, device-code, notification, and cancellation UI states.
 
@@ -63,13 +64,13 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 - `registerQwenProvider(runtime, baseUrl?)`, `registerQwenCnProvider(runtime, baseUrl?)`
 
 **Methods — DeepSeek catalog shim:**
-- `registerDeepSeekVisionModel(runtime)`
+- `registerDeepSeekFlashModel(runtime)`
 
 **Markers:**
 - SecretStorage prefix: `pi-code.apiKey.`
 - Codex catalog freshness: 24 hours per account, with stale-while-revalidate behavior
 - `DOCUMENTED_API_OVERRIDES`
-- `DEEPSEEK_VISION_MODEL_ID`, `DEEPSEEK_VISION_MODEL_NAME`
+- `DEEPSEEK_FLASH_MODEL_ID`, `DEEPSEEK_FLASH_MODEL_NAME`, `ROUTED_MODEL_IDS`
 
 ## Lifecycle edges
 
@@ -94,4 +95,5 @@ Pi Code creates the runtime with model-catalog networking disabled. This keeps S
 - **Rule — every SDK credential call needs an explicit `signal`.** `operationSignal()` falls back to `new AbortController().signal`, which never fires, so an omitted signal means no timeout and no cancellation. Because `queueSecretSync` runs all synchronization on one process-wide promise chain, a single unbounded call does not merely stall its own provider — it blocks every later `getModelRuntime()`, and with it the creation of every new chat tab, with no error and no way to cancel from the UI.
 - **Rule — documented context-window corrections apply to the direct `openai` provider only.** The bundled `openai-codex` catalog lists every model at the same conservative 272K, but those windows are plan-specific and `applyCodexCatalogMetadata()` refreshes them from the user's authenticated catalog. Adding a documented value for a Codex entry would overwrite account truth with a guess, so `DOCUMENTED_API_OVERRIDES` entries must name `openai`.
 - **Rule — a catalog shim must retire itself.** Gate it on `runtime.getModel()` so an SDK release that ships the model wins automatically; otherwise the temporary entry outlives its reason and freezes stale metadata.
+- **Pitfall — a retired model id keeps answering under new metadata.** When a provider reroutes an old id to a successor, nothing fails: requests still succeed, and the catalog silently describes a model that is no longer being served. DeepSeek retired V4 Flash and V4 Flash Vision Exp with the 2026-09-10 V4.1 release and routes both names to V4.1 Flash, so the bundled entries understated the model's capability (`input: ['text']` on a multimodal model) and its price (`0.28` against `0.60` per million output tokens, which the DeepSeek balance ledger records verbatim). Correct capability whenever it is missing, but correct a price only when it matches the exact superseded value — a catalog quoting something else is fresher than the constant.
 - **Pitfall — `input` is the only image-capability signal.** `getAvailableModels()` derives `ModelInfo.supportsImages` from `model.input`, and the chat input refuses attachments on that basis, so a vision model missing from the catalog is unusable for images no matter what the provider API accepts. Mixed line-ups also need the [session-lifecycle](../session-lifecycle/session-lifecycle.md) image-compat guard.

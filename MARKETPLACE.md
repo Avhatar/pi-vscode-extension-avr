@@ -123,7 +123,7 @@ The extension warms up behind the scenes so the launcher sidebar and first chat 
 
 **Subscription (OAuth login):** Anthropic Claude Pro/Max, ChatGPT Plus/Pro/Codex, GitHub Copilot, Google Gemini CLI, Google Antigravity.
 
-DeepSeek's vision model is offered in the picker even when the bundled Pi SDK catalog predates it; the added entry retires itself once an SDK release ships the model.
+DeepSeek V4.1 Flash is offered in the picker even when the bundled Pi SDK catalog predates it, and the older DeepSeek names that now route to it are corrected to match; both adjustments retire themselves once an SDK release ships the model.
 
 ## Keyboard Shortcuts
 

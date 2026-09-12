@@ -9,10 +9,11 @@ interface ImageCapableModel {
 /**
  * Keep an image-bearing history sendable after switching to a text-only model.
  *
- * Providers with mixed line-ups (DeepSeek ships vision as a separate model,
- * while Anthropic and OpenAI make every current model multimodal) make this
- * switch routine: attach a screenshot on the vision model, then move back to
- * the stronger text-only model in the same chat. The chat panel only blocks
+ * Providers with mixed line-ups (DeepSeek's Flash models take images while V4
+ * Pro is text-only, whereas Anthropic and OpenAI make every current model
+ * multimodal) make this switch routine: attach a screenshot on an
+ * image-capable model, then move to the stronger text-only model in the same
+ * chat. The chat panel only blocks
  * *new* attachments for a text-only model; images already in the history would
  * still be serialized, and the `openai-completions` request builder emits image
  * blocks from user messages without checking `model.input`, so the next request

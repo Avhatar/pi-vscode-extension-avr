@@ -115,8 +115,17 @@ async function queueSecretSync(runtime: ModelRuntime, secrets: SecretStore): Pro
  * arrives here as a rejection like any other failure.
  */
 async function applySecretsToRuntime(runtime: ModelRuntime, secrets: SecretStore): Promise<void> {
-    for (const provider of KNOWN_PROVIDERS) {
-        const key = await secrets.get(`${API_KEY_PREFIX}${provider}`);
+    // Read every key first, concurrently. Each read is an IPC round-trip to the
+    // host's credential store, so doing them one at a time cost roughly as many
+    // round-trips as there are providers — the dominant term in session
+    // bring-up. The reads are independent; only the applying below must stay
+    // sequential, so one provider's failure cannot disturb another's.
+    const storedKeys = await Promise.all(
+        KNOWN_PROVIDERS.map((provider) => secrets.get(`${API_KEY_PREFIX}${provider}`)),
+    );
+
+    for (const [index, provider] of KNOWN_PROVIDERS.entries()) {
+        const key = storedKeys[index];
         const applied = appliedRuntimeKeys.get(provider);
         try {
             if (key) {

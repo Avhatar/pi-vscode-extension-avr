@@ -113,7 +113,20 @@ export async function activate(context: vscode.ExtensionContext) {
         );
         const prewarmFull = vscode.workspace.getConfiguration('pi-code').get<boolean>('prewarm.full', false);
         if (prewarmFull) {
-            await perf.time('activation.session.initialize', () => initialSession.initialize());
+            // Warm the full bring-up in the background rather than awaiting it.
+            // Everything below — the secret subscription, the view providers,
+            // the commands — registers only after `activate()` returns, so
+            // holding activation for a multi-second bring-up leaves the Pi Code
+            // panel with nothing to draw and reads as a frozen window. The
+            // lightweight branch already runs the whole activation against an
+            // uninitialized session, which is what makes deferring safe here.
+            perf.event('activation.session.prewarm.full.dispatched');
+            void perf.time('activation.session.initialize', () => initialSession.initialize()).then(
+                () => perf.event('activation.session.prewarm.full.ready'),
+                (err) => outputChannel.appendLine(
+                    `Full session prewarm failed: ${err instanceof Error ? err.message : String(err)}`,
+                ),
+            );
         } else {
             // Lightweight prewarm: warm Node's module cache for the Pi SDK so
             // the first user click no longer pays the ~1s dynamic-import cost.
