@@ -6,9 +6,14 @@ import {
 } from './codex-catalog-cache';
 
 const CODEX_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models';
-// GPT-5.6 requires Codex client 0.144.0 or newer. This value is used only to
-// select compatible server catalog entries; Pi Code does not emulate Codex CLI.
-const CODEX_MODELS_CLIENT_VERSION = '0.144.0';
+// GPT-6 Astra declares `minimal_client_version: 0.153.0`, so any lower value
+// hides it from the response entirely and the account catalog silently stops
+// correcting it — it then keeps the bundled 272K window. Verified against the
+// live endpoint: 0.144.0 returns seven models without Astra, 0.153.0 and newer
+// return eight with identical metadata for the others. This value is used only
+// to select compatible server catalog entries; Pi Code does not emulate Codex CLI.
+const CODEX_MODELS_CLIENT_VERSION = '0.153.0';
+const GPT_54_MODEL_IDS = ['gpt-5.4', 'gpt-5.5'] as const;
 const GPT_56_MODEL_IDS = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const;
 const GPT_6_MODEL_IDS = ['gpt-6-astra'] as const;
 
@@ -28,6 +33,24 @@ type ContextWindowOverride = {
     correctedValue: number;
 };
 
+type CodexCostRates = {
+    input: number;
+    output: number;
+    cacheRead: number;
+};
+
+type CodexLongContextExemption = {
+    modelId: string;
+    baseCost: CodexCostRates;
+    longContextCost: CodexCostRates;
+};
+
+/** The mutable slice of a runtime model's cost table this module rewrites. */
+type MutableModelCost = CodexCostRates & {
+    cacheWrite: number;
+    tiers?: (CodexCostRates & { inputTokensAbove: number; cacheWrite: number })[];
+};
+
 /**
  * The OpenAI Models API does not currently return context-window metadata.
  * Use the published direct-API limit while still allowing newer SDK metadata
@@ -40,6 +63,12 @@ type ContextWindowOverride = {
  * value for them would overwrite account truth with a guess.
  */
 const DOCUMENTED_API_OVERRIDES: readonly ContextWindowOverride[] = [
+    {
+        provider: 'openai',
+        modelIds: GPT_54_MODEL_IDS,
+        upstreamValue: 272_000,
+        correctedValue: 1_050_000,
+    },
     {
         provider: 'openai',
         modelIds: GPT_56_MODEL_IDS,
@@ -74,6 +103,7 @@ export async function refreshModelMetadata(
     fetchImpl: typeof fetch = fetch,
 ): Promise<number> {
     let corrected = applyDocumentedApiMetadata(runtime);
+    corrected += applyCodexLongContextExemptions(runtime);
     const accessToken = (await runtime.getAuth('openai-codex'))?.auth.apiKey;
     if (!accessToken) return corrected;
 
@@ -86,7 +116,13 @@ export async function refreshModelMetadata(
     }
 
     try {
-        const cachedCatalog = getCachedCodexCatalog(accountId);
+        // A catalog fetched for an older Codex client version is unusable rather
+        // than merely stale: the entry list itself differs, so a version bump
+        // waits for one fresh fetch instead of serving the previous shape.
+        const cached = getCachedCodexCatalog(accountId);
+        const cachedCatalog = cached?.clientVersion === CODEX_MODELS_CLIENT_VERSION
+            ? cached
+            : undefined;
         const isFresh = cachedCatalog
             ? Date.now() - cachedCatalog.capturedAt <= CODEX_CATALOG_FRESH_TTL_MS
             : false;
@@ -144,7 +180,7 @@ async function fetchAndCacheCodexCatalog(
         }).catch(() => undefined);
     }
     const catalog = await request;
-    setCachedCodexCatalog(accountId, catalog);
+    setCachedCodexCatalog(accountId, catalog, CODEX_MODELS_CLIENT_VERSION);
     return catalog;
 }
 
@@ -186,7 +222,16 @@ export function applyDocumentedApiMetadata(
     return corrected;
 }
 
-/** Apply context windows returned by the authenticated Codex catalog. */
+/**
+ * Apply the context window the authenticated Codex catalog declares.
+ *
+ * `context_window` is the conservative window the account starts with and
+ * `max_context_window` is the ceiling the same account may use: the upstream
+ * Codex client reads the first by default and clamps an explicit
+ * `model_context_window` to the second. Pi Code has no such opt-in, so it uses
+ * the ceiling — that is what makes a large-context model usable at all, and the
+ * footer marks the point where the pricier long-context tier begins.
+ */
 export function applyCodexCatalogMetadata(
     runtime: Pick<ModelRuntime, 'getModels'>,
     catalog: readonly CodexCatalogModel[],
@@ -196,11 +241,72 @@ export function applyCodexCatalogMetadata(
     for (const model of runtime.getModels()) {
         if (model.provider !== 'openai-codex') continue;
         const remote = bySlug.get(model.id);
-        if (!remote || model.contextWindow === remote.contextWindow) continue;
-        model.contextWindow = remote.contextWindow;
+        if (!remote) continue;
+        const contextWindow = remote.maxContextWindow !== undefined
+            && remote.maxContextWindow > remote.contextWindow
+            ? remote.maxContextWindow
+            : remote.contextWindow;
+        if (model.contextWindow === contextWindow) continue;
+        model.contextWindow = contextWindow;
         corrected += 1;
     }
     return corrected;
+}
+
+/**
+ * OpenAI's rate card carves GPT-6 Astra out of the long-context multiplier
+ * inside Codex: "GPT-6 Astra usage in Codex does not incur additional
+ * long-context multipliers above 272K input tokens", while the same model on
+ * the direct API — and every other Codex model — still pays 2x input and 1.5x
+ * output above that threshold. The bundled catalog expresses the multiplier as
+ * a `cost.tiers` entry, so the exemption has to remove it: Pi Code would
+ * otherwise overstate Astra's Codex cost and, worse, warn about a pricier
+ * window Codex does not charge for.
+ *
+ * As in `DOCUMENTED_API_OVERRIDES`, a correction applies only to the exact
+ * published figures — a catalog quoting anything else knows more than this
+ * constant does, and rewriting its tier would replace fresher data with a guess.
+ */
+const CODEX_LONG_CONTEXT_EXEMPTIONS: readonly CodexLongContextExemption[] = [
+    {
+        modelId: 'gpt-6-astra',
+        baseCost: { input: 10, cacheRead: 1, output: 50 },
+        longContextCost: { input: 20, cacheRead: 2, output: 75 },
+    },
+];
+
+/** The Codex long-context threshold the exempted tiers above are keyed on. */
+const CODEX_LONG_CONTEXT_THRESHOLD = 272_000;
+
+/** Remove the long-context tier OpenAI does not charge inside Codex. */
+export function applyCodexLongContextExemptions(
+    runtime: Pick<ModelRuntime, 'getModels'>,
+): number {
+    let corrected = 0;
+    for (const model of runtime.getModels()) {
+        if (model.provider !== 'openai-codex') continue;
+        const exemption = CODEX_LONG_CONTEXT_EXEMPTIONS.find(candidate => candidate.modelId === model.id);
+        if (!exemption) continue;
+        const cost = model.cost as MutableModelCost | undefined;
+        if (!cost || !isExemptLongContextCost(cost, exemption)) continue;
+        cost.tiers = cost.tiers!.filter(tier => tier.inputTokensAbove !== CODEX_LONG_CONTEXT_THRESHOLD);
+        corrected += 1;
+    }
+    return corrected;
+}
+
+function isExemptLongContextCost(cost: MutableModelCost, exemption: CodexLongContextExemption): boolean {
+    if (cost.input !== exemption.baseCost.input
+        || cost.output !== exemption.baseCost.output
+        || cost.cacheRead !== exemption.baseCost.cacheRead) {
+        return false;
+    }
+    return !!cost.tiers?.some(tier =>
+        tier.inputTokensAbove === CODEX_LONG_CONTEXT_THRESHOLD
+        && tier.input === exemption.longContextCost.input
+        && tier.output === exemption.longContextCost.output
+        && tier.cacheRead === exemption.longContextCost.cacheRead,
+    );
 }
 
 /** Parse only catalog fields that affect context accounting. */

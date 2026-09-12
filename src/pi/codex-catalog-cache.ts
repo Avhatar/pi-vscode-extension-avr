@@ -22,6 +22,14 @@ export interface CachedCatalogModel {
 export interface CachedCatalogEntry {
     models: CachedCatalogModel[];
     capturedAt: number;
+    /**
+     * Codex client version this catalog was fetched for. The endpoint filters
+     * the model list by that version, so an entry fetched for an older version
+     * is unusable rather than merely stale — see `CODEX_MODELS_CLIENT_VERSION`.
+     * Absent on entries persisted before the version was recorded, which is
+     * therefore treated as a mismatch and refetched once.
+     */
+    clientVersion?: string;
 }
 
 let store: StateStore | undefined;
@@ -48,8 +56,12 @@ export function getCachedCodexCatalog(accountId: string): CachedCatalogEntry | u
     return inMemory[accountId];
 }
 
-export function setCachedCodexCatalog(accountId: string, models: CachedCatalogModel[]): void {
-    inMemory[accountId] = { models, capturedAt: Date.now() };
+export function setCachedCodexCatalog(
+    accountId: string,
+    models: CachedCatalogModel[],
+    clientVersion: string,
+): void {
+    inMemory[accountId] = { models, capturedAt: Date.now(), clientVersion };
     if (store) void store.update(STORE_KEY, inMemory);
 }
 
@@ -65,5 +77,6 @@ function isValidEntry(value: unknown): value is CachedCatalogEntry {
     const entry = value as Partial<CachedCatalogEntry>;
     return Array.isArray(entry.models)
         && typeof entry.capturedAt === 'number'
-        && entry.capturedAt > 0;
+        && entry.capturedAt > 0
+        && (entry.clientVersion === undefined || typeof entry.clientVersion === 'string');
 }

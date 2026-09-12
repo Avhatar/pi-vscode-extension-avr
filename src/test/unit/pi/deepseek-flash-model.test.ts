@@ -25,6 +25,8 @@ const THINKING_LEVEL_MAP = {
 const RETIRED_COST = { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 };
 /** The prices DeepSeek published for V4.1 Flash on 2026-09-10. */
 const CURRENT_COST = { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 };
+/** The off-peak V4 Pro prices DeepSeek published on 2026-09-10. */
+const CURRENT_PRO_COST = { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 };
 
 /** Mirrors the metadata the bundled Pi catalog ships for DeepSeek. */
 function flashModel(id = 'deepseek-v4-flash', name = 'DeepSeek V4 Flash') {
@@ -135,23 +137,27 @@ describe('DeepSeek V4.1 Flash catalog shim', () => {
         });
     });
 
-    it('leaves models DeepSeek still serves under their own id alone', () => {
+    it('reprices V4 Pro without giving it image input', () => {
         const runtime = createRuntime(catalogModels());
         registerDeepSeekFlashModel(runtime as any);
 
+        // DeepSeek kept serving V4 Pro under its own id and reversed the
+        // announced reroute to V4.1 Flash, so only its prices moved.
         expect(runtime.getModel('deepseek', 'deepseek-v4-pro')).toMatchObject({
             input: ['text'],
-            cost: proModel().cost,
+            cost: CURRENT_PRO_COST,
         });
     });
 
     it('keeps prices the SDK already changed', () => {
         const repriced = { ...flashModel(), cost: { input: 0.2, output: 0.8, cacheRead: 0.004, cacheWrite: 0 } };
-        const runtime = createRuntime([repriced, proModel()]);
+        const repricedPro = { ...proModel(), cost: { input: 0.7, output: 2.1, cacheRead: 0.03, cacheWrite: 0 } };
+        const runtime = createRuntime([repriced, repricedPro]);
 
         registerDeepSeekFlashModel(runtime as any);
 
         expect(runtime.getModel('deepseek', 'deepseek-v4-flash')!.cost).toEqual(repriced.cost);
+        expect(runtime.getModel('deepseek', 'deepseek-v4-pro')!.cost).toEqual(repricedPro.cost);
         // The new entry still carries the published V4.1 prices rather than
         // inheriting an unrecognized template cost.
         expect(runtime.getModel('deepseek', DEEPSEEK_FLASH_MODEL_ID)!.cost).toMatchObject(CURRENT_COST);
@@ -237,7 +243,10 @@ describe('DeepSeek V4.1 Flash shim against the bundled SDK catalog', () => {
         expect(legacy?.input).toContain('image');
         expect(legacy?.cost).toMatchObject({ input: 0.15, output: 0.6 });
         expect(runtime.getModel('deepseek', 'deepseek-v4-flash-vision-exp')?.input).toContain('image');
-        expect(runtime.getModel('deepseek', 'deepseek-v4-pro')?.input).toEqual(['text']);
+        // V4 Pro keeps its own id and text-only input, with the current prices.
+        const pro = runtime.getModel('deepseek', 'deepseek-v4-pro');
+        expect(pro?.input).toEqual(['text']);
+        expect(pro?.cost).toMatchObject(CURRENT_PRO_COST);
     });
 
     it('keeps other providers untouched', () => {

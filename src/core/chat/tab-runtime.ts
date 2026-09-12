@@ -122,6 +122,8 @@ export class TabRuntime<
     codexTurnModelId?: string;
     deepSeekSessionCostBaseline?: number;
     deepSeekAccountFingerprint?: string;
+    /** DeepSeek peak/off-peak multiplier captured when the turn started. */
+    deepSeekRateMultiplier?: number;
     errorReportedThisRun: boolean;
     lastTurnEndAt: number;
     maxIdleGapMs: number;

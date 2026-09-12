@@ -17,6 +17,13 @@ export interface ContextUsageInfo {
     contextWindow: number;
     percent: number | null;
     estimated?: boolean;
+    /**
+     * Input-token threshold above which the selected model switches to a
+     * pricier tier (OpenAI's long-context rate, for example). Absent when the
+     * model has one price at any context size. Read from the model's own cost
+     * table, so it follows catalog updates rather than a hardcoded number.
+     */
+    higherRateAboveTokens?: number;
 }
 
 export interface CodexUsageWindow {

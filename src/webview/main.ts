@@ -21,6 +21,7 @@ import {
     type MessageEventSource,
 } from './vscode-agent-connection';
 import { mergeStateMessages } from './interrupted-turn-notice';
+import { higherRateContextNotice } from './context-usage-chip';
 import { shouldShowFileUndoView } from './file-undo-view';
 import { createAttachmentOnlyPromptText, prepareUserMessageContent } from './user-message-content';
 import { shouldResumeAutoFollow } from './scroll-follow-state';
@@ -214,7 +215,7 @@ const state: {
     isWritingText: boolean;
     thinkingStartTime: number;
     streamingThinkingDuration: number;
-    contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null; estimated?: boolean };
+    contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null; estimated?: boolean; higherRateAboveTokens?: number };
     fileChanges: FileChangeInfo[];
     fileUndoViewEnabled: boolean;
     rollbackPoint: number | null;
@@ -1352,8 +1353,10 @@ function updateInputArea(): void {
         if (tokensK !== null && pct !== null) {
             const estimatePrefix = cu.estimated ? 'Approximate context' : 'Context';
             const estimateMark = cu.estimated ? '~' : '';
-            const title = `${estimatePrefix}: ${tokensK} / ${windowK} tokens (${pct}%). Click for context actions.`;
-            contextHtml = `<span class="footer-context footer-context-usage" title="${escAttr(title)}" role="button" tabindex="0">${estimateMark}${tokensK} / ${windowK} &middot; ${pct}%</span>`;
+            const higherRate = higherRateContextNotice(cu, formatTokenCount);
+            const rateClass = higherRate ? ' footer-context-usage--higher-rate' : '';
+            const title = `${estimatePrefix}: ${tokensK} / ${windowK} tokens (${pct}%).${higherRate?.note ?? ''} Click for context actions.`;
+            contextHtml = `<span class="footer-context footer-context-usage${rateClass}" title="${escAttr(title)}" role="button" tabindex="0">${estimateMark}${tokensK} / ${windowK} &middot; ${pct}%</span>`;
         } else {
             contextHtml = `<span class="footer-context footer-context-usage" title="Context window: ${escAttr(windowK)} tokens. Click for context actions." role="button" tabindex="0">${windowK}</span>`;
         }

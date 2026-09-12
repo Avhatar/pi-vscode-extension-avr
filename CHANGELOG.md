@@ -9,7 +9,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - DeepSeek V4.1 Flash is now offered in the model picker. DeepSeek released it as `deepseek-flash` on 10 September 2026, after the bundled catalog was generated, so Pi Code adds the model itself — with image input and the published prices — until a Pi SDK release carries it.
-- GPT-6 Astra is now offered in the model picker, both for a direct OpenAI API key and for a ChatGPT subscription through Codex. Its full 1,050,000-token context window is reported on the direct API, where the published catalog understates it as 272,000; on Codex the window keeps coming from your own account's catalog, because that figure is plan-specific.
+- GPT-6 Astra is now offered in the model picker, both for a direct OpenAI API key and for a ChatGPT subscription through Codex. Its full 1,050,000-token context window is reported on the direct API, where the published catalog understates it as 272,000; on Codex the window comes from your own account's catalog, which reports the plan-specific ceiling.
+- The context chip in the chat footer turns yellow once the conversation passes the point where the selected model switches to its more expensive long-context tier, and its tooltip says how far past that point you are and that compacting brings the context back below it. The threshold is read from the model's own price table, so it follows whatever your provider charges rather than a fixed number.
 
 ### Changed
 - Reloading the window no longer leaves the Pi Code panel blank while the agent warms up. With `pi-code.prewarm.full` enabled the extension used to hold its own activation until the whole session was ready, so the sidebar, the commands and the chat panels only appeared seconds later and the window looked frozen. The warm-up now runs in the background: everything is usable immediately, and the first chat still opens fast once it finishes.
@@ -29,6 +30,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Reopening a chat from history no longer corrupts the next message written to it.
 - Long conversations compact more reliably: an oversized tool result is no longer handed to the model before compaction runs, and compaction is no longer skipped outright when the provider reports no token usage while streaming.
 - Stopping a response on Windows no longer crashes the agent when `taskkill.exe` is missing from `PATH`.
+- GPT-6 Astra now uses the context window your own ChatGPT account grants it on Codex instead of a fixed 272,000. It was never learned from your account at all: Pi Code asked the model catalog using a client version older than the one Astra requires, so the entry was missing from the response and the conservative default stayed. The other Codex models that grant more than the default now use their own ceiling as well.
+- The direct OpenAI API reports the documented 1,050,000-token context window for GPT-5.4 and GPT-5.5 instead of 272,000.
+- DeepSeek spend is now booked at the rate the request was really charged. DeepSeek doubles its prices during peak hours, and the last-turn and daily figures were reporting the off-peak price for requests sent in them. Peak hours are 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday.
+- DeepSeek V4 Pro is priced at the rates DeepSeek publishes. DeepSeek reversed the announced move to V4.1 Flash and kept serving V4 Pro under its own name and prices, but the bundled catalog still carried the older, lower numbers, so every V4 Pro turn understated its cost.
 
 ## [0.72.0] - 2026-08-24
 

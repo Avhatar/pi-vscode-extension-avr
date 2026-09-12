@@ -3,7 +3,9 @@ import type { StateStore } from '../../../core/ports/chat-platform';
 import { DeepSeekUsageStore } from '../../../pi/deepseek-usage-store';
 import {
     computeDeepSeekTurnUsage,
+    deepSeekRateMultiplier,
     formatUsdAmount,
+    isDeepSeekPeakHour,
     parseDeepSeekBalancePayload,
 } from '../../../shared/deepseek-usage';
 import { isServerMessage } from '../../../shared/protocol-runtime';
@@ -69,13 +71,43 @@ describe('DeepSeek usage accounting', () => {
     });
 
     it('computes turn and cumulative session cost from monotonic SDK totals', () => {
-        expect(computeDeepSeekTurnUsage(1.25, 1.2542, 5000)).toEqual({
+        expect(computeDeepSeekTurnUsage(1.25, 1.2542, 5000, 1)).toEqual({
             turnCost: 0.0042,
             sessionCost: 1.2542,
             capturedAt: 5000,
         });
-        expect(computeDeepSeekTurnUsage(undefined, 1.2, 5000)).toBeUndefined();
-        expect(computeDeepSeekTurnUsage(2, 1, 5000)).toBeUndefined();
+        expect(computeDeepSeekTurnUsage(undefined, 1.2, 5000, 1)).toBeUndefined();
+        expect(computeDeepSeekTurnUsage(2, 1, 5000, 1)).toBeUndefined();
+    });
+
+    it('books a turn at the peak multiplier when it started inside a peak window', () => {
+        expect(computeDeepSeekTurnUsage(1.25, 1.2542, 5000, 2)).toEqual({
+            turnCost: 0.0084,
+            sessionCost: 1.2542,
+            capturedAt: 5000,
+        });
+    });
+
+    it('treats only DeepSeek weekday peak windows as peak', () => {
+        // Peak: 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday.
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 2, 30))).toBe(true);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 6, 0))).toBe(true);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 9, 59))).toBe(true);
+
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 0, 59))).toBe(false);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 1, 0))).toBe(true);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 3, 59))).toBe(true);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 4, 0))).toBe(false);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 5, 59))).toBe(false);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 10, 0))).toBe(false);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 14, 23, 0))).toBe(false);
+
+        // 2026-09-12 and 2026-09-13 are a Saturday and a Sunday.
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 12, 2, 0))).toBe(false);
+        expect(isDeepSeekPeakHour(Date.UTC(2026, 8, 13, 8, 0))).toBe(false);
+
+        expect(deepSeekRateMultiplier(Date.UTC(2026, 8, 14, 2, 0))).toBe(2);
+        expect(deepSeekRateMultiplier(Date.UTC(2026, 8, 14, 12, 0))).toBe(1);
     });
 
     it('formats USD with at most four decimals while keeping tiny non-zero costs visible', () => {

@@ -4,6 +4,12 @@ import type {
     DeepSeekUsageSnapshot,
 } from './agent-protocol';
 
+/** Peak hours run at twice the off-peak rate. */
+const DEEPSEEK_PEAK_MULTIPLIER = 2;
+
+/** UTC [startHour, endHour) windows DeepSeek charges peak rates in, weekdays only. */
+const DEEPSEEK_PEAK_WINDOWS_UTC: readonly (readonly [number, number])[] = [[1, 4], [6, 10]];
+
 export function parseDeepSeekBalancePayload(
     payload: unknown,
     capturedAt: number,
@@ -39,14 +45,38 @@ export function computeDeepSeekTurnUsage(
     beforeSessionCost: number | undefined,
     afterSessionCost: number | undefined,
     capturedAt: number,
+    rateMultiplier: number,
 ): DeepSeekTurnUsage | undefined {
     if (!isNonNegativeFinite(beforeSessionCost) || !isNonNegativeFinite(afterSessionCost)) return undefined;
     if (afterSessionCost < beforeSessionCost) return undefined;
     return {
-        turnCost: normalizeCost(afterSessionCost - beforeSessionCost),
+        turnCost: normalizeCost((afterSessionCost - beforeSessionCost) * rateMultiplier),
         sessionCost: normalizeCost(afterSessionCost),
         capturedAt,
     };
+}
+
+/**
+ * DeepSeek bills peak and off-peak rates, with off-peak at half of peak. Peak
+ * hours are 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday; every other
+ * hour is off-peak.
+ *
+ * The SDK prices DeepSeek turns at the off-peak rates, so the peak multiplier
+ * has to be applied where the spend is accounted. It is evaluated once, when
+ * the turn starts: a turn spans several provider requests and DeepSeek prices
+ * each request when it arrives, which this cannot model exactly.
+ */
+export function deepSeekRateMultiplier(at: number): number {
+    return isDeepSeekPeakHour(at) ? DEEPSEEK_PEAK_MULTIPLIER : 1;
+}
+
+/** Whether `at` falls inside one of DeepSeek's weekday peak windows. */
+export function isDeepSeekPeakHour(at: number): boolean {
+    const date = new Date(at);
+    const day = date.getUTCDay();
+    if (day === 0 || day === 6) return false;
+    const hour = date.getUTCHours();
+    return DEEPSEEK_PEAK_WINDOWS_UTC.some(([start, end]) => hour >= start && hour < end);
 }
 
 export function formatUsdAmount(value: number): string {

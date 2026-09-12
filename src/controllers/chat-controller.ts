@@ -59,7 +59,7 @@ import { onAuthChanged } from '../pi/auth';
 import { getCodexUsageStore } from '../pi/codex-usage-store';
 import { getDeepSeekUsageStore } from '../pi/deepseek-usage-store';
 import { computeCodexTurnUsage, isCodexUsageStale } from '../shared/codex-usage';
-import { computeDeepSeekTurnUsage } from '../shared/deepseek-usage';
+import { computeDeepSeekTurnUsage, deepSeekRateMultiplier } from '../shared/deepseek-usage';
 import type { SubagentCoordinator } from '../pi/subagents/coordinator';
 import { SubagentCapabilityGate } from '../pi/subagents/gating';
 import { projectSubagentLauncherSnapshot } from '../pi/subagents/launcher-state';
@@ -705,6 +705,11 @@ export class ChatController implements vscode.Disposable {
                     tab.deepSeekAccountFingerprint = currentModel?.provider === 'deepseek'
                         ? getDeepSeekUsageStore().getActiveFingerprint()
                         : undefined;
+                    // DeepSeek reprices its whole request by the hour it arrives in,
+                    // so the turn is booked at the rate in force when it started.
+                    tab.deepSeekRateMultiplier = currentModel?.provider === 'deepseek'
+                        ? deepSeekRateMultiplier(Date.now())
+                        : undefined;
                 },
                 streamingContextChanged: (isStreaming) => {
                     void vscode.commands.executeCommand(
@@ -734,10 +739,12 @@ export class ChatController implements vscode.Disposable {
                     const codexModelId = tab.codexTurnModelId;
                     const deepSeekBaseline = tab.deepSeekSessionCostBaseline;
                     const deepSeekAccountFingerprint = tab.deepSeekAccountFingerprint;
+                    const deepSeekRate = tab.deepSeekRateMultiplier;
                     tab.codexTurnBaseline = undefined;
                     tab.codexTurnModelId = undefined;
                     tab.deepSeekSessionCostBaseline = undefined;
                     tab.deepSeekAccountFingerprint = undefined;
+                    tab.deepSeekRateMultiplier = undefined;
 
                     if (codexModelId) await this._refreshCodexUsageForTab(tab, 'turn ended');
                     const codexTurn = computeCodexTurnUsage(
@@ -750,6 +757,7 @@ export class ChatController implements vscode.Disposable {
                         deepSeekBaseline,
                         deepSeekBaseline === undefined ? undefined : tab.session.getSessionCost(),
                         Date.now(),
+                        deepSeekRate ?? 1,
                     );
                     if (deepSeekBaseline !== undefined) {
                         void this._updateDeepSeekUsageAfterTurn(

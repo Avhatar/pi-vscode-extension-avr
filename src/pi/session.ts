@@ -49,7 +49,7 @@ import { TodoStore } from './todo/store';
 import { parseTodoPromptGuidelines } from './todo/tool';
 import { installEditToolPreflight } from './tools/preflight-edit';
 import { createToolSelectionGuard } from './tool-selection-guard';
-import { isContextUsageEstimated } from './context-usage';
+import { higherRateAboveTokens, isContextUsageEstimated } from './context-usage';
 import type { SubagentCoordinator } from './subagents/coordinator';
 import { SubagentManager } from './subagents/manager';
 import { PiChildSessionFactory, CHILD_BASH_TOOL, CHILD_SAFE_TOOLS } from './subagents/pi-child-session';
@@ -1160,7 +1160,26 @@ export class PiSessionManager {
             contextWindow: usage.contextWindow,
             percent,
             estimated,
+            higherRateAboveTokens: this._getHigherRateAboveTokens(),
         };
+    }
+
+    /**
+     * Input-token threshold above which the selected model switches to a
+     * pricier tier, read from the model's own cost table so it follows catalog
+     * updates and documented corrections instead of a hardcoded number. The
+     * runtime copy is authoritative: it is the object Pi Code corrects, and the
+     * session model can still be holding pre-correction metadata.
+     *
+     * @returns the threshold, or undefined when the model has one price at any
+     * context size.
+     */
+    private _getHigherRateAboveTokens(): number | undefined {
+        const current: any = this._session?.model;
+        if (!current || !this._modelRuntime) return undefined;
+        return higherRateAboveTokens(
+            findModel(this._modelRuntime, getProviderId(current), current.id) ?? current,
+        );
     }
 
     async showModelPicker(): Promise<void> {

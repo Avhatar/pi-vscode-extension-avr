@@ -1782,6 +1782,17 @@ body[data-mode="panel"] .input-container {
     color: var(--fg);
     outline: none;
 }
+/*
+ * The conversation has crossed the model's long-context threshold, so the next
+ * request is priced at the pricier tier. Repeated for the hover and focus
+ * variants because the rule above would otherwise repaint the text neutral.
+ */
+.footer-context-usage--higher-rate,
+.footer-context-usage--higher-rate:hover,
+.footer-context-usage--higher-rate:focus-visible {
+    color: var(--warning-fg);
+    box-shadow: inset 0 0 0 1px var(--warning-fg);
+}
 
 .footer-cache {
     font-size: 12px;

@@ -1,6 +1,6 @@
 # Chapter: models-and-auth
 
-Pi Code owns one process-wide Pi SDK `ModelRuntime`. The runtime unifies the model catalog, API-key and OAuth credential resolution, provider registration, and session-facing model lookup. Pi Code adds an opinionated `KNOWN_PROVIDERS` bridge from VS Code `SecretStorage`, conditionally registers Qwen international / China endpoints, and augments model metadata from documented limits and the authenticated Codex catalog.
+Pi Code owns one process-wide Pi SDK `ModelRuntime`. The runtime unifies the model catalog, API-key and OAuth credential resolution, provider registration, and session-facing model lookup. Pi Code adds an opinionated `KNOWN_PROVIDERS` bridge from VS Code `SecretStorage`, conditionally registers Qwen international / China endpoints, and augments model metadata from documented limits, the authenticated Codex catalog, and one documented Codex price exemption.
 
 ## Article roster
 

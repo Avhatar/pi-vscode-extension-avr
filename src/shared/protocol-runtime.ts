@@ -189,6 +189,7 @@ const ContextUsageInfoSchema = Type.Object({
     contextWindow: Type.Number(),
     percent: Type.Union([Type.Number(), Type.Null()]),
     estimated: Type.Optional(Type.Boolean()),
+    higherRateAboveTokens: Type.Optional(Type.Number()),
 }, StrictObject);
 const FileChangeInfoSchema = Type.Object({
     filePath: Type.String(),
