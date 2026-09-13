@@ -1557,7 +1557,37 @@ body[data-mode="panel"] .tab-strip,
 }
 
 body[data-mode="panel"] .input-container {
-    width: min(720px, 90%);
+    width: min(720px, calc(100% - 4px));
+    margin-top: 2px;
+    margin-right: auto;
+    margin-bottom: 2px;
+    margin-left: auto;
+}
+
+.input-details-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2px 4px;
+    margin: 0 2px 2px;
+    padding: 3px 4px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--input-bg);
+    flex-shrink: 0;
+    position: relative;
+    user-select: none;
+}
+
+.input-details-footer[hidden] {
+    display: none;
+}
+
+body[data-mode="panel"] .input-details-footer {
+    width: max-content;
+    min-width: min(720px, calc(100% - 4px));
+    max-width: calc(100% - 4px);
     margin-left: auto;
     margin-right: auto;
 }
@@ -1694,7 +1724,6 @@ body[data-mode="panel"] .input-container {
 /* ── Input footer ── */
 .input-footer {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     gap: 4px 8px;
     padding: 4px 10px 8px;
@@ -1709,13 +1738,17 @@ body[data-mode="panel"] .input-container {
     min-width: 0;
 }
 
-.input-footer-right {
-    margin-left: auto;
-    justify-content: flex-end;
+.input-footer-left {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow: hidden;
 }
 
-.footer-hidden-overflow {
-    display: none !important;
+.input-footer-right {
+    margin-left: auto;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
 }
 
 .attach-btn {
@@ -1752,6 +1785,8 @@ body[data-mode="panel"] .input-container {
 .footer-model {
     font-size: 13px;
     color: var(--muted);
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1851,11 +1886,13 @@ body[data-mode="panel"] .input-container {
     bottom: 100%;
     left: 12px;
     margin-bottom: 6px;
+    width: min(260px, calc(100% - 24px));
+    min-width: 0;
+    max-width: calc(100% - 24px);
     background: var(--vscode-editorWidget-background, var(--bg));
     border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.1));
     border-radius: 6px;
     padding: 4px;
-    min-width: 260px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
     z-index: 50;
 }
@@ -1865,11 +1902,13 @@ body[data-mode="panel"] .input-container {
     bottom: 100%;
     left: 12px;
     margin-bottom: 6px;
+    width: min(280px, calc(100% - 24px));
+    min-width: 0;
+    max-width: calc(100% - 24px);
     background: var(--vscode-editorWidget-background, var(--bg));
     border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.1));
     border-radius: 6px;
     padding: 4px;
-    min-width: 280px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
     z-index: 50;
 }
@@ -1926,11 +1965,13 @@ body[data-mode="panel"] .input-container {
     position: absolute;
     bottom: 100%;
     margin-bottom: 6px;
+    width: min(140px, calc(100% - 12px));
+    min-width: 0;
+    max-width: calc(100% - 12px);
     background: var(--vscode-editorWidget-background, var(--bg));
     border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.1));
     border-radius: 6px;
     padding: 4px;
-    min-width: 140px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
     z-index: 50;
 }
@@ -1996,6 +2037,34 @@ body[data-mode="panel"] .input-container {
 }
 .footer-codex--error {
     color: var(--vscode-editorError-foreground);
+}
+
+.footer-details-toggle-btn {
+    background: var(--badge-bg);
+    border: none;
+    border-radius: 50%;
+    color: var(--badge-fg);
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+}
+.footer-details-toggle-btn:hover,
+.footer-details-toggle-btn:focus-visible {
+    background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08));
+    color: var(--fg);
+    outline: none;
+}
+.footer-details-toggle-icon {
+    transition: transform 0.15s ease;
+}
+.footer-details-toggle-btn--expanded .footer-details-toggle-icon {
+    transform: rotate(180deg);
 }
 
 .send-btn {

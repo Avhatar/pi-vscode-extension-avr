@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Chat controls are split into two compact rows: attachment, model, details toggle, and send/stop stay with the prompt, while cache, thinking, account usage, attachments, and context move into a collapsible details bar that starts at the prompt width, grows to fit its contents, and can use nearly the full panel width instead of hiding data.
+
 ## [0.72.1] - 2026-09-12
 
 ### Added

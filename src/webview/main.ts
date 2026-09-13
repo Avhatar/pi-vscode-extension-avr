@@ -105,6 +105,7 @@ const draftImages = new Map<string, ImageAttachment[]>();
 const draftFiles = new Map<string, FileAttachment[]>();
 const expandedUserPrompts = new Set<string>();
 const foldoutStates = new Map<string, boolean>();
+let footerDetailsExpanded = true;
 let currentImageAttachments: ImageAttachment[] = [];
 let currentFileAttachments: FileAttachment[] = [];
 
@@ -834,7 +835,10 @@ function render(): void {
     inputContainer.appendChild(area);
     const footer = el('div', 'input-footer');
     inputContainer.appendChild(footer);
+    const detailsFooter = el('div', 'input-details-footer');
+    detailsFooter.id = 'input-details-footer';
     app.appendChild(inputContainer);
+    app.appendChild(detailsFooter);
 
     // Bind stable event listeners (these elements persist for the lifetime of the skeleton)
     bindStableEvents();
@@ -847,7 +851,6 @@ function render(): void {
     });
 
     skeletonBuilt = true;
-    setupFooterOverflowObserver();
 
     // Populate all dynamic sections
     updateTabs();
@@ -1256,79 +1259,6 @@ function formatAge(seconds: number): string {
     return `${hours}h`;
 }
 
-// Priority order in which footer chips/buttons disappear when the input footer
-// no longer fits on one line. Earlier entries are hidden first.
-const FOOTER_HIDE_PRIORITY: ReadonlyArray<string> = [
-    '.footer-cache',
-    '.footer-context-usage',
-    '.footer-thinking',
-    '#btn-attach-file',
-    '#btn-send',
-    '.footer-model',
-];
-
-let footerResizeObserver: ResizeObserver | null = null;
-let footerWindowResizeBound = false;
-let footerAdjustScheduled = false;
-
-function scheduleFooterAdjust(): void {
-    if (footerAdjustScheduled) return;
-    footerAdjustScheduled = true;
-    requestAnimationFrame(() => {
-        footerAdjustScheduled = false;
-        adjustFooterOverflow();
-    });
-}
-
-function setupFooterOverflowObserver(): void {
-    // The chat panel rebuilds its DOM on tab switches via render(), which
-    // destroys the previous .input-container. A persistent observer would be
-    // left observing a detached element and never fire for the new one, so we
-    // disconnect and reattach every time the skeleton is rebuilt.
-    if (footerResizeObserver) {
-        footerResizeObserver.disconnect();
-        footerResizeObserver = null;
-    }
-    const container = document.querySelector('.input-container') as HTMLElement | null;
-    if (container && typeof ResizeObserver !== 'undefined') {
-        footerResizeObserver = new ResizeObserver(() => scheduleFooterAdjust());
-        footerResizeObserver.observe(container);
-    }
-    if (!footerWindowResizeBound) {
-        window.addEventListener('resize', scheduleFooterAdjust);
-        footerWindowResizeBound = true;
-    }
-}
-
-function isFooterWrapped(footer: HTMLElement): boolean {
-    let maxItemH = 0;
-    const items = footer.querySelectorAll<HTMLElement>(
-        '.input-footer-group > *:not(.footer-hidden-overflow)',
-    );
-    for (const el of items) {
-        if (el.offsetHeight > maxItemH) maxItemH = el.offsetHeight;
-    }
-    if (maxItemH === 0) return false;
-    const cs = getComputedStyle(footer);
-    const padding = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
-    return footer.offsetHeight > maxItemH + padding + 2;
-}
-
-function adjustFooterOverflow(): void {
-    const footer = document.querySelector('.input-footer') as HTMLElement | null;
-    if (!footer) return;
-    for (const sel of FOOTER_HIDE_PRIORITY) {
-        footer.querySelector(sel)?.classList.remove('footer-hidden-overflow');
-    }
-    if (!isFooterWrapped(footer)) return;
-    for (const sel of FOOTER_HIDE_PRIORITY) {
-        const el = footer.querySelector(sel) as HTMLElement | null;
-        if (!el) continue;
-        el.classList.add('footer-hidden-overflow');
-        if (!isFooterWrapped(footer)) return;
-    }
-}
-
 function updateInputArea(): void {
     const input = document.getElementById('input') as HTMLTextAreaElement | null;
     if (input) {
@@ -1340,7 +1270,8 @@ function updateInputArea(): void {
     }
 
     const footer = document.querySelector('.input-footer');
-    if (!footer) return;
+    const detailsFooter = document.getElementById('input-details-footer');
+    if (!footer || !detailsFooter) return;
 
     const modelName = state.model?.name ?? state.model?.id ?? '';
 
@@ -1378,22 +1309,31 @@ function updateInputArea(): void {
 
     const cacheChipHtml = renderCacheChip();
     const thinkingChipHtml = renderThinkingChip();
+    const detailsToggleTitle = footerDetailsExpanded ? 'Hide chat details' : 'Show chat details';
+    const detailsToggleClass = footerDetailsExpanded ? ' footer-details-toggle-btn--expanded' : '';
 
     footer.innerHTML = `
         <div class="input-footer-group input-footer-left">
             <button id="btn-attach-file" class="attach-btn" title="Attach file or image"><img class="attach-icon-img" src="${iconsBaseUri}/folder.png" alt="Attach file or image"></button>
             <span class="footer-model">${escHtml(modelName)}</span>
-            ${cacheChipHtml}
-            ${thinkingChipHtml}
         </div>
         <div class="input-footer-group input-footer-right">
-            ${attachmentHtml}
-            ${codexUsageHtml}
-            ${deepSeekUsageHtml}
-            ${contextHtml}
+            <button id="btn-footer-details" class="footer-details-toggle-btn${detailsToggleClass}" type="button" title="${detailsToggleTitle}" aria-label="${detailsToggleTitle}" aria-controls="input-details-footer" aria-expanded="${footerDetailsExpanded}"><svg class="footer-details-toggle-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button id="btn-send" class="send-btn${state.isStreaming ? ' send-btn--stop' : ''}" title="${actionTitle}"><img class="send-icon-img" src="${iconsBaseUri}/${actionIcon}" alt="${actionAlt}"></button>
         </div>
     `;
+    closeCacheModePicker();
+    closeThinkingPicker();
+    closeContextActionPicker();
+    detailsFooter.innerHTML = `
+        ${cacheChipHtml}
+        ${thinkingChipHtml}
+        ${attachmentHtml}
+        ${codexUsageHtml}
+        ${deepSeekUsageHtml}
+        ${contextHtml}
+    `;
+    updateFooterDetailsVisibility();
 
     // Rebind the dynamic footer elements
     const sendBtn = document.getElementById('btn-send');
@@ -1411,6 +1351,15 @@ function updateInputArea(): void {
     attachBtn?.addEventListener('click', () => {
         const fileInput = document.getElementById('file-input') as HTMLInputElement | null;
         fileInput?.click();
+    });
+
+    document.getElementById('btn-footer-details')?.addEventListener('click', () => {
+        footerDetailsExpanded = !footerDetailsExpanded;
+        closeCacheModePicker();
+        closeThinkingPicker();
+        closeContextActionPicker();
+        closeModelPicker();
+        updateFooterDetailsVisibility();
     });
 
     document.querySelector('.footer-model')?.addEventListener('click', (e) => {
@@ -1454,7 +1403,19 @@ function updateInputArea(): void {
     });
 
     updateQueuedMessageBanner();
-    scheduleFooterAdjust();
+}
+
+function updateFooterDetailsVisibility(): void {
+    const detailsFooter = document.getElementById('input-details-footer');
+    const toggle = document.getElementById('btn-footer-details') as HTMLButtonElement | null;
+    if (!detailsFooter || !toggle) return;
+
+    const title = footerDetailsExpanded ? 'Hide chat details' : 'Show chat details';
+    detailsFooter.hidden = !footerDetailsExpanded;
+    toggle.title = title;
+    toggle.setAttribute('aria-label', title);
+    toggle.setAttribute('aria-expanded', String(footerDetailsExpanded));
+    toggle.classList.toggle('footer-details-toggle-btn--expanded', footerDetailsExpanded);
 }
 
 function renderCacheChip(): string {
@@ -1517,7 +1478,7 @@ function toggleCacheModePicker(): void {
         document.removeEventListener('click', onClickOutsideCachePicker);
         return;
     }
-    const container = document.querySelector('.input-container');
+    const container = document.getElementById('input-details-footer');
     if (!container) return;
 
     const picker = el('div', 'cache-mode-picker');
@@ -1641,7 +1602,7 @@ function toggleThinkingPicker(): void {
         document.removeEventListener('click', onClickOutsideThinkingPicker);
         return;
     }
-    const container = document.querySelector('.input-container');
+    const container = document.getElementById('input-details-footer');
     if (!container) return;
 
     const picker = el('div', 'thinking-picker');
@@ -1699,7 +1660,7 @@ function toggleContextActionPicker(anchor: HTMLElement): void {
         closeContextActionPicker();
         return;
     }
-    const container = document.querySelector('.input-container') as HTMLElement | null;
+    const container = document.getElementById('input-details-footer');
     if (!container) return;
 
     const picker = el('div', 'context-action-picker');
