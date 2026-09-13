@@ -14,12 +14,46 @@
 
 # Pi Code — Release Notes
 
-Each entry covers everything that arrived since the version directly below it,
-so you can read exactly one entry: the one for the version you are upgrading to.
+Each entry covers everything that arrived since the version directly below it.
+Upgrading from that version means reading one entry; if you skipped several
+releases, read the intervening entries too.
 The newest entry follows the latest build and accumulates changes until that
 build is handed to users; intermediate development builds are not kept as
 separate entries. Contributors can find the full per-build history in
 [CHANGELOG.md](https://github.com/Avhatar/pi-vscode-extension-avr/blob/main/CHANGELOG.md).
+
+---
+
+## 0.72.1 — 2026-09-12
+
+*Everything new since 0.72.0.*
+
+### Added
+
+- **GPT-6 Astra** is available in the model picker with either an OpenAI API key or a ChatGPT subscription through Codex. The direct API reports its full 1,050,000-token context window; Codex uses the allowance returned by your own account.
+- **DeepSeek V4.1 Flash** is available with image input and tools, even though the bundled catalog predates it. The older V4 Flash and V4 Flash Vision Exp names that now route to it also accept screenshots and use the corrected prices.
+- **A warning before long context costs more.** The context chip turns yellow above the selected model's higher-price threshold. Its tooltip names that threshold and suggests compacting the conversation to reduce context. It follows the model's price table rather than a fixed token count.
+
+### Changed
+
+- **Faster startup without a blank launcher.** Full prewarm now runs in the background instead of holding extension activation open, so the launcher, commands, and restored panels register without waiting for the session. Stored API keys are read concurrently to shorten session startup. A chat opened before warm-up finishes can still need a wait.
+- **Claude-compatible projects no longer get stuck reviewing resources.** After three consecutive interruptions to load scoped skills or rules, the bridge stops blocking tools for the rest of the session while still adding resources to context. The chat explains when this happens, with details in the Pi Code output channel.
+
+### Fixed
+
+- **Messages sent during compaction are no longer lost.** They queue until the session is free, including during the short wrap-up after a response ends. The input explains when the agent is compacting; `Ctrl+Enter` queues then instead of trying to steer a response that is not running.
+- **Codex uses the context your account actually grants.** Astra and other large-context models now use the account catalog's maximum allowance instead of staying at a conservative default. GPT-5.4 and GPT-5.5 on the direct OpenAI API also report their full 1,050,000-token windows instead of 272,000.
+- **Astra on Codex no longer shows an inapplicable long-context surcharge.** Its cost table and context warning respect the Codex exemption above 272,000 tokens; the direct OpenAI API still uses its long-context tier.
+- **DeepSeek spend estimates account for peak hours and current V4 Pro prices.** Last-turn and daily figures include double rates at 01:00–04:00 and 06:00–10:00 UTC, Monday to Friday. The rate is chosen at turn start, so turns spanning a pricing boundary can differ from the provider's per-request bill. The cumulative session figure remains the SDK's base-rate total.
+- **One failing provider no longer prevents the others from being configured.** A stored API key that cannot be applied, or a provider that times out during configuration, is reported and skipped rather than stalling startup or aborting the remaining providers. It is retried on the next credential synchronization.
+- Skills grouped into subdirectories under `.agents/skills/` are discovered correctly, and an ordinary `README.md` in a skill folder is no longer reported as a broken skill.
+- Context and settings files saved with a UTF-8 byte-order mark load correctly instead of being silently skipped.
+- Reopening a conversation from history no longer corrupts the next message written to it.
+- Long conversations compact more reliably: oversized tool results are handled before the next model request, and missing streamed token-usage data no longer causes compaction to be skipped.
+- Stopping a response on Windows no longer crashes the agent when `taskkill.exe` is missing from `PATH`.
+- Provider connections are more reliable: Codex handles final stream events correctly, Anthropic recovers from signed-thinking mismatches, Mistral keeps fragmented tool calls together, and GitHub Copilot sign-in handles model-policy rate limits more reliably.
+- Long-cache requests for GPT-5.6 and newer Responses models use the supported 30-minute cache option. Proxy fixes cover Google Vertex, `NO_PROXY` domain matching, and plain-HTTP requests that could hang after a tool call.
+- Built-in file and shell tools respect their execution context's working directory, and extension messages no longer break the order of tool calls and results in conversation history.
 
 ---
 

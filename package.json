@@ -1,8 +1,8 @@
 {
   "name": "pi-code",
   "displayName": "Pi Code",
-  "description": "Editor-tab UI for the Pi coding agent with multi-model chat, subagents, diffs, rollback, web/MCP tools, and Claude compatibility",
-  "version": "0.72.0",
+  "description": "Multi-model AI coding in editor tabs: subagents, Plan Mode, diffs and rollback, context and cost insights, web/MCP tools, Claude compatibility",
+  "version": "0.72.1",
   "publisher": "Avhatar",
   "license": "MIT",
   "icon": "media/icons/piIcon1.png",
@@ -289,7 +289,7 @@
         "pi-code.prewarm.full": {
           "type": "boolean",
           "default": false,
-          "description": "Perform the full Pi session bring-up (SDK import, auth, model registry, resource loader) at VS Code startup instead of on the first click. Opening the Pi Code sidebar and the first chat tab become nearly instant. Trade-off: window reload takes ~3 seconds longer, extra ~50 MB of memory is held, and one model-metadata network request runs at startup — even in windows where you never use Pi Code."
+          "description": "Initialize the full Pi session (SDK import, auth, model registry, resource loader) in the background at VS Code startup without waiting to finish extension activation. A chat opened before warm-up finishes may still need to wait. Uses extra memory and may fetch model metadata even in windows where you never use Pi Code."
         },
         "pi-code.todo.promptGuidelines": {
           "type": "string",

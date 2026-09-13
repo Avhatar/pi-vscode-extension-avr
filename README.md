@@ -13,10 +13,15 @@ Under the hood Pi Code embeds [Mario Zechner's Pi coding agent](https://github.c
 
 ## Release notes
 
-[RELEASES.md](RELEASES.md) is the user-facing history: one entry per version
-actually published, each covering everything that changed since the previous
-published version. It ships inside the VSIX as the Marketplace Changelog tab
-and is what the in-chat `/changelog` command opens.
+[RELEASES.md](RELEASES.md) is the user-facing history: each entry covers changes
+since the release directly below it. The newest entry accumulates changes for
+the next handout; `release-state.json` records the last version actually handed
+to users. The notes ship inside the VSIX as the Marketplace Changelog tab and
+are what the in-chat `/changelog` command opens.
+
+**0.72.1 highlights:** GPT-6 Astra and DeepSeek V4.1 Flash, account-aware Codex
+context limits, long-context pricing warnings, peak-aware DeepSeek spend
+estimates, faster startup, and reliable message queuing during compaction.
 
 [CHANGELOG.md](CHANGELOG.md) is the per-build history for contributors. Most
 of the versions it stamps are only ever installed locally, so it is excluded
@@ -32,7 +37,7 @@ Two motivations drove the split from upstream:
 
 In addition to those two structural changes, the fork has accumulated a number of features not present upstream at the time of forking:
 
-- OAuth subscription login in the settings panel for Anthropic Claude Pro/Max, ChatGPT Plus/Pro/Codex, GitHub Copilot, Google Gemini CLI, and Google Antigravity — so subscription-only models (e.g. GPT-5.x Codex) work without an API key.
+- OAuth subscription login in the settings panel for Anthropic Claude Pro/Max, ChatGPT Plus/Pro/Codex, GitHub Copilot, Google Gemini CLI, and Google Antigravity — so subscription models (including GPT-6 Astra through Codex) work without an API key.
 - Codex subscription usage indicator: a percent-used readout for the 5-hour and weekly windows in the chat footer, plus a per-turn delta on each assistant message.
 - Prompt cache retention controls in the chat footer, with `short`, `long`, and provider-aware `auto` modes.
 - Image attachments via paste, drag-and-drop, or a paperclip button — sent to image-capable models with previews preserved in chat history.
@@ -75,7 +80,9 @@ Each user message creates a checkpoint. Restore your workspace to any previous c
 Watch the agent's reasoning in real time with collapsible thinking blocks. Cycle through `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. `max` is natively supported by GPT-5.6 and adaptive Claude models; other models fall back to their closest supported level.
 
 ### Model Selection
-Pick from any model available through the Pi coding agent's model registry via a quick-pick menu or the in-chat model picker. Recently used models are surfaced for fast switching. Pi Code adds DeepSeek V4.1 Flash to that list itself, because the bundled Pi SDK catalog predates its release, and corrects the image support and prices of the two older DeepSeek names that now route to it; both adjustments disappear silently once an SDK release ships the model.
+Pick from the Pi model registry using a quick-pick menu or the in-chat model picker, with recent models surfaced for fast switching. GPT-6 Astra is available through a direct OpenAI API key or a ChatGPT subscription via Codex. On the direct API, GPT-5.4, GPT-5.5, GPT-5.6, and GPT-6 Astra report a 1,050,000-token context window; Codex uses the ceiling returned by your own account's catalog instead of a fixed default.
+
+DeepSeek V4.1 Flash supports image input and tools. Pi Code adds it when absent from the bundled catalog, corrects image support and prices for the older Flash names routed to it, and updates V4 Pro's prices without changing its text-only capabilities. These compatibility corrections retire when the bundled catalog includes V4.1 Flash.
 
 ### Settings Page with OAuth Login
 A dedicated settings panel (accessible via the gear icon in the launcher header or the `Pi Code: Open Settings` command) provides configuration for API keys, default model and thinking level, ToDo behaviour, subagents, Claude compatibility controls, Raw Mode recording, performance diagnostics and prewarm, Claude Code MCP import, file-mention indexing, and chat appearance. API keys are stored via VS Code's SecretStorage and never written to disk in plaintext. The same panel hosts OAuth sign-in for Anthropic Claude (Pro/Max), ChatGPT (Plus/Pro/Codex), GitHub Copilot, Google Gemini CLI, and Google Antigravity, so subscription-only models work without leaving VS Code. A manual authorization-code paste field is shown alongside the browser flow as a fallback when the local OAuth callback can't be reached.
@@ -91,13 +98,15 @@ Claude compatibility activates only when the workspace contains real Claude infr
 
 Root, ancestor, local, explicitly imported, and directory-scoped instructions are injected as hidden context without spending read-tool calls. Imports are contained to the workspace and limited to four recursive hops; generated and dependency directories are excluded from nested discovery. Project-wide and path-scoped rules are applied when relevant. Project and activated user skills and legacy commands become native slash commands, while nested skills activate only in their directory scope under qualified names such as `/apps/web:deploy`. Claude tool names map only to capabilities already available through Pi, preserving the active agent, model, permissions, and MCP configuration. `/claude-compat` reports what is active. Native `AGENTS.md` handling remains unchanged.
 
+To avoid retry loops in projects with many scoped resources, after three consecutive resource-review interruptions the bridge stops blocking tool calls for the rest of that session. Resources still enter context, and the chat and Pi Code output channel explain the change.
+
 ### Image Attachments
 Paste images directly into the chat input, drop them onto the chat panel, or pick a file via the paperclip button next to the model picker. Attached images appear as previews before sending and remain in the chat history. Large images are resized automatically; image-capable models receive them inline with the prompt.
 
 Switching an image-bearing chat to a model without image support is safe: those images are replaced with a short placeholder for the requests that model sends, and the originals stay in the history and are sent again once an image-capable model is selected. This matters for providers with a mixed line-up — DeepSeek's Flash models take images while V4 Pro does not — where attaching a screenshot and then switching to a text-only model used to leave the chat unusable.
 
 ### Codex Subscription Usage Indicator
-When using a Codex (GPT-5.x) model with a ChatGPT subscription, the chat footer shows percent used in the 5-hour and weekly windows with colour cues at 50% and 90%. A tooltip details the plan, exact reset times, and remaining credit balance. Each assistant message footer also shows the per-turn delta (`5h +1.2% · week +0.3%`) so you can see how much each turn cost. Hidden for non-Codex models and for token-billed API key accounts.
+When using a Codex model with a ChatGPT subscription, the chat footer shows percent used in the 5-hour and weekly windows with colour cues at 50% and 90%. A tooltip details the plan, exact reset times, and remaining credit balance. Each assistant message footer also shows the per-turn delta (`5h +1.2% · week +0.3%`) so you can see how much each turn cost. Hidden for non-Codex models and for token-billed API key accounts.
 
 ### Plan Mode
 A per-chat toggle in the launcher sidebar (above ToDo) that prepends planning guidance to every prompt. Questions and information requests are answered directly; for code changes and multi-step work, the agent studies the relevant files, presents a plan, and stops until you approve it. If you object or ask for changes instead of approving, it revises the plan and waits again. Once approved it carries out the whole plan, and your next request starts a fresh plan-and-approve cycle. Plan Mode does not restrict tools, maintain execution phases, or use control markers — it is prompt guidance, so a model can still get it wrong. Disabled by default for new chats; toggle it in the sidebar or set `pi-code.planMode.defaultEnabled`.
@@ -123,10 +132,10 @@ Each assistant message footer shows the elapsed wall-clock time for that turn pl
 The launcher provides **Show Popup** and **Play Sound** toggles, both off by default. On Windows, they can show a native toast outside VS Code and play the standard notification sound when an agent turn finishes. On unsupported platforms no popup or sound is produced, and an explanatory notice is logged.
 
 ### Message Queuing & Steering
-While the agent is streaming, you can **queue** follow-up messages that will be sent automatically once the current generation finishes. Queued messages appear in a collapsible list above the input with inline edit and delete controls. You can also **steer** the agent mid-generation (Ctrl+Enter) to inject guidance into the current response without waiting.
+While the agent is streaming, compacting its context, or finishing a turn, follow-up messages are **queued** and sent automatically once the session is free. Queued messages appear in a collapsible list above the input with inline edit and delete controls. **Ctrl+Enter** steers an active response; during compaction it queues instead, because there is no response to steer. The input placeholder indicates when compaction will delay delivery.
 
 ### Slash Commands & Skills
-Type `/` in the input to trigger a slash-command menu. Cross-client Agent Skills are discovered from `~/.agents/skills/` and workspace `.agents/skills/`; Pi Code also retains legacy `~/.pi/agent/skills/` and workspace `.pi/skills/` discovery. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` appear alongside them, with nested skills activated only in their directory scope.
+Type `/` in the input to trigger a slash-command menu. Cross-client Agent Skills are discovered recursively from `~/.agents/skills/` and workspace `.agents/skills/`, including skills grouped in subdirectories; ordinary `README.md` files in skill folders are ignored. Pi Code also retains legacy `~/.pi/agent/skills/` and workspace `.pi/skills/` discovery. In Claude-enabled projects, compatible project/user Claude skills and legacy `.claude/commands` appear alongside them, with nested skills activated only in their directory scope.
 
 ### Subagents
 Enable the per-chat **Subagents** toggle to let the parent agent delegate bounded work through a single `subagent` tool. Reusable agents are discovered from user and trusted-project `.agents/agents/*.md` files, compatible Claude agent resources, and bundled packages; the parent can also create temporary ad-hoc roles. Children use fresh context, policy-approved tools, and exact configured `provider/id` models, and can run in the foreground or background under global and per-chat concurrency limits.
@@ -142,7 +151,10 @@ A `cache: …` chip in the chat footer controls prompt cache retention for futur
 Each chat panel has its own persistent task list that the agent can manage via a built-in `todo` tool. Tasks support creation, updates, status transitions (`pending`, `in_progress`, `completed`), dependencies (`blockedBy`), and deletion. The launcher sidebar displays the active chat's ToDo with a toggle to enable or disable it per tab — when disabled, the agent has no knowledge of the tool. Task state persists across reloads. The tool's behavior is configurable via the `pi-code.todo.promptGuidelines` setting.
 
 ### Context Usage
-Token usage and context window utilization are displayed in both the chat footer and the status bar tooltip.
+Token usage and context window utilization are displayed in both the chat footer and the status bar tooltip. The footer's context chip turns yellow above the selected model's more expensive long-context threshold. Its tooltip names the threshold and suggests `/compact` to reduce context. The warning follows the model's price table, not a fixed token count; GPT-6 Astra on Codex is exempt from its direct-API long-context multiplier and does not show that warning.
+
+### DeepSeek Balance and Spend
+DeepSeek chats show the remaining USD balance, last-turn cost, and today's Pi Code spend. Last-turn and daily estimates use the corrected Flash and V4 Pro prices and account for double peak-hour rates at 01:00–04:00 and 06:00–10:00 UTC, Monday to Friday. The rate is selected at turn start, so a turn spanning a pricing boundary can differ from the provider's per-request bill. The cumulative session cost remains the SDK's base-rate total.
 
 ### User Message Glow
 User messages in the chat have a subtle colored glow outline for visual distinction. The color and opacity are configurable via `pi-code.userMessageGlowColor` and `pi-code.userMessageGlowOpacity` settings, allowing you to customize or disable the effect.
@@ -154,7 +166,9 @@ Use the pencil button in a chat panel or type `/name <new name>` to rename a cha
 Raw Mode records the complete unredacted stream of provider payloads and agent events for a chat session into a local JSONL file under VS Code global storage. Disabled by default — toggle `pi-code.rawMode.enabled` to start capturing for active and future chats. Capture is unbounded while enabled and may include system prompts, tool schemas and results, provider headers, model exchanges, and workspace file contents. Existing recordings persist on disk after you disable the setting; clear them per session or delete all Raw Mode data from Pi Code Settings, or delete the corresponding History entry to remove its recording. Open the Raw View with the **Pi Code: Open Raw View for Active Chat** command or the inspect icon in the chat toolbar.
 
 ### Startup and Performance Diagnostics
-The extension warms up behind the scenes so the launcher sidebar and first chat tab open without perceptible delay. Enable `pi-code.prewarm.full` to bring up the entire Pi session (SDK import, auth, model registry, resource loader) at VS Code startup — every subsequent chat opens nearly instantly, at the cost of ~3 seconds added to window reload and ~50 MB extra memory. For troubleshooting slow activation or session bring-up, toggle `pi-code.perf.enabled` to record detailed timing events to a JSONL file under the extension's global storage; the file path is printed to the Pi Code output channel on activation.
+Pi Code warms the SDK in the background at VS Code startup. Enable `pi-code.prewarm.full` to also initialize the full session (auth, model registry, resource loader) without holding extension activation open. The launcher, commands, and restored panels register without waiting for that work; opening a chat before warm-up finishes can still require a wait. Stored API keys are read concurrently, and a provider that fails or times out during configuration no longer prevents the others from being configured.
+
+Full prewarm uses extra memory and may make model-metadata network requests even in windows where you never use Pi Code. For troubleshooting, enable `pi-code.perf.enabled` to record activation and session timings locally; the file path is printed to the Pi Code output channel.
 
 ## Prerequisites
 
@@ -255,8 +269,8 @@ Run tests and compile before pruning, because pruning removes the development de
 |---|---|
 | `Ctrl+Shift+L` (`Cmd+Shift+L`) | Reveal the active chat panel, or focus the launcher if no chat is open |
 | `Ctrl+Shift+N` (`Cmd+Shift+N`) | Open a new chat as an editor tab |
-| `Enter` | Send prompt, or queue message while streaming |
-| `Ctrl+Enter` (`Cmd+Enter`) | Steer the agent mid-generation |
+| `Enter` | Send prompt, or queue while the session is streaming, compacting, or finishing a turn |
+| `Ctrl+Enter` (`Cmd+Enter`) | Steer mid-generation; queue during compaction |
 | `Escape` | Stop the current generation (while streaming) |
 
 ## Commands
@@ -307,7 +321,7 @@ Settings can be configured through the dedicated settings page (gear icon in the
 | `pi-code.lsp.enabled` | `boolean` | `false` | Expose Language Server tools (`find_references`, `document_symbols`, `goto_definition`, `hover`, `find_implementations`, `type_definition`, `workspace_symbols`, `call_hierarchy_*`) to the agent. Off by default — the tools are not registered and add nothing to the system prompt. Requires a language extension for each file's language (C#, rust-analyzer, Pylance, etc.). |
 | `pi-code.rawMode.enabled` | `boolean` | `false` | Record complete unredacted provider payloads and agent events to local global-storage JSONL; existing recordings persist after disabling |
 | `pi-code.perf.enabled` | `boolean` | `false` | Record activation and session-bring-up timings to a local JSONL file for troubleshooting slow startup |
-| `pi-code.prewarm.full` | `boolean` | `false` | Perform full Pi session bring-up at VS Code startup. Adds about 3 seconds to reload, roughly 50 MB of memory, and a startup model-metadata request |
+| `pi-code.prewarm.full` | `boolean` | `false` | Initialize the full Pi session in the background at startup without waiting to finish activation; uses extra memory and may fetch model metadata |
 | `pi-code.todo.promptGuidelines` | `string` | *(multiline)* | Prompt guidelines injected into the system prompt for the ToDo tool |
 | `pi-code.userMessageGlowColor` | `string` | `#00aaff` | Color of the subtle glow outline around user messages in the chat |
 | `pi-code.userMessageGlowOpacity` | `number` | `40` | Opacity of the glow around user messages, as a percentage (0–100) |

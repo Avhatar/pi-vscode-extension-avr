@@ -7,19 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.72.1] - 2026-09-12
+
 ### Added
 - DeepSeek V4.1 Flash is now offered in the model picker. DeepSeek released it as `deepseek-flash` on 10 September 2026, after the bundled catalog was generated, so Pi Code adds the model itself — with image input and the published prices — until a Pi SDK release carries it.
 - GPT-6 Astra is now offered in the model picker, both for a direct OpenAI API key and for a ChatGPT subscription through Codex. Its full 1,050,000-token context window is reported on the direct API, where the published catalog understates it as 272,000; on Codex the window comes from your own account's catalog, which reports the plan-specific ceiling.
-- The context chip in the chat footer turns yellow once the conversation passes the point where the selected model switches to its more expensive long-context tier, and its tooltip says how far past that point you are and that compacting brings the context back below it. The threshold is read from the model's own price table, so it follows whatever your provider charges rather than a fixed number.
+- The context chip in the chat footer turns yellow once the conversation passes the point where the selected model switches to its more expensive long-context tier, and its tooltip names that threshold and suggests compacting to return below it. The threshold is read from the model's own price table, so it follows whatever your provider charges rather than a fixed number.
 
 ### Changed
 - Reloading the window no longer leaves the Pi Code panel blank while the agent warms up. With `pi-code.prewarm.full` enabled the extension used to hold its own activation until the whole session was ready, so the sidebar, the commands and the chat panels only appeared seconds later and the window looked frozen. The warm-up now runs in the background: everything is usable immediately, and the first chat still opens fast once it finishes.
 - Starting a session is faster. The stored API keys for every known provider were read from the credential store one after another, and that chain was the single largest cost of bringing a session up; they are now read together.
 - Claude compatibility can no longer stall a chat by repeatedly interrupting the agent. When a project carries many directory-scoped skills or rules, each matching tool call was blocked so the agent could review the resources first and retry — and with enough of them the agent spent its time being interrupted rather than working, with nothing on screen explaining why. After three interruptions in a row it now stops interrupting for the rest of the session: resources are still added to context, but tool calls run through. The chat says when this happens, and the reason is written to the Pi Code output channel.
 
-### Changed
 - The download is no longer more than twice its previous size. Updating the bundled Pi SDK pulled in prebuilt compiler binaries for twenty-six operating systems, of which any given machine can use one and this extension uses none; excluding them brings the package back to its usual size.
 - Release notes are now written as the builds happen rather than reconstructed at publish time. The version bump rolls the top `RELEASES.md` entry forward — retitling it to the version just built, or opening a fresh one once the previous top entry has been handed out — and `npm run package` refuses to build when that file disagrees with `package.json` or with the new `release-state.json`, which is the only record of the version users actually received. `npm run mark-released -- <version>` writes that record. No user-visible behaviour changes.
+
+- Updated the bundled Pi SDK from 0.82.1 to 0.85.1, including the model catalog, skill discovery, session history, compaction, and Windows fixes listed below.
+- Updated the Marketplace description, repository guide, and in-app startup setting help to cover the latest models, context pricing warnings, DeepSeek cost estimates, compaction queuing, and non-blocking background warm-up.
 
 ### Fixed
 - The DeepSeek models still named V4 Flash and V4 Flash Vision Exp now accept image attachments and are priced correctly. DeepSeek retired both and temporarily routes their names to V4.1 Flash, which understands images and costs more per output token than the bundled catalog knows — so screenshots were refused on a model that accepts them, and the DeepSeek balance panel understated the day's spend.
@@ -30,9 +34,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Reopening a chat from history no longer corrupts the next message written to it.
 - Long conversations compact more reliably: an oversized tool result is no longer handed to the model before compaction runs, and compaction is no longer skipped outright when the provider reports no token usage while streaming.
 - Stopping a response on Windows no longer crashes the agent when `taskkill.exe` is missing from `PATH`.
+- The bundled SDK improves provider reliability: Codex recognizes final stream events without a trailing blank line, Anthropic recovers from signed-thinking mismatches, Mistral keeps fragmented tool calls together, and GitHub Copilot login handles model-policy rate limits more reliably.
+- Long-cache requests for GPT-5.6 and newer Responses models now use the provider's supported 30-minute cache option.
+- Proxy handling is more reliable, including Google Vertex connections, `NO_PROXY` domain matching, and plain-HTTP provider requests that previously hung after tool calls.
+- Built-in file and shell tools now respect their execution context's working directory, and extension messages no longer split tool calls from their results in replayed history.
 - GPT-6 Astra now uses the context window your own ChatGPT account grants it on Codex instead of a fixed 272,000. It was never learned from your account at all: Pi Code asked the model catalog using a client version older than the one Astra requires, so the entry was missing from the response and the conservative default stayed. The other Codex models that grant more than the default now use their own ceiling as well.
 - The direct OpenAI API reports the documented 1,050,000-token context window for GPT-5.4 and GPT-5.5 instead of 272,000.
-- DeepSeek spend is now booked at the rate the request was really charged. DeepSeek doubles its prices during peak hours, and the last-turn and daily figures were reporting the off-peak price for requests sent in them. Peak hours are 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday.
+- GPT-6 Astra on Codex no longer carries an inapplicable long-context price multiplier or warns about a higher rate above 272,000 tokens; the direct OpenAI API retains its long-context tier.
+- DeepSeek last-turn and daily spend estimates now account for double peak-hour pricing at 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday, instead of always using off-peak prices. The rate is selected when the turn starts; a turn spanning a pricing boundary can still differ from the provider's per-request bill.
 - DeepSeek V4 Pro is priced at the rates DeepSeek publishes. DeepSeek reversed the announced move to V4.1 Flash and kept serving V4 Pro under its own name and prices, but the bundled catalog still carried the older, lower numbers, so every V4 Pro turn understated its cost.
 
 ## [0.72.0] - 2026-08-24

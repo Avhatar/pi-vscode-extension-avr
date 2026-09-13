@@ -151,7 +151,7 @@ function render(data: SettingsData): void {
 
     container.appendChild(buildSection('Performance', [
         buildToggle('prewarm.full', 'Full prewarm on startup', data.prewarmFull,
-            'By default, only the Pi SDK is warmed up when VS Code starts — the first click on Pi Code still takes a moment to bring up the agent session. Turn this on to run the entire session bring-up (SDK, auth, model registry, resource loader) at VS Code startup, so the first click is nearly instant. Trade-off: Reload Window becomes ~3 seconds longer, extra ~50 MB of memory is held, and one model-metadata network request runs on every window start — even in windows where you never touch Pi Code.'),
+            'By default, Pi Code warms the SDK when VS Code starts and initializes the session on first use. Turn this on to initialize the full session (auth, model registry, resource loader) in the background, without delaying registration of the launcher, commands, and restored panels. A chat opened before warm-up finishes may still need to wait. Uses extra memory and may fetch model metadata even in windows where you never use Pi Code.'),
     ]));
 
     container.appendChild(buildSection('Diagnostics', [
